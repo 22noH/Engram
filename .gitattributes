@@ -1,0 +1,2 @@
+# 위키 .md 등 텍스트 파일의 CRLF churn 방지 (이식성 체크리스트)
+* text=auto eol=lf

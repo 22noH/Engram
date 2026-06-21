@@ -1,0 +1,310 @@
+# Engram — 설계 문서
+
+> **프로젝트명: `Engram`** — 뇌에 저장된 기억의 물리적 흔적(engram). stateful 위키(기억 코어)를 은유.
+>
+> 최종 갱신: 2026-06-21 · 상태: **설계 확정, Phase 0 착수 예정**
+
+이 문서는 Engram의 단일 설계 기준선이다. (✦ = 브레인스토밍에서 새로 정하거나 다듬은 것)
+
+---
+
+## 1. 개요
+
+개인용 **stateful LLM 위키(지식 코어)** 를 중심에 두고, 에이전트 무리가 그것을 **읽고(A)·공유 협업하고(B)·자율 갱신(C)** 하는 24/7 셀프호스팅 멀티에이전트 시스템. 윈도우 네이티브 우선.
+
+- **A — 읽기**: 위키/RAG를 검색해 질의에 답하는 에이전트.
+- **B — 협업**: 여러 페르소나 에이전트(별자리 테마)가 같은 위키를 공유하며 협업. (8팀 + Board Meeting)
+- **C — 자율 갱신**: 수집 에이전트가 대화/소스를 다이제스트해 위키를 자율 갱신. (검증 파이프라인 + 승인 게이트 경유)
+
+**핵심 통찰**: A·B·C는 별도 시스템이 아니라 같은 지식 코어의 입출력일 뿐이다. → 코어를 **단일 진실원(single source of truth)** 으로 두고, 에이전트는 **stateless 워커**로 분리한다.
+
+참고 레퍼런스: `ramsbaby/jarvis` (셀프호스팅 멀티에이전트 어시스턴트 구조 참고).
+
+---
+
+## 2. 아키텍처 (4 레이어)
+
+```
+KnowledgeCore (공유 substrate — 단일 진실원)
+ ├ WikiEngine      .md 페이지 CRUD + 카테고리 스키마   ✦버전관리형(출처 + git이력 + draft상태)
+ ├ RagStore        벡터 + BM25 하이브리드 검색          ✦LanceDB + 로컬 임베딩(다국어)
+ ├ ImportanceGate  Mem0식 1~5점 채점, 3점↑만 저장
+ └ InsightLayer    행동/패턴 메트릭 (✦확정 포함, 후순위)
+
+AgentLayer (코어를 소비/생산)
+ ├ Orchestrator      질의 라우팅·분해·종합 (허브). 에이전트 직접 호출 금지, 모든 흐름 경유
+ ├ ReaderAgent       A: 읽고 답함
+ ├ SpecialistAgents  B: 페르소나(.md) 무리, Wiki 공유로 협업 (8팀 + Board Meeting)
+ ├ IngesterAgent     C: 스케줄로 자율 수집 → ✦검증 파이프라인 → 게이트 → Wiki 갱신
+ ├ BrainProvider     ✦교체 가능한 두뇌 포트. Claude CLI 기본 / API·Codex·Gemini·로컬LLM 어댑터
+ └ IEmbedder         ✦교체 가능한 임베더 포트. 로컬 JS 기본 / Ollama·API 어댑터
+
+Edge
+ ├ Gateway    ✦포트 + 어댑터, 코어 앞단 중립. (CLI 초기 → Discord → 자체 front-end)
+ └ Scheduler  in-process @Cron / BullMQ. OS cron 사용 금지
+
+PAL (Platform Abstraction Layer — 얇게)
+ └ ProcessSupervisor  항상 켜짐. ✦OS 서비스관리자(재시작) + 크로스플랫폼 감시자(멈춤감지·알림)
+       Windows = Windows Service(node-windows/NSSM) · macOS = launchd · Linux = systemd. Docker는 선택.
+```
+
+---
+
+## 3. 핵심 설계 원칙 (불변)
+
+- **코어 = 단일 진실원, 에이전트 = stateless 워커.** B(공유)·C(쓰기)·A(읽기)가 같은 저장소에서 충돌 없이 돈다.
+- **B의 협업은 자유 채팅이 아니다.** Wiki + Orchestrator 경유의 구조화된 흐름. (자유 에이전트 채팅 = 루프·비용 폭발로 금지)
+- **C의 자율 쓰기는 승인 게이트 필수.** 초안 → 검증 → 승인 → 반영. (윈도우는 OS 샌드박싱이 없어 더 엄격히)
+- ✦**이유 있을 때만 프로세스를 쪼갠다.** 외부 도구 실행(`claude -p`)과 외부 감시자만 분리. 기능별로 상주 프로세스를 쪼개지 않는다.
+- **셸 스크립트 0개.** 자율·감사·재색인 전부 TS Service. in-process 스케줄러. 경로/spawn은 `path`·`cross-spawn`으로 흡수.
+- ✦**포트 + 어댑터.** 두뇌(`IBrainProvider`)·임베더(`IEmbedder`)·게이트웨이를 전부 교체 가능하게.
+- **코드/데이터 분리.** 코드(repo)와 데이터(`runtime/`)를 분리. `git pull`이 데이터를 안 건드린다.
+
+---
+
+## 4. 확정된 설계 결정 (Design Ledger)
+
+| 영역 | 결정 | 출처 |
+|---|---|:--:|
+| 구조 | KnowledgeCore 중심 + AgentLayer(A/B/C) | 기존 |
+| 스택 | NestJS / TypeScript / Node 22+ | 기존 |
+| B 협업 | 자유 채팅 ❌ → Wiki + Orchestrator 경유 + 턴 상한 | 기존 |
+| C 자율쓰기 | 검증 다층 파이프라인 + 승인 게이트 필수 | 기존+✦ |
+| 벡터 저장소 | **LanceDB** (임베디드, 파일 기반) | ✦ |
+| 임베딩 | **로컬 JS 다국어**(bge-m3 / multilingual-e5), `IEmbedder` 포트 | ✦ |
+| 기본 두뇌 | **Claude CLI(구독)**, `IBrainProvider` 포트 | ✦ |
+| 두뇌 교체 | API·Codex·Gemini·**로컬 LLM** 전부 어댑터로. 모델·경로·인증은 config 선택(하드코딩 금지) | 기존+✦ |
+| WikiEngine | **버전관리형**: 출처(frontmatter) + git이력 + draft/published 상태 | ✦ |
+| 프로세스 | 단일 상주 프로세스 + OS별 `ProcessSupervisor` | 기존+✦ |
+| 감독·복구 | OS 서비스관리자 재시작 + 작은 감시자(멈춤 감지) + 외부 알림 | ✦ |
+| 동시성 | 세마포어(동시 두뇌 호출 제한) + TurnBudget(협업 총턴 제한) — 실제 자원 제약 | ✦ |
+| 스케줄 | in-process `@Cron` / BullMQ (OS cron 금지) | 기존 |
+| Gateway | 포트 + 어댑터, 코어 앞단 중립. CLI → Discord → 자체 | 기존+✦ |
+| TaskStore | 공유 1차 프리미티브 (`runtime/state/`) — Dev-Queue·Board 산출물·약속추적 공용 | ✦ |
+| InsightLayer | 확정 포함(후순위) — 행동 메트릭·일일 리포트·응답 맥락 주입 | ✦ |
+| 페르소나 | `.md` 정의(클래스) + 런타임 상태(객체) 분리. 별자리 테마(Vega·Lyra·Orion·Rigel·Sirius…) | 기존 |
+| 위키 패턴 | Karpathy LLM Wiki 3계층 (Raw/Wiki/Schema), stateful·복리 | 기존 |
+| 코드/데이터 | 분리 (`runtime/`: 토큰·대화·RAG DB·설정) | 기존 |
+| 플랫폼 | Windows → macOS → Linux 네이티브. Docker는 선택(추가) | 기존 |
+
+---
+
+## 5. KnowledgeCore
+
+### 5.1 WikiEngine ✦버전관리형
+
+단순 `.md` CRUD가 아니라 **출처·이력·상태를 가진 버전 관리형 저장소**. C 자율쓰기의 검증을 가능케 하는 토대.
+
+- **페이지 = `.md` + frontmatter.** frontmatter에 `sources:`(출처 포인터), `status:`(draft/published), `category:`, `updated:` 등.
+- **출처(provenance) 내장.** 모든 주장은 출처(대화·문서·URL)를 단다. 출처 없는 주장은 검증에서 거부.
+- **git 이력.** 위키 데이터 폴더(`runtime/wiki/`)를 자체 git으로 버전관리. C가 첫 글을 쓰기 *전부터* 이력·rollback이 존재. 모든 변경 = 출처·판정을 기록한 커밋.
+- **draft vs published 상태.** C가 제안을 "초안"으로 스테이징 → 승인 시 published로 전환.
+- **카테고리 스키마(JSON).** 도메인별 페이지 구조 정의.
+- **3계층(Karpathy):** Raw(원본 보존) → Wiki(증류) → Schema. Raw 보존이 출처 검증을 가능케 함.
+
+### 5.2 RagStore ✦
+
+- **저장소: LanceDB** — 임베디드·파일 기반, 상시 프로세스 0개. `runtime/rag/`에 얹힘. 단일 라이터 지향(우리 설계와 합치). 내장 FTS(Tantivy)로 하이브리드를 한 저장소에서.
+- **임베딩: 로컬 JS(다국어)** — fastembed-js / transformers.js(onnxruntime), in-process. 한·영 혼재 대응 위해 **다국어 모델**(bge-m3 / multilingual-e5). 첫 실행 시 모델 1회 다운로드 후 캐시. `IEmbedder` 포트로 Ollama·API 교체 가능.
+- **하이브리드 검색:** BM25(FTS) + 벡터, RRF로 융합.
+- **증분 색인 + 파일 워처:** 위키 변경 시 증분 재색인. 파일 워처로 실시간 감지. 위키 갱신 ↔ RAG 재색인을 묶어 stale 읽기 방지.
+
+### 5.3 ImportanceGate
+
+Mem0식 1~5점 채점, **3점↑만 저장**. 위키 비대화 방지.
+
+### 5.4 InsightLayer ✦(확정 포함, 후순위)
+
+행동/패턴 메트릭, 일일 인사이트 리포트. 사용 로그 분석 → 응답에 상황 맥락 주입. **빼지 않고 반드시 구현**하되, 사용 로그가 쌓이고 A/B/C 루프가 돈 다음에 얹는 최후순위 레이어. Phase 0 범위 아님.
+
+---
+
+## 6. C 자율쓰기 — 검증 파이프라인 ✦
+
+stateful 위키의 최대 위험은 "틀린 사실이 박혀 진실원을 오염"시키는 것. 단일 게이트가 아니라 **검증 다층 방어(pipeline)** 로 막는다.
+
+```
+소스/대화
+  → ① 추출    브레인이 후보 사실 추출 + 출처 부착
+  → ② 중요도 게이트   1~5점, <3점 폐기                  (비대화 방지)
+  → ③ 근거 검증   "출처가 실제로 이 주장을 뒷받침하나?"   (환각 차단)
+  → ④ 모순 검사   RAG로 관련 기존 페이지 검색 후 충돌 비교  (일관성)
+  → ⑤ 판정    별도 judge 모델이 채점 (작성자 ≠ 검증자)
+  → 분기:
+       고신뢰 + 무충돌 + 저영향  → 자동 반영 (+알림)    ← 신뢰 쌓인 뒤
+       충돌 / 저신뢰 / 고영향    → 사람 승인 게이트       ← 처음엔 전부 여기
+  → ⑥ 반영    diff를 git 커밋(출처·판정 기록) + RAG 증분 재색인
+  → ⑦ 되돌리기   언제든 rollback
+(주기적) ⑧ 감사   전체 위키의 모순·stale·죽은 링크 스캔  (TS Service)
+```
+
+**대원칙**: 통째 교체 ❌ → **diff 제안** · **출처 없으면 거부** · **작성자 ≠ 검증자** · **모순은 덮어쓰기 금지(플래그/이력 superseded)**.
+처음엔 모든 변경이 사람 승인 경유(엄격). 자동 검증은 (a) 명백한 쓰레기를 사전 필터, (b) 사람 판단을 빠르고 정보에 근거하게(diff+출처+판정 제시). 신뢰가 쌓이면 자동 반영 티어를 연다.
+
+**필수(첫 쓰기 전)**: diff 제안 · 출처 필수 · 모순 검사 · 별도 judge · 사람 승인 · git 이력.
+**나중**: 다중투표 judge · 신뢰도별 자동 반영 · 주기 감사 · golden-question 회귀 테스트.
+
+---
+
+## 7. AgentLayer
+
+### 7.1 Orchestrator
+질의 라우팅·분해·종합의 허브. **모든 흐름이 경유**(에이전트 직접 호출 금지). 허브-스포크 + **TurnBudget**(협업 총턴 상한)으로 루프·비용 폭발을 막는다.
+
+### 7.2 ReaderAgent (A)
+질문 → 검색(RAG) → 답변. Phase 1의 단일 에이전트.
+
+### 7.3 SpecialistAgents (B) — ✦8팀 + Board Meeting
+- **페르소나 = `.md` 정의(클래스) + 런타임 상태(객체).** 각자 `brain:` 선언 → 설정된 어댑터로 해소.
+- **8팀**(예: Council·Infra·Brand·Career·Academy·Trend·Recon·Record) = SpecialistAgents. 별자리 테마 이름 부여 가능. `/team <이름>` 소환은 **Orchestrator 경유**.
+- **Board Meeting** = 스케줄(`@Cron` 매일) 멀티에이전트 세션. Orchestrator가 페르소나(CEO·Infra Chief·Strategy Advisor·Record Keeper)를 소집, 구조화된 라운드로 진행.
+  - 산출물 매핑: **공유 컨텍스트 = KnowledgeCore 위키 페이지**("위키가 유일한 공유 상태" 원칙), **회의록 = Record Keeper가 쓰는 위키 페이지**, **의사결정 로그 = TaskStore(`runtime/state/`)**.
+- 일부 팀은 대화형 페르소나(소환), 일부는 스케줄 분석가(정기 실행) — 같은 페르소나 틀, 호출 방식만 다름.
+- **이 기능이 §3의 제약(세마포어·자유채팅금지·TurnBudget·두뇌 라우팅)의 존재 이유다.** 4명+8팀 동시 추론은 자원·구독 한도에 부딪히므로, 통제된 라운드·턴 상한·페르소나별 두뇌 선택으로만 안전·비용한정하게 굴러간다.
+
+### 7.4 IngesterAgent (C)
+스케줄로 자율 수집 → §6 검증 파이프라인 → 게이트 → 위키 갱신 + RAG 재색인.
+
+### 7.5 BrainProvider (`IBrainProvider`) ✦
+- **기본 = Claude CLI(구독).** 0설정·구독 한도 내 토큰 $0·풀 에이전트 하네스. `BrainResult`로 출력 정규화.
+- **교체 가능**: ClaudeApi / CodexCli / GeminiApi / **LocalBrain(Ollama: Llama·Qwen…)**. 모델·경로(CLI/API)·인증을 **config로 선택**(하드코딩 금지). 페르소나 frontmatter `brain:`로 선언.
+- **라우팅 권고**: 깊은 추론·B 종합 = Claude / 대량 저비용 다이제스트 = Gemini Flash·Claude Haiku·로컬 / 자율 코드 = Codex.
+
+### 7.6 IEmbedder ✦
+기본 = 로컬 JS(다국어). 교체 = Ollama·API. RagStore 전용.
+
+---
+
+## 8. 동시성·자원 제약 ✦
+
+- **두뇌 호출 = 프로세스 spawn**(Claude CLI). 매 호출이 별도 프로그램 부팅 → 시작 지연 + RAM/CPU 점유.
+- **구독 레이트 한도**: 무제한 아님. 24/7 자동화가 세게 때리면 throttle·정책 경계.
+- 둘이 겹쳐 **"동시에 생각하는 에이전트 수"에 천장**을 박는다. → **세마포어(동시 호출 max N)** + **TurnBudget(협업 총턴 상한)**. Phase 3(B)의 설계 전제.
+
+---
+
+## 9. Edge
+
+### 9.1 Gateway ✦ (포트 + 어댑터)
+입출력 통로. 코어는 추상 "메시지"만 다루고, 프론트엔드 특유의 것(채널 ID·버튼·길이 제한 등)은 어댑터 안에 가둔다 → **코어 앞단 중립**. 각 어댑터는 번역기(프론트엔드 ↔ 코어 질문). 두뇌·임베더와 같은 포트+어댑터 패턴.
+- 로드맵: **CLI(초기) → Discord(discord.js) → 자체 front-end(웹/앱).** CLI를 먼저 만드는 것이 코어의 앞단 중립 경계를 강제한다.
+- 자체 front-end는 별도 프로젝트(인증·모바일·실시간·호스팅 재구현). 채팅 이상의 UX(위키 편집 화면, 리뷰형 승인 게이트, 대시보드)를 원할 때 정당화됨.
+
+### 9.2 Scheduler
+in-process `@nestjs/schedule`(@Cron) 또는 BullMQ. OS cron 미사용. 자율·감사·재색인·뉴스브리핑 등 모든 정기 작업이 여기. BullMQ 잡 상태로 성공률·실패·소요시간 추적.
+
+---
+
+## 10. PAL — 프로세스 감독 ✦
+
+### 10.1 ProcessSupervisor (크로스플랫폼)
+
+OS별로 갈리는 유일한 코드. 설치·시작·정지·재시작 정책을 OS별로 한 번씩 구현.
+
+| 기능 | Windows Service | Linux systemd | macOS launchd |
+|---|:--:|:--:|:--:|
+| 부팅 시 자동 시작 | ✓ | ✓ | ✓ |
+| 죽으면 재시작 | ✓ | ✓ | ✓ |
+| 재시도 간격(백오프) | ✓ | ✓ | ✓ (기본 10초) |
+| N번 실패 후 포기 | ✓ | ✓ | ✗ |
+| 실패 시 알림 명령 실행 | ✓ | ✓ | ✗ |
+| 멈춤(hang) 감지 | ✗ | ✓ (WatchdogSec) | ✗ |
+
+핵심: **재시작이라는 근본은 셋 다 네이티브.** OS마다 다른 디테일은 ProcessSupervisor가, 부족한 고급 기능(멈춤 감지·포기·알림)은 §10.2 크로스플랫폼 감시자가 통일되게 메운다. 개발 순서: **Windows(1순위) → macOS → Linux.**
+
+### 10.2 감시자 (heartbeat + 알림)
+- 재시작은 **OS 서비스관리자**가 담당(제일 안 죽는 OS 기능). 직접 만들지 않는다(감시자 자신도 죽을 수 있음 = 무한 후퇴).
+- 작은 감시자가 **생존신호(heartbeat)** 를 받는다: Engram이 1분마다 "건강함" 신호 → 끊기면(죽음 또는 멈춤) 멈춘 프로세스를 강제 종료(→ 서비스관리자 재시작) + 몇 분 내 미복구 시 **폰/외부로 알림**.
+- 감시자는 **아주 단순**하게(거의 안 죽게). 최종 알림은 **외부**(PC 통째 죽어도 인지).
+- 재시도는 일시적 장애에만 효과 → **빠른 재시도 1~2회 후 즉시 알림**(고정 장애는 재시도로 안 고쳐짐).
+- **무한 자동복구는 환상.** 모든 복구는 "사람 알림"에서 끝난다. 데이터가 `runtime/`에 파일로 분리돼 있어, 프로세스가 못 켜져도 **지식은 보존** → 고치고 재시작.
+
+### 10.3 단일 프로세스 운영 위생 ✦
+단일 상주 프로세스의 대가(셸 스크립트와 달리 죽으며 자동 청소가 안 됨). Phase 0부터 코어에 내장:
+- **메모리**: 모든 캐시는 `lru-cache`(크기 제한 → 구조적으로 누수 방지). 감지는 메모리 추세(청소 후 바닥값이 계속 오르면 누수) + 임계치 알림 + heap 스냅샷으로 원인 특정.
+- **동시성**: 공유 상태 단일 라이터 / 페이지 락. 두뇌 호출 `p-limit` 세마포어.
+- **에러**: 작업 경계마다 try/catch(한 에이전트 실패가 프로세스를 안 죽이게). 구조화 로깅(pino) 디스크 영속.
+
+---
+
+## 11. 위험 요소 및 완화
+
+| 위험 | 완화 |
+|---|---|
+| 쓰기 경합 (C·B 동시 갱신) | 단일 라이터 / 페이지 락 / FSM(PENDING→RUNNING→SUCCESS/FAILED) |
+| stale 읽기 (C 갱신 중 A 읽음) | 위키 갱신 ↔ RAG 재색인 묶음, 증분 색인 |
+| B 루프/비용 폭발 | Orchestrator 허브-스포크 + TurnBudget + 세마포어 |
+| C가 틀린 사실 자율 박음 | §6 검증 파이프라인 + 승인 게이트 |
+| 위키 비대화 | ImportanceGate 3점↑만 |
+| 프라이버시 | 로컬 유지, `runtime/` 분리, gitleaks pre-commit |
+| 윈도우 OS 샌드박싱 부재 | C 자율 권한 최소화 + 승인 게이트 강화 |
+| 하네스 불일치 (CLI별 상이) | `BrainResult` 정규화, 능력차는 페르소나 `brain` 선택으로 흡수 |
+| 인증 분산 (Claude/OpenAI/Google) | 어댑터별 자격증명 분리(환경변수), `cc-switch`로 통합 관리 |
+| ✦메모리 누수 (단일 상주) | lru-cache 기본 + 추세 감시 + 임계치 알림 + 자동 재시작 안전망 |
+| ✦프로세스 다운/멈춤 | 서비스관리자 재시작 + 감시자 멈춤감지 + 외부 알림 + 데이터 분리로 무손실 |
+
+---
+
+## 12. 플랫폼 전략 (윈도우 네이티브 우선)
+
+- **`claude -p`는 윈도우 네이티브 동작 확인됨**(WSL 불필요). 설치: PowerShell `irm https://claude.ai/install.ps1 | iex`. 권장 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
+- **OS 레벨 샌드박싱은 macOS/Linux 전용** → C 자율 쓰기 안전장치 강화 근거.
+- **항상 켜짐**: Windows Service(1순위) → macOS launchd(2) → Linux systemd(3). 개발 중엔 터미널 `start:dev`. Docker는 선택.
+- **이식성 체크리스트**: 셸 0개 · OS cron 미사용 · 경로 하드코딩 금지(`path.join`) · `.gitattributes` `* text=auto eol=lf` · `claude -p`는 `cross-spawn`.
+
+---
+
+## 13. 빌드 로드맵 (이 순서 — B·C가 코어에 의존)
+
+> 교훈: **1개부터.** A·B·C 동시 착수는 코어가 흔들려 다 무너진다.
+
+- **Phase 0 — KnowledgeCore (토대)**: WikiEngine(✦버전관리형) + RagStore(✦LanceDB + 로컬임베딩 + 하이브리드 + 증분색인 + 파일워처) + 수집 1경로 + ✦상주 위생(lru-cache·로깅).
+- **Phase 1 — A 읽기**: ReaderAgent(질문→검색→답) + ✦CLI Gateway(앞단 중립 경계) + Claude CLI 두뇌 + ✦세마포어.
+- **Phase 2 — C 자율쓰기**: IngesterAgent(스케줄 digest) + ✦검증 파이프라인 + 승인 게이트 + 위키↔RAG 재색인 묶음 + ✦ops 자동화 대부분(@Cron 잡).
+- **Phase 3 — B 협업**: Orchestrator + Specialist + 종합 + ✦8팀 + Board Meeting + TaskStore + 동시성/턴 상한.
+- ✦**후순위(확정 포함) — InsightLayer**: 행동 메트릭 + 일일 인사이트 리포트 + 응답 맥락 주입. A/B/C 루프가 돈 뒤 얹음.
+- **운영(PAL)**: Phase 0부터 깔되 OS 순서대로(Win→Mac→Linux) + 감시자.
+
+---
+
+## 14. 기술 스택
+
+- 런타임: Node.js 22+, TypeScript, NestJS
+- 위키: 파일 기반 `.md` + 카테고리 스키마(JSON) + git 이력
+- RAG: **LanceDB** + **로컬 JS 임베딩(다국어)** + 하이브리드(BM25 + 벡터, RRF)
+- 두뇌: `IBrainProvider` 포트 — **Claude CLI 기본** / API·Codex·Gemini·로컬LLM 어댑터. 모델·경로·인증 config 선택
+- 스케줄: `@nestjs/schedule`(@Cron) / BullMQ
+- 항상 켜짐: Windows Service(node-windows/NSSM) / macOS launchd / Linux systemd. Docker 선택
+- 게이트웨이: CLI(초기) → Discord(discord.js) → 자체 front-end
+
+---
+
+## 15. 디렉토리 구조
+
+```
+engram/                      # 코드 (repo, git pull로 교체됨)
+ ├ src/
+ │  ├ knowledge-core/        # WikiEngine, RagStore, ImportanceGate, InsightLayer
+ │  ├ agent-layer/           # Orchestrator, ReaderAgent, SpecialistAgents, IngesterAgent
+ │  ├ brain/                 # IBrainProvider + 어댑터(Claude CLI/API, Codex, Gemini, Local), IEmbedder
+ │  ├ edge/                  # Gateway(CLI/Discord), Scheduler
+ │  └ pal/                   # ProcessSupervisor(Win/Mac/Linux), 감시자, PathResolver
+ ├ personas/                 # 페르소나 .md 정의 (클래스)
+ ├ docs/
+ └ docker/                   # 선택 배포 타깃
+
+%APPDATA%/engram/ (또는 runtime/)   # 데이터 (git 미추적)
+ ├ wiki/pages/{userId}/*.md  # + 자체 git 이력
+ ├ rag/                      # LanceDB
+ ├ state/                    # 세션, TaskStore
+ └ config/                   # 토큰, 개인 설정
+```
+
+---
+
+## 16. 참고 레퍼런스
+
+- ramsbaby/jarvis — 셀프호스팅 멀티에이전트 어시스턴트 구조 레퍼런스
+- NanoClaw — Agent SDK 기반, 페르소나 = 클래스/객체 패턴
+- Karpathy LLM Wiki — stateful 위키 3계층 (Raw/Wiki/Schema)
+- Mem0 — 중요도 채점 메모리 패턴
