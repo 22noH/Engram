@@ -27,3 +27,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# SDD 진행 스크래치 (subagent-driven-development)
+.superpowers/
