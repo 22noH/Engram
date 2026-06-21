@@ -4,12 +4,16 @@ import * as path from 'path';
 import { PathResolver } from '../../pal/path-resolver';
 import { serializePage, parsePage } from './page-serializer';
 import { WikiPage, CreatePageInput, UpdatePageInput } from './page.types';
+import { WikiGit } from './wiki-git';
 
 // 위키 페이지의 버전관리형 저장소(설계 §5.1).
 // .md 파일 CRUD + 출처/상태 메타데이터를 다룬다. (git 이력은 WikiGit가 담당 — Task 6)
 @Injectable()
 export class WikiEngine {
-  constructor(private readonly paths: PathResolver) {}
+  constructor(
+    private readonly paths: PathResolver,
+    private readonly git: WikiGit,
+  ) {}
 
   private pagePath(slug: string): string {
     return path.join(this.paths.getWikiPagesDir(), `${slug}.md`);
@@ -35,6 +39,7 @@ export class WikiEngine {
     await fs.writeFile(this.pagePath(input.slug), serializePage(page), {
       flag: 'wx',
     });
+    await this.git.commitAll(`create ${input.slug}`);
     return page;
   }
 
@@ -65,6 +70,7 @@ export class WikiEngine {
       body: patch.body ?? existing.body,
     };
     await fs.writeFile(this.pagePath(slug), serializePage(updated));
+    await this.git.commitAll(`update ${slug}`);
     return updated;
   }
 
@@ -104,6 +110,7 @@ export class WikiEngine {
       },
     };
     await fs.writeFile(this.pagePath(slug), serializePage(published));
+    await this.git.commitAll(`publish ${slug}`);
     return published;
   }
 }

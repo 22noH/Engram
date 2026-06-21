@@ -3,11 +3,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { PathResolver } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
+import { WikiGit } from './wiki-git';
 
 // 각 테스트는 임시 디렉토리에서 독립 실행한다.
 async function makeEngine(): Promise<WikiEngine> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-'));
-  return new WikiEngine(new PathResolver(dir));
+  const paths = new PathResolver(dir);
+  const git = new WikiGit(paths);
+  await git.ensureRepo();
+  return new WikiEngine(paths, git);
 }
 
 describe('WikiEngine CRUD', () => {
