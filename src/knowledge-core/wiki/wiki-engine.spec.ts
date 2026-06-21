@@ -52,3 +52,33 @@ describe('WikiEngine CRUD', () => {
     expect(all.map((p) => p.slug).sort()).toEqual(['a', 'b']);
   });
 });
+
+describe('WikiEngine 상태(draft/published)', () => {
+  it('publishPage는 상태를 published로 바꾼다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'p', title: 'T', category: 'c', body: 'x' });
+    const pub = await engine.publishPage('p');
+    expect(pub.frontmatter.status).toBe('published');
+
+    const read = await engine.getPage('p');
+    expect(read?.frontmatter.status).toBe('published');
+  });
+
+  it('publishPage는 없는 페이지에 에러를 던진다', async () => {
+    const engine = await makeEngine();
+    await expect(engine.publishPage('nope')).rejects.toThrow();
+  });
+
+  it('listPages({status}) 는 상태로 필터링한다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'd', title: 'D', category: 'c', body: 'x' }); // draft
+    await engine.createPage({ slug: 'p', title: 'P', category: 'c', body: 'y' });
+    await engine.publishPage('p');
+
+    const published = await engine.listPages({ status: 'published' });
+    expect(published.map((x) => x.slug)).toEqual(['p']);
+
+    const all = await engine.listPages();
+    expect(all.length).toBe(2);
+  });
+});

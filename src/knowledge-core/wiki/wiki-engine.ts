@@ -68,8 +68,10 @@ export class WikiEngine {
     return updated;
   }
 
-  // 전체 페이지 목록.
-  async listPages(): Promise<WikiPage[]> {
+  // 페이지 목록. status로 선택 필터링.
+  async listPages(filter?: {
+    status?: import('./page.types').PageStatus;
+  }): Promise<WikiPage[]> {
     const dir = this.paths.getWikiPagesDir();
     let files: string[];
     try {
@@ -82,8 +84,26 @@ export class WikiEngine {
     for (const f of files) {
       if (!f.endsWith('.md')) continue;
       const page = await this.getPage(f.slice(0, -3));
-      if (page) pages.push(page);
+      if (!page) continue;
+      if (filter?.status && page.frontmatter.status !== filter.status) continue;
+      pages.push(page);
     }
     return pages;
+  }
+
+  // draft → published 전환(승인 게이트 통과 시, §6 반영 지점).
+  async publishPage(slug: string): Promise<WikiPage> {
+    const existing = await this.getPage(slug);
+    if (!existing) throw new Error(`Page not found: ${slug}`);
+    const published: WikiPage = {
+      ...existing,
+      frontmatter: {
+        ...existing.frontmatter,
+        status: 'published',
+        updated: new Date().toISOString(),
+      },
+    };
+    await fs.writeFile(this.pagePath(slug), serializePage(published));
+    return published;
   }
 }
