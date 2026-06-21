@@ -16,6 +16,7 @@ export class PathResolver {
       path.join(process.cwd(), 'runtime');
   }
 
+  // 데이터 루트 디렉토리 경로를 반환한다.
   getDataDir(): string {
     return this.dataDir;
   }

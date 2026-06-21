@@ -22,6 +22,23 @@ describe('page-serializer', () => {
     expect(back).toEqual(page);
   });
 
+  it('본문 끝 공백(마크다운 하드 줄바꿈)이 왕복 후 보존된다', () => {
+    const page: WikiPage = {
+      slug: 'trailing-space',
+      frontmatter: {
+        title: '공백 테스트',
+        category: 'general',
+        status: 'draft',
+        sources: [],
+        created: '2026-06-21T00:00:00.000Z',
+        updated: '2026-06-21T00:00:00.000Z',
+      },
+      body: '줄1\n줄2 뒤 공백  ',
+    };
+
+    expect(parsePage(page.slug, serializePage(page))).toEqual(page);
+  });
+
   it('frontmatter가 YAML로 직렬화된다', () => {
     const page: WikiPage = {
       slug: 'p',

@@ -5,8 +5,11 @@ import { PathResolver } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
 import { WikiGit } from './wiki-git';
 
+const tmpDirs: string[] = [];
+
 async function setup(): Promise<{ engine: WikiEngine; git: WikiGit }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-git-'));
+  tmpDirs.push(dir);
   const paths = new PathResolver(dir);
   const git = new WikiGit(paths);
   await git.ensureRepo();
@@ -31,4 +34,10 @@ describe('WikiGit 이력', () => {
     const msgs = await git.recentMessages();
     expect(msgs.length).toBeGreaterThanOrEqual(2);
   });
+});
+
+afterAll(async () => {
+  for (const d of tmpDirs) {
+    await fs.rm(d, { recursive: true, force: true });
+  }
 });

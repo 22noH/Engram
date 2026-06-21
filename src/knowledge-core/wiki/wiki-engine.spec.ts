@@ -5,9 +5,12 @@ import { PathResolver } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
 import { WikiGit } from './wiki-git';
 
+const tmpDirs: string[] = [];
+
 // 각 테스트는 임시 디렉토리에서 독립 실행한다.
 async function makeEngine(): Promise<WikiEngine> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-'));
+  tmpDirs.push(dir);
   const paths = new PathResolver(dir);
   const git = new WikiGit(paths);
   await git.ensureRepo();
@@ -85,4 +88,10 @@ describe('WikiEngine 상태(draft/published)', () => {
     const all = await engine.listPages();
     expect(all.length).toBe(2);
   });
+});
+
+afterAll(async () => {
+  for (const d of tmpDirs) {
+    await fs.rm(d, { recursive: true, force: true });
+  }
 });

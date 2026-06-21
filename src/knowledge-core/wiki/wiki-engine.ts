@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PathResolver } from '../../pal/path-resolver';
 import { serializePage, parsePage } from './page-serializer';
-import { WikiPage, CreatePageInput, UpdatePageInput } from './page.types';
+import { WikiPage, CreatePageInput, UpdatePageInput, PageStatus } from './page.types';
 import { WikiGit } from './wiki-git';
 
 // 위키 페이지의 버전관리형 저장소(설계 §5.1).
@@ -76,7 +76,7 @@ export class WikiEngine {
 
   // 페이지 목록. status로 선택 필터링.
   async listPages(filter?: {
-    status?: import('./page.types').PageStatus;
+    status?: PageStatus;
   }): Promise<WikiPage[]> {
     const dir = this.paths.getWikiPagesDir();
     let files: string[];

@@ -14,7 +14,7 @@ export class WikiGit {
     this.git = simpleGit();
   }
 
-  // 위키 디렉토리를 git 저장소로 보장(이미 init돼 있으면 신원만 확인).
+  // 위키 디렉토리를 git 저장소로 보장(최초 init 시 커밋 신원도 함께 설정한다).
   async ensureRepo(): Promise<void> {
     const dir = this.paths.getWikiDir();
     await fs.mkdir(dir, { recursive: true });
@@ -22,10 +22,10 @@ export class WikiGit {
     const isRepo = await this.git.checkIsRepo();
     if (!isRepo) {
       await this.git.init();
+      // 데이터 저장소 전용 커밋 신원(코드 repo의 사용자와 분리). init 시 한 번만 설정.
+      await this.git.addConfig('user.name', 'Engram');
+      await this.git.addConfig('user.email', 'engram@localhost');
     }
-    // 데이터 저장소 전용 커밋 신원(코드 repo의 사용자와 분리).
-    await this.git.addConfig('user.name', 'Engram');
-    await this.git.addConfig('user.email', 'engram@localhost');
   }
 
   // 위키 디렉토리의 모든 변경을 커밋. 변경이 없으면 빈 커밋을 만들지 않는다.
