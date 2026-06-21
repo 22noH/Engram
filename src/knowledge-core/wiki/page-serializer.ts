@@ -14,8 +14,8 @@ export function parsePage(slug: string, fileContent: string): WikiPage {
   return {
     slug,
     frontmatter: parsed.data as PageFrontmatter,
-    // stringify가 본문 앞뒤로 개행을 주입하므로, 그 개행만 제거해 왕복 동일성을 맞춘다.
-    // (trim()은 사용자의 의도적 후행 공백까지 없애므로 사용하지 않는다)
+    // gray-matter가 본문 앞뒤에 주입하는 개행 1개씩만 제거한다(사용자 후행 공백은 보존).
+    // 단, 본문 경계의 빈 줄(앞/뒤 연속 개행)은 gray-matter가 정규화하므로 완전한 바이트 단위 왕복은 보장하지 않는다.
     body: parsed.content.replace(/^\n/, '').replace(/\n$/, ''),
   };
 }

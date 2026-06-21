@@ -10,6 +10,7 @@ export class PathResolver {
   private readonly dataDir: string;
 
   constructor(baseDir?: string) {
+    // ENGRAM_DATA_DIR는 생성 시점(DI 해소 시)에 1회 읽는다. 이후 환경변수 변경은 반영되지 않음.
     this.dataDir =
       baseDir ??
       process.env.ENGRAM_DATA_DIR ??

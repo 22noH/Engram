@@ -31,6 +31,8 @@ export class WikiGit {
   // 위키 디렉토리의 모든 변경을 커밋. 변경이 없으면 빈 커밋을 만들지 않는다.
   async commitAll(message: string): Promise<void> {
     this.git.cwd(this.paths.getWikiDir());
+    // TODO(Phase 0 Part 3): 단일 라이터/페이지 락 + 변경 경로만 스테이징.
+    // 현재 add('.')은 동시 쓰기 시 여러 변경이 한 커밋에 혼입될 수 있음 (설계 §10.3 "단일 라이터/페이지 락", §11 "쓰기 경합").
     await this.git.add('.');
     const status = await this.git.status();
     if (status.files.length === 0) return;
