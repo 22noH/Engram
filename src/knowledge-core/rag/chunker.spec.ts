@@ -13,8 +13,7 @@ describe('chunkBody', () => {
     const p = 'x'.repeat(80);
     const body = [p, p, p].join('\n\n'); // 3문단 × 80자
     const chunks = chunkBody(body, 100); // 한도 100 → 문단당 1청크 근처
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((c) => c.length <= 100 || !c.includes('\n\n'))).toBe(true);
+    expect(chunks).toEqual([p, p, p]);
   });
 
   it('여러 짧은 문단은 한 청크로 합쳐진다', () => {
