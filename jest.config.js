@@ -12,6 +12,6 @@ module.exports = {
     process.env.ENGRAM_RAG_INTEGRATION === '1'
       ? '<rootDir>/../jest-integration-env.js'
       : 'node',
-  // onnxruntime-node 세션이 열린 채로 남아 Jest가 종료를 기다리는 현상을 방지한다.
-  forceExit: true,
+  // ENGRAM_RAG_INTEGRATION=1 일 때만 onnxruntime-node 세션이 열린 채로 남아 Jest가 종료를 기다리는 현상을 방지한다.
+  forceExit: process.env.ENGRAM_RAG_INTEGRATION === '1',
 };

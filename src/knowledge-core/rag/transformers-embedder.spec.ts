@@ -1,5 +1,7 @@
 import { TransformersEmbedder } from './transformers-embedder';
 
+// 통합테스트 실행(PowerShell): $env:NODE_OPTIONS='--experimental-vm-modules'; $env:ENGRAM_RAG_INTEGRATION='1'; npx jest src/knowledge-core/rag/transformers-embedder.spec.ts; $env:NODE_OPTIONS=$null; $env:ENGRAM_RAG_INTEGRATION=$null
+
 // 실제 모델 다운로드가 필요해 기본 skip. 수동/CI에서 ENGRAM_RAG_INTEGRATION=1로 켠다.
 const run = process.env.ENGRAM_RAG_INTEGRATION === '1' ? describe : describe.skip;
 
