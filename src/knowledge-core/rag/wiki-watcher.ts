@@ -23,6 +23,7 @@ export class WikiWatcher implements OnModuleDestroy {
     const glob = path.join(this.paths.getWikiPagesDir(), '*.md');
     this.watcher = chokidar.watch(glob, { ignoreInitial: true });
     this.watcher
+      // 'add'(새 파일)·'change'(수정)는 모두 재색인으로 취급. (chokidar 실이벤트 E2E는 Part 3 이월)
       .on('add', (f) => this.debounce(this.slugOf(f), 'change'))
       .on('change', (f) => this.debounce(this.slugOf(f), 'change'))
       .on('unlink', (f) => this.debounce(this.slugOf(f), 'unlink'));
@@ -50,7 +51,9 @@ export class WikiWatcher implements OnModuleDestroy {
       slug,
       setTimeout(() => {
         this.timers.delete(slug);
-        void this.handleChange(slug, event);
+        void this.handleChange(slug, event).catch((err) =>
+          console.error(`[WikiWatcher] 재색인 실패 slug=${slug}:`, err),
+        );
       }, DEBOUNCE_MS),
     );
   }
