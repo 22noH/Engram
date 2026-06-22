@@ -1,0 +1,127 @@
+import { Inject, Injectable } from '@nestjs/common';
+import * as lancedb from '@lancedb/lancedb';
+import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
+import { PathResolver } from '../../pal/path-resolver';
+import { EMBEDDER, IEmbedder } from './embedder.port';
+import { chunkBody } from './chunker';
+import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
+
+const TABLE = 'chunks';
+
+// SQL 술어용 문자열 이스케이프(작은따옴표 이중화).
+const sql = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+
+// 위키 published 페이지를 LanceDB에 멱등 색인하고 하이브리드 검색을 제공한다(설계 §5.2).
+@Injectable()
+export class RagStore implements PageIndexer {
+  private db!: lancedb.Connection;
+  private table!: lancedb.Table;
+  private reranker!: lancedb.rerankers.RRFReranker;
+  private ftsReady = false;
+  // LanceDB 단일 라이터 — 쓰기를 직렬화한다(진짜 락은 Part 3).
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    private readonly paths: PathResolver,
+    @Inject(EMBEDDER) private readonly embedder: IEmbedder,
+  ) {}
+
+  async init(): Promise<void> {
+    this.db = await lancedb.connect(this.paths.getRagDir());
+    const names = await this.db.tableNames();
+    if (names.includes(TABLE)) {
+      this.table = await this.db.openTable(TABLE);
+      this.ftsReady = true; // 기존 테이블엔 인덱스가 있다고 가정
+    } else {
+      this.table = await this.db.createEmptyTable(TABLE, this.schema());
+    }
+    this.reranker = await lancedb.rerankers.RRFReranker.create();
+  }
+
+  private schema(): Schema {
+    return new Schema([
+      new Field('id', new Utf8()),
+      new Field('slug', new Utf8()),
+      new Field('chunkIndex', new Int32()),
+      new Field('title', new Utf8()),
+      new Field('category', new Utf8()),
+      new Field('text', new Utf8()),
+      new Field(
+        'vector',
+        new FixedSizeList(this.embedder.dimensions, new Field('item', new Float32(), true)),
+      ),
+      // sources는 JSON 직렬화 문자열로 저장(Arrow List 타입 대신 단순 Utf8).
+      new Field('sources', new Utf8()),
+      new Field('updated', new Utf8()),
+    ]);
+  }
+
+  // 청크 색인 후 FTS 인덱스 1회 보장(빈 테이블엔 인덱스를 못 만들 수 있어 첫 데이터 후로 미룸).
+  private async ensureFts(): Promise<void> {
+    if (this.ftsReady) return;
+    await this.table.createIndex('text', { config: lancedb.Index.fts() });
+    this.ftsReady = true;
+  }
+
+  async indexPage(page: IndexablePage): Promise<void> {
+    return this.enqueue(async () => {
+      await this.table.delete(`slug = ${sql(page.slug)}`); // 멱등: 기존 청크 제거
+      const chunks = chunkBody(page.body);
+      if (chunks.length === 0) return;
+      const vectors = await this.embedder.embed(chunks);
+      const now = new Date().toISOString();
+      const rows = chunks.map((text, i) => ({
+        id: `${page.slug}#${i}`,
+        slug: page.slug,
+        chunkIndex: i,
+        title: page.title,
+        category: page.category,
+        text,
+        vector: vectors[i],
+        sources: JSON.stringify(page.sources),
+        updated: now,
+      }));
+      await this.table.add(rows);
+      await this.ensureFts();
+    });
+  }
+
+  async removePage(slug: string): Promise<void> {
+    await this.enqueue(() => this.table.delete(`slug = ${sql(slug)}`));
+  }
+
+  async reindexAll(pages: IndexablePage[]): Promise<void> {
+    for (const p of pages) await this.indexPage(p);
+  }
+
+  async search(query: string, limit = 5): Promise<SearchResult[]> {
+    if (!this.ftsReady) return []; // 아직 색인된 게 없으면 빈 결과
+    const [qvec] = await this.embedder.embed([query]);
+    // select 없이 모든 필드를 반환 — _score(FTS)와 _distance(벡터) 모두 포함.
+    // 0.30에서 select에 점수 필드를 빠뜨리면 deprecated 경고 발생하므로, select 자체를 생략한다.
+    const rows = (await this.table
+      .query()
+      .nearestTo(qvec)
+      .fullTextSearch(query)
+      .rerank(this.reranker)
+      .limit(limit)
+      .toArray()) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      slug: String(r.slug),
+      title: String(r.title),
+      text: String(r.text),
+      // RRF rerank 결과의 점수: _score(FTS 경로) 또는 _distance(벡터 경로).
+      score: Number(r._score ?? r._distance ?? 0),
+    }));
+  }
+
+  // 쓰기 작업을 순차 실행(앞 작업 성패와 무관하게 다음 진행).
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+}

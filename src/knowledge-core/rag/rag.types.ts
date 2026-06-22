@@ -23,4 +23,5 @@ export const PAGE_INDEXER = Symbol('PAGE_INDEXER');
 export interface PageIndexer {
   indexPage(page: IndexablePage): Promise<void>;
   removePage(slug: string): Promise<void>;
+  reindexAll(pages: IndexablePage[]): Promise<void>;
 }
