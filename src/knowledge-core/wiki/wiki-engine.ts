@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { IndexablePage, PageIndexer, PAGE_INDEXER } from '../rag/rag.types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PathResolver } from '../../pal/path-resolver';
@@ -13,7 +14,19 @@ export class WikiEngine {
   constructor(
     private readonly paths: PathResolver,
     private readonly git: WikiGit,
+    @Optional() @Inject(PAGE_INDEXER) private readonly indexer?: PageIndexer,
   ) {}
+
+  // WikiPage → 색인용 평탄 타입. (RagStore가 WikiPage 전체에 의존하지 않게.)
+  private toIndexable(page: WikiPage): IndexablePage {
+    return {
+      slug: page.slug,
+      title: page.frontmatter.title,
+      category: page.frontmatter.category,
+      sources: page.frontmatter.sources,
+      body: page.body,
+    };
+  }
 
   private pagePath(slug: string): string {
     return path.join(this.paths.getWikiPagesDir(), `${slug}.md`);
@@ -40,6 +53,9 @@ export class WikiEngine {
       flag: 'wx',
     });
     await this.git.commitAll(`create ${input.slug}`);
+    if (page.frontmatter.status === 'published') {
+      await this.indexer?.indexPage(this.toIndexable(page));
+    }
     return page;
   }
 
@@ -71,6 +87,9 @@ export class WikiEngine {
     };
     await fs.writeFile(this.pagePath(slug), serializePage(updated));
     await this.git.commitAll(`update ${slug}`);
+    if (updated.frontmatter.status === 'published') {
+      await this.indexer?.indexPage(this.toIndexable(updated));
+    }
     return updated;
   }
 
@@ -111,6 +130,7 @@ export class WikiEngine {
     };
     await fs.writeFile(this.pagePath(slug), serializePage(published));
     await this.git.commitAll(`publish ${slug}`);
+    await this.indexer?.indexPage(this.toIndexable(published));
     return published;
   }
 }
