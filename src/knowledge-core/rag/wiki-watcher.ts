@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import chokidar, { FSWatcher } from 'chokidar';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PathResolver } from '../../pal/path-resolver';
 import { RagStore } from './rag-store';
@@ -20,10 +21,16 @@ export class WikiWatcher implements OnModuleDestroy {
   ) {}
 
   async start(): Promise<void> {
-    const glob = path.join(this.paths.getWikiPagesDir(), '*.md');
-    this.watcher = chokidar.watch(glob, { ignoreInitial: true });
+    const dir = this.paths.getWikiPagesDir();
+    // chokidar v4에서 글로브 지원이 제거됐으므로 디렉토리를 감시하고 확장자로 필터링한다.
+    // 빈 위키 대비: 디렉토리가 없으면 워처가 붙을 수 없으므로 미리 생성한다.
+    await fs.mkdir(dir, { recursive: true });
+    this.watcher = chokidar.watch(dir, {
+      ignoreInitial: true,
+      ignored: (p, stats) => !!stats?.isFile() && !p.endsWith('.md'),
+    });
     this.watcher
-      // 'add'(새 파일)·'change'(수정)는 모두 재색인으로 취급. (chokidar 실이벤트 E2E는 Part 3 이월)
+      // 'add'(새 파일)·'change'(수정)는 모두 재색인으로 취급.
       .on('add', (f) => this.debounce(this.slugOf(f), 'change'))
       .on('change', (f) => this.debounce(this.slugOf(f), 'change'))
       .on('unlink', (f) => this.debounce(this.slugOf(f), 'unlink'));

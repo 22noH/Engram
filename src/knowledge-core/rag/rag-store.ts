@@ -17,7 +17,6 @@ export class RagStore implements PageIndexer {
   private db!: lancedb.Connection;
   private table!: lancedb.Table;
   private reranker!: lancedb.rerankers.RRFReranker;
-  private ftsReady = false;
   // LanceDB 단일 라이터 — 쓰기를 직렬화한다(진짜 락은 Part 3).
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -31,7 +30,8 @@ export class RagStore implements PageIndexer {
     const names = await this.db.tableNames();
     if (names.includes(TABLE)) {
       this.table = await this.db.openTable(TABLE);
-      this.ftsReady = true; // 기존 테이블엔 인덱스가 있다고 가정
+      // ftsReady 가드 없이 재오픈 경로에서도 ensureFts가 실행되도록 하기 위해
+      // 여기서 미리 설정하지 않는다(ensureFts가 listIndices로 직접 확인한다).
     } else {
       this.table = await this.db.createEmptyTable(TABLE, this.schema());
     }
@@ -56,11 +56,18 @@ export class RagStore implements PageIndexer {
     ]);
   }
 
-  // 청크 색인 후 FTS 인덱스 1회 보장(빈 테이블엔 인덱스를 못 만들 수 있어 첫 데이터 후로 미룸).
+  // 청크 색인 후 FTS 인덱스를 보장한다.
+  // - listIndices()로 실제 인덱스 존재를 확인 후 없으면 생성(idempotent).
+  // - 재오픈 경로에서도 ftsReady 가드 없이 항상 실행되므로 stale 인덱스 문제가 없다.
+  // - 빈 테이블엔 인덱스를 만들 수 없으므로 데이터가 있는 후(indexPage 내부)에서만 호출한다.
   private async ensureFts(): Promise<void> {
-    if (this.ftsReady) return;
-    await this.table.createIndex('text', { config: lancedb.Index.fts() });
-    this.ftsReady = true;
+    const indices = await this.table.listIndices();
+    const hasFts = indices.some(
+      (idx) => idx.columns.includes('text'),
+    );
+    if (!hasFts) {
+      await this.table.createIndex('text', { config: lancedb.Index.fts() });
+    }
   }
 
   async indexPage(page: IndexablePage): Promise<void> {
@@ -95,7 +102,10 @@ export class RagStore implements PageIndexer {
   }
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
-    if (!this.ftsReady) return []; // 아직 색인된 게 없으면 빈 결과
+    // FTS 인덱스가 없으면(아직 indexPage가 한 번도 호출되지 않은 상태) 빈 결과 반환.
+    const indices = await this.table.listIndices();
+    const hasFts = indices.some((idx) => idx.columns.includes('text'));
+    if (!hasFts) return [];
     const [qvec] = await this.embedder.embed([query]);
     // select 없이 모든 필드를 반환 — _score(FTS)와 _distance(벡터) 모두 포함.
     // 0.30에서 select에 점수 필드를 빠뜨리면 deprecated 경고 발생하므로, select 자체를 생략한다.

@@ -50,6 +50,22 @@ describe('RagStore', () => {
     expect(slugs).toEqual(expect.arrayContaining(['p1', 'p2']));
   });
 
+  it('재오픈 후 추가한 페이지도 검색된다(2회 init FTS stale 회귀)', async () => {
+    // 첫 번째 인스턴스: pageA 색인
+    await store.indexPage(page('reopen-a', 'LanceDB 재오픈 검증 A'));
+
+    // 두 번째 인스턴스: 같은 디렉토리를 재오픈 후 pageB 추가
+    const store2 = new RagStore(new PathResolver(dir), new FakeEmbedder());
+    await store2.init();
+    await store2.indexPage(page('reopen-b', 'LanceDB 재오픈 검증 B'));
+
+    // A·B 모두 검색돼야 한다(특히 재오픈 후 넣은 B가 FTS stale로 누락되지 않아야 함)
+    const results = await store2.search('LanceDB 재오픈 검증', 50);
+    const slugs = results.map((r) => r.slug);
+    expect(slugs).toContain('reopen-a');
+    expect(slugs).toContain('reopen-b');
+  });
+
   it('검색 score가 유한수이고 내림차순이다', async () => {
     await store.reindexAll([
       page('s1', '머신러닝 모델 학습'),
