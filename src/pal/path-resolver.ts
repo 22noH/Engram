@@ -31,4 +31,9 @@ export class PathResolver {
   getWikiPagesDir(): string {
     return path.join(this.getWikiDir(), 'pages');
   }
+
+  // RAG 벡터 저장소(LanceDB) 루트.
+  getRagDir(): string {
+    return path.join(this.dataDir, 'rag');
+  }
 }

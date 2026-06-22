@@ -95,3 +95,45 @@ afterAll(async () => {
     await fs.rm(d, { recursive: true, force: true });
   }
 });
+
+import { PageIndexer, IndexablePage } from '../rag/rag.types';
+
+class SpyIndexer implements PageIndexer {
+  indexed: IndexablePage[] = [];
+  removed: string[] = [];
+  async indexPage(p: IndexablePage) { this.indexed.push(p); }
+  async removePage(slug: string) { this.removed.push(slug); }
+  async reindexAll(pages: IndexablePage[]) { for (const p of pages) this.indexed.push(p); }
+}
+
+describe('WikiEngine + PAGE_INDEXER', () => {
+  let dir: string;
+  let engine: WikiEngine;
+  let spy: SpyIndexer;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-idx-'));
+    const paths = new PathResolver(dir);
+    const git = new WikiGit(paths);
+    await git.ensureRepo();
+    spy = new SpyIndexer();
+    engine = new WikiEngine(paths, git, spy);
+  });
+  afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+
+  it('publishPage는 indexer.indexPage를 부른다', async () => {
+    await engine.createPage({ slug: 'a', title: 'A', category: 'c', body: '본문' });
+    await engine.publishPage('a');
+    expect(spy.indexed.map((p) => p.slug)).toContain('a');
+  });
+
+  it('draft 생성은 색인하지 않는다', async () => {
+    await engine.createPage({ slug: 'b', title: 'B', category: 'c', body: '본문' });
+    expect(spy.indexed).toHaveLength(0);
+  });
+
+  it('published로 직접 생성하면 색인한다', async () => {
+    await engine.createPage({ slug: 'c', title: 'C', category: 'c', body: '본문', status: 'published' });
+    expect(spy.indexed.map((p) => p.slug)).toContain('c');
+  });
+});

@@ -15,4 +15,9 @@ describe('PathResolver', () => {
     const r = new PathResolver();
     expect(r.getDataDir()).toBe(path.join(process.cwd(), 'runtime'));
   });
+
+  it('getRagDir는 dataDir 아래 rag 경로를 반환한다', () => {
+    const paths = new PathResolver(path.join('C:', 'tmp', 'engram-test'));
+    expect(paths.getRagDir()).toBe(path.join('C:', 'tmp', 'engram-test', 'rag'));
+  });
 });
