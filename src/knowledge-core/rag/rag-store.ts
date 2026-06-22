@@ -110,8 +110,15 @@ export class RagStore implements PageIndexer {
       slug: String(r.slug),
       title: String(r.title),
       text: String(r.text),
-      // RRF rerank 결과의 점수: _score(FTS 경로) 또는 _distance(벡터 경로).
-      score: Number(r._score ?? r._distance ?? 0),
+      // RRFReranker는 _relevance_score(높을수록 관련)를 출력한다.
+      // _distance(낮을수록 유사)는 rerank 후 undefined가 되므로 사용하지 않는다.
+      // 만약 _relevance_score도 없으면(벡터 단독 경로) 1/(1+_distance)로 변환해 "높을수록 관련"을 보장한다.
+      score:
+        r._relevance_score != null
+          ? Number(r._relevance_score)
+          : r._distance != null
+            ? 1 / (1 + Number(r._distance))
+            : 0,
     }));
   }
 

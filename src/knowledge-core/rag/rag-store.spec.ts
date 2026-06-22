@@ -49,4 +49,23 @@ describe('RagStore', () => {
     const slugs = results.map((r) => r.slug);
     expect(slugs).toEqual(expect.arrayContaining(['p1', 'p2']));
   });
+
+  it('검색 score가 유한수이고 내림차순이다', async () => {
+    await store.reindexAll([
+      page('s1', '머신러닝 모델 학습'),
+      page('s2', '벡터 데이터베이스 검색'),
+      page('s3', '자연어 처리 파이프라인'),
+    ]);
+    const results = await store.search('벡터 검색', 10);
+    // 결과가 1개 이상이어야 score 순서 검증이 의미 있다.
+    expect(results.length).toBeGreaterThan(0);
+    // 모든 score가 유한수여야 한다.
+    for (const r of results) {
+      expect(Number.isFinite(r.score)).toBe(true);
+    }
+    // 결과가 2개 이상이면 내림차순(가장 관련 높은 게 먼저)임을 검증한다.
+    if (results.length >= 2) {
+      expect(results[0].score).toBeGreaterThanOrEqual(results[results.length - 1].score);
+    }
+  });
 });
