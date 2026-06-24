@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
-import { PathResolver } from '../../pal/path-resolver';
+import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { EMBEDDER, IEmbedder } from './embedder.port';
 import { chunkBody } from './chunker';
 import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
@@ -12,6 +12,7 @@ const TABLE = 'chunks';
 const sql = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 
 // 위키 published 페이지를 LanceDB에 멱등 색인하고 하이브리드 검색을 제공한다(설계 §5.2).
+// Phase 0 Part 3: userId 컬럼 추가로 멀티유저 격리 + 쓰기마다 optimize()로 FTS 인덱스 최신화.
 @Injectable()
 export class RagStore implements PageIndexer {
   private db!: lancedb.Connection;
@@ -30,8 +31,13 @@ export class RagStore implements PageIndexer {
     const names = await this.db.tableNames();
     if (names.includes(TABLE)) {
       this.table = await this.db.openTable(TABLE);
-      // ftsReady 가드 없이 재오픈 경로에서도 ensureFts가 실행되도록 하기 위해
-      // 여기서 미리 설정하지 않는다(ensureFts가 listIndices로 직접 확인한다).
+      // 멀티유저 마이그레이션: userId 컬럼이 없는 구 스키마면 drop+recreate.
+      // RAG는 wiki에서 파생·시작 시 reindex되므로 데이터 손실이 없다(disposable store).
+      const fields = (await this.table.schema()).fields;
+      if (!fields.some((f) => f.name === 'userId')) {
+        await this.db.dropTable(TABLE);
+        this.table = await this.db.createEmptyTable(TABLE, this.schema());
+      }
     } else {
       this.table = await this.db.createEmptyTable(TABLE, this.schema());
     }
@@ -40,6 +46,8 @@ export class RagStore implements PageIndexer {
 
   private schema(): Schema {
     return new Schema([
+      // userId를 맨 앞에 배치: WHERE 프리필터 핵심 컬럼(설계 §15 멀티유저 격리).
+      new Field('userId', new Utf8()),
       new Field('id', new Utf8()),
       new Field('slug', new Utf8()),
       new Field('chunkIndex', new Int32()),
@@ -71,14 +79,17 @@ export class RagStore implements PageIndexer {
   }
 
   async indexPage(page: IndexablePage): Promise<void> {
+    const userId = page.userId ?? DEFAULT_USER;
     return this.enqueue(async () => {
-      await this.table.delete(`slug = ${sql(page.slug)}`); // 멱등: 기존 청크 제거
+      // 멱등: 같은 (userId, slug)의 기존 청크 제거 — userId 범위 한정으로 타 유저 데이터 보호.
+      await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(page.slug)}`);
       const chunks = chunkBody(page.body);
       if (chunks.length === 0) return;
       const vectors = await this.embedder.embed(chunks);
       const now = new Date().toISOString();
       const rows = chunks.map((text, i) => ({
-        id: `${page.slug}#${i}`,
+        userId,
+        id: `${userId}/${page.slug}#${i}`,
         slug: page.slug,
         chunkIndex: i,
         title: page.title,
@@ -90,33 +101,43 @@ export class RagStore implements PageIndexer {
       }));
       await this.table.add(rows);
       await this.ensureFts();
+      // 쓰기마다 optimize()로 FTS 인덱스·tombstone 정비(정확성보단 성능, 누락 방지 목적).
+      await this.table.optimize();
     });
   }
 
-  async removePage(slug: string): Promise<void> {
-    await this.enqueue(() => this.table.delete(`slug = ${sql(slug)}`));
+  async removePage(slug: string, userId: string = DEFAULT_USER): Promise<void> {
+    await this.enqueue(async () => {
+      // userId 범위 한정 삭제: 타 유저 동명 페이지를 건드리지 않는다.
+      await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(slug)}`);
+      // 삭제 후 optimize: tombstone 정비. startup reindexAll이 페이지마다 호출하므로
+      // 코퍼스 수백+ 시 배치/주기 인덱스로 승격 여부를 측정 후 결정(현재 YAGNI).
+      await this.table.optimize();
+    });
   }
 
   async reindexAll(pages: IndexablePage[]): Promise<void> {
     for (const p of pages) await this.indexPage(p);
   }
 
-  async search(query: string, limit = 5): Promise<SearchResult[]> {
+  async search(query: string, limit = 5, userId: string = DEFAULT_USER): Promise<SearchResult[]> {
     // FTS 인덱스가 없으면(아직 indexPage가 한 번도 호출되지 않은 상태) 빈 결과 반환.
     const indices = await this.table.listIndices();
-    const hasFts = indices.some((idx) => idx.columns.includes('text'));
-    if (!hasFts) return [];
+    if (!indices.some((idx) => idx.columns.includes('text'))) return [];
     const [qvec] = await this.embedder.embed([query]);
+    // userId WHERE 프리필터: 벡터+FTS 양쪽 leg에 격리 조건 적용(설계 §15).
     // select 없이 모든 필드를 반환 — _score(FTS)와 _distance(벡터) 모두 포함.
     // 0.30에서 select에 점수 필드를 빠뜨리면 deprecated 경고 발생하므로, select 자체를 생략한다.
     const rows = (await this.table
       .query()
+      .where(`userId = ${sql(userId)}`) // 사용자 격리 프리필터
       .nearestTo(qvec)
       .fullTextSearch(query)
       .rerank(this.reranker)
       .limit(limit)
       .toArray()) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
+      userId: String(r.userId),
       slug: String(r.slug),
       title: String(r.title),
       text: String(r.text),

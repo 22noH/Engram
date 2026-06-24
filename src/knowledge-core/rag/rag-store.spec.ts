@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { RagStore } from './rag-store';
 import { FakeEmbedder } from './fake-embedder';
-import { PathResolver } from '../../pal/path-resolver';
+import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { IndexablePage } from './rag.types';
 
 function page(slug: string, body: string, title = slug): IndexablePage {
@@ -64,6 +64,41 @@ describe('RagStore', () => {
     const slugs = results.map((r) => r.slug);
     expect(slugs).toContain('reopen-a');
     expect(slugs).toContain('reopen-b');
+  });
+
+  it('다른 userId의 같은 slug를 격리한다', async () => {
+    await store.indexPage({
+      userId: 'alice', slug: 'note', title: 'A', category: 'c', sources: [], body: 'apple pie recipe',
+    });
+    await store.indexPage({
+      userId: 'bob', slug: 'note', title: 'B', category: 'c', sources: [], body: 'banana bread recipe',
+    });
+    const alice = await store.search('recipe', 5, 'alice');
+    expect(alice.length).toBeGreaterThan(0);
+    expect(alice.every((h) => h.text.includes('apple'))).toBe(true);
+    expect(alice.some((h) => h.text.includes('banana'))).toBe(false);
+  });
+
+  it('removePage는 userId 범위로만 제거한다', async () => {
+    await store.indexPage({
+      userId: 'alice', slug: 'k', title: 'A', category: 'c', sources: [], body: 'keepme alpha',
+    });
+    await store.indexPage({
+      userId: 'bob', slug: 'k', title: 'B', category: 'c', sources: [], body: 'keepme beta',
+    });
+    await store.removePage('k', 'alice');
+    const bob = await store.search('keepme', 5, 'bob');
+    expect(bob.some((h) => h.text.includes('beta'))).toBe(true);
+    const alice = await store.search('keepme', 5, 'alice');
+    expect(alice.some((h) => h.text.includes('alpha'))).toBe(false);
+  });
+
+  it('userId 미지정 색인·검색은 DEFAULT_USER로 동작한다(하위호환)', async () => {
+    await store.indexPage({
+      slug: 'legacy', title: 'L', category: 'c', sources: [], body: 'legacy default user content',
+    });
+    const hits = await store.search('legacy content'); // userId 생략
+    expect(hits.length).toBeGreaterThan(0);
   });
 
   it('검색 score가 유한수이고 내림차순이다', async () => {
