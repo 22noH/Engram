@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import * as path from 'path';
 
+// 단일사용자 기본 네임스페이스(설계 §15 wiki/pages/{userId}). 멀티유저는 userId를 명시.
+export const DEFAULT_USER = 'default';
+
 // 데이터 디렉토리(runtime/) 경로 해소기.
 // 설계 §3 "코드/데이터 분리": 위키·RAG·상태가 모두 이 아래에 위치한다.
 // 우선순위: 생성자 인자 > 환경변수(ENGRAM_DATA_DIR) > <cwd>/runtime.
@@ -27,9 +30,14 @@ export class PathResolver {
     return path.join(this.dataDir, 'wiki');
   }
 
-  // 위키 페이지(.md) 디렉토리.
-  getWikiPagesDir(): string {
-    return path.join(this.getWikiDir(), 'pages');
+  // 위키 페이지(.md) 디렉토리. 멀티유저 네임스페이스 wiki/pages/{userId}/ (설계 §15).
+  getWikiPagesDir(userId: string = DEFAULT_USER): string {
+    return path.join(this.getWikiDir(), 'pages', userId);
+  }
+
+  // 구조화 로그(pino) 디렉토리.
+  getLogsDir(): string {
+    return path.join(this.dataDir, 'logs');
   }
 
   // RAG 벡터 저장소(LanceDB) 루트.
