@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { PathResolver } from '../../pal/path-resolver';
+import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
 import { WikiGit } from './wiki-git';
 
@@ -58,6 +58,20 @@ describe('WikiEngine CRUD', () => {
     const all = await engine.listPages();
     expect(all.map((p) => p.slug).sort()).toEqual(['a', 'b']);
   });
+
+  it('다른 userId의 같은 slug를 파일로 격리한다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'note', title: 'A', category: 'c', body: 'alice body' }, 'alice');
+    await engine.createPage({ slug: 'note', title: 'B', category: 'c', body: 'bob body' }, 'bob');
+    expect((await engine.getPage('note', 'alice'))?.body).toBe('alice body');
+    expect((await engine.getPage('note', 'bob'))?.body).toBe('bob body');
+  });
+
+  it('userId 미지정은 DEFAULT_USER로 동작한다(하위호환)', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'legacy', title: 'L', category: 'c', body: 'x' });
+    expect((await engine.getPage('legacy', DEFAULT_USER))?.slug).toBe('legacy');
+  });
 });
 
 describe('WikiEngine 상태(draft/published)', () => {
@@ -100,9 +114,9 @@ import { PageIndexer, IndexablePage } from '../rag/rag.types';
 
 class SpyIndexer implements PageIndexer {
   indexed: IndexablePage[] = [];
-  removed: string[] = [];
+  removed: Array<{ slug: string; userId?: string }> = [];
   async indexPage(p: IndexablePage) { this.indexed.push(p); }
-  async removePage(slug: string) { this.removed.push(slug); }
+  async removePage(slug: string, userId?: string) { this.removed.push({ slug, userId }); }
   async reindexAll(pages: IndexablePage[]) { for (const p of pages) this.indexed.push(p); }
 }
 
@@ -135,5 +149,19 @@ describe('WikiEngine + PAGE_INDEXER', () => {
   it('published로 직접 생성하면 색인한다', async () => {
     await engine.createPage({ slug: 'c', title: 'C', category: 'c', body: '본문', status: 'published' });
     expect(spy.indexed.map((p) => p.slug)).toContain('c');
+  });
+
+  it('unpublishPage는 published를 draft로 내리고 색인에서 제거한다', async () => {
+    await engine.createPage({ slug: 'u', title: 'U', category: 'c', body: 'b', status: 'published' });
+    const result = await engine.unpublishPage('u');
+    expect(result.frontmatter.status).toBe('draft');
+    expect(spy.removed).toContainEqual({ slug: 'u', userId: DEFAULT_USER });
+  });
+
+  it('unpublishPage는 이미 draft면 멱등 no-op(제거 호출 안 함)', async () => {
+    await engine.createPage({ slug: 'd2', title: 'D', category: 'c', body: 'b' }); // draft
+    const result = await engine.unpublishPage('d2');
+    expect(result.frontmatter.status).toBe('draft');
+    expect(spy.removed).toHaveLength(0);
   });
 });
