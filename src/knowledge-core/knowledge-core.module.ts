@@ -7,12 +7,15 @@ import { TransformersEmbedder } from './rag/transformers-embedder';
 import { RagStore } from './rag/rag-store';
 import { WikiWatcher } from './rag/wiki-watcher';
 import { PAGE_INDEXER } from './rag/rag.types';
+import { KeyedLock } from './keyed-lock';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
   providers: [
     { provide: PathResolver, useFactory: () => new PathResolver() },
     WikiGit,
+    // 페이지별 쓰기 직렬화 락 — WikiEngine에 주입된다(§10.3).
+    KeyedLock,
     { provide: EMBEDDER, useClass: TransformersEmbedder },
     RagStore,
     { provide: PAGE_INDEXER, useExisting: RagStore },

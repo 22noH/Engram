@@ -4,6 +4,7 @@ import * as path from 'path';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
 import { WikiGit } from './wiki-git';
+import { KeyedLock } from '../keyed-lock';
 
 const tmpDirs: string[] = [];
 
@@ -14,7 +15,8 @@ async function makeEngine(): Promise<WikiEngine> {
   const paths = new PathResolver(dir);
   const git = new WikiGit(paths);
   await git.ensureRepo();
-  return new WikiEngine(paths, git);
+  // KeyedLock을 주입해 페이지별 쓰기 직렬화를 활성화한다.
+  return new WikiEngine(paths, git, new KeyedLock());
 }
 
 describe('WikiEngine CRUD', () => {
@@ -71,6 +73,20 @@ describe('WikiEngine CRUD', () => {
     const engine = await makeEngine();
     await engine.createPage({ slug: 'legacy', title: 'L', category: 'c', body: 'x' });
     expect((await engine.getPage('legacy', DEFAULT_USER))?.slug).toBe('legacy');
+  });
+
+  it('같은 (userId,slug) 동시 update는 직렬화되어 lost-update가 없다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'race', title: 'R', category: 'c', body: 'start' });
+    // 서로 다른 필드를 동시에 patch. 락이 read-modify-write를 직렬화하면 두 갱신이 모두 보존된다.
+    // (락 없으면 둘 다 'start'/'R'를 읽어 마지막 writer가 다른 쪽 갱신을 덮어씀 = lost-update.)
+    await Promise.all([
+      engine.updatePage('race', { body: 'first' }),
+      engine.updatePage('race', { title: 'Second' }),
+    ]);
+    const page = await engine.getPage('race');
+    expect(page!.body).toBe('first'); // 두 갱신이 모두 살아남음(실행 순서 무관)
+    expect(page!.frontmatter.title).toBe('Second');
   });
 });
 
@@ -131,7 +147,8 @@ describe('WikiEngine + PAGE_INDEXER', () => {
     const git = new WikiGit(paths);
     await git.ensureRepo();
     spy = new SpyIndexer();
-    engine = new WikiEngine(paths, git, spy);
+    // KeyedLock을 세 번째 인자로, PageIndexer(spy)를 네 번째 인자로 전달한다.
+    engine = new WikiEngine(paths, git, new KeyedLock(), spy);
   });
   afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
 

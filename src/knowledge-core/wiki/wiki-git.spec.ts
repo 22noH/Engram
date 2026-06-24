@@ -5,6 +5,7 @@ import simpleGit from 'simple-git';
 import { PathResolver } from '../../pal/path-resolver';
 import { WikiEngine } from './wiki-engine';
 import { WikiGit } from './wiki-git';
+import { KeyedLock } from '../keyed-lock';
 
 const tmpDirs: string[] = [];
 
@@ -14,7 +15,8 @@ async function setup(): Promise<{ engine: WikiEngine; git: WikiGit; paths: PathR
   const paths = new PathResolver(dir);
   const git = new WikiGit(paths);
   await git.ensureRepo();
-  const engine = new WikiEngine(paths, git);
+  // KeyedLock을 주입해 생성자 계약을 충족한다.
+  const engine = new WikiEngine(paths, git, new KeyedLock());
   return { engine, git, paths };
 }
 

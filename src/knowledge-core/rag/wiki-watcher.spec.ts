@@ -7,6 +7,7 @@ import { RagStore } from './rag-store';
 import { FakeEmbedder } from './fake-embedder';
 import { WikiGit } from '../wiki/wiki-git';
 import { WikiEngine } from '../wiki/wiki-engine';
+import { KeyedLock } from '../keyed-lock';
 
 // 폴링 헬퍼: 조건이 참이 될 때까지 intervalMs 간격으로 최대 timeoutMs 동안 대기한다.
 async function pollUntil(
@@ -35,7 +36,8 @@ describe('WikiWatcher.handleChange', () => {
     await git.ensureRepo();
     store = new RagStore(paths, new FakeEmbedder());
     await store.init();
-    engine = new WikiEngine(paths, git, store);
+    // KeyedLock을 세 번째 인자로, RagStore(store)를 네 번째 인자로 전달한다.
+    engine = new WikiEngine(paths, git, new KeyedLock(), store);
     watcher = new WikiWatcher(paths, store, engine);
   });
   afterEach(async () => {
@@ -73,7 +75,8 @@ describe('WikiWatcher.start() 통합', () => {
     await git.ensureRepo();
     store = new RagStore(paths, new FakeEmbedder());
     await store.init();
-    engine = new WikiEngine(paths, git, store);
+    // KeyedLock을 세 번째 인자로, RagStore(store)를 네 번째 인자로 전달한다.
+    engine = new WikiEngine(paths, git, new KeyedLock(), store);
     watcher = new WikiWatcher(paths, store, engine);
   });
   afterEach(async () => {

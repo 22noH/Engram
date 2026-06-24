@@ -6,6 +6,7 @@ import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { serializePage, parsePage } from './page-serializer';
 import { WikiPage, CreatePageInput, UpdatePageInput, PageStatus } from './page.types';
 import { WikiGit } from './wiki-git';
+import { KeyedLock } from '../keyed-lock';
 
 // 위키 페이지의 버전관리형 저장소(설계 §5.1).
 // .md 파일 CRUD + 출처/상태 메타데이터를 다룬다. (git 이력은 WikiGit가 담당 — Task 6)
@@ -15,6 +16,8 @@ export class WikiEngine {
   constructor(
     private readonly paths: PathResolver,
     private readonly git: WikiGit,
+    // 페이지별 쓰기 직렬화 락(§10.3). 같은 페이지는 순차, 다른 페이지는 병렬.
+    private readonly lock: KeyedLock,
     @Optional() @Inject(PAGE_INDEXER) private readonly indexer?: PageIndexer,
   ) {}
 
@@ -44,27 +47,30 @@ export class WikiEngine {
   // 페이지 생성. 기본 상태는 draft(검증·승인 전 초안, §6).
   // 통째 교체 금지 원칙에 따라 이미 존재하면 덮어쓰지 않고 실패시킨다('wx').
   // userId 기본값 DEFAULT_USER — 기존 호출자 하위호환 유지.
+  // 본문 전체(파일 쓰기·커밋·색인)를 락으로 감싸 동시 create 충돌을 직렬화한다.
   async createPage(input: CreatePageInput, userId: string = DEFAULT_USER): Promise<WikiPage> {
-    const now = new Date().toISOString();
-    const page: WikiPage = {
-      slug: input.slug,
-      frontmatter: {
-        title: input.title,
-        category: input.category,
-        status: input.status ?? 'draft',
-        sources: input.sources ?? [],
-        created: now,
-        updated: now,
-      },
-      body: input.body,
-    };
-    await fs.mkdir(this.paths.getWikiPagesDir(userId), { recursive: true });
-    await fs.writeFile(this.pagePath(input.slug, userId), serializePage(page), { flag: 'wx' });
-    await this.git.commitAll(`create ${userId}/${input.slug}`, this.relPath(input.slug, userId));
-    if (page.frontmatter.status === 'published') {
-      await this.indexer?.indexPage(this.toIndexable(page, userId));
-    }
-    return page;
+    return this.lock.run(`${userId}/${input.slug}`, async () => {
+      const now = new Date().toISOString();
+      const page: WikiPage = {
+        slug: input.slug,
+        frontmatter: {
+          title: input.title,
+          category: input.category,
+          status: input.status ?? 'draft',
+          sources: input.sources ?? [],
+          created: now,
+          updated: now,
+        },
+        body: input.body,
+      };
+      await fs.mkdir(this.paths.getWikiPagesDir(userId), { recursive: true });
+      await fs.writeFile(this.pagePath(input.slug, userId), serializePage(page), { flag: 'wx' });
+      await this.git.commitAll(`create ${userId}/${input.slug}`, this.relPath(input.slug, userId));
+      if (page.frontmatter.status === 'published') {
+        await this.indexer?.indexPage(this.toIndexable(page, userId));
+      }
+      return page;
+    });
   }
 
   // 페이지 읽기. 없으면 null.
@@ -81,26 +87,29 @@ export class WikiEngine {
 
   // 페이지 수정. created는 보존하고 updated만 갱신한다.
   // userId 기본값 DEFAULT_USER — 기존 호출자 하위호환 유지.
+  // read-modify-write 전체를 락으로 감싸 동시 수정에 의한 lost-update를 방지한다.
   async updatePage(slug: string, patch: UpdatePageInput, userId: string = DEFAULT_USER): Promise<WikiPage> {
-    const existing = await this.getPage(slug, userId);
-    if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
-    const updated: WikiPage = {
-      slug,
-      frontmatter: {
-        ...existing.frontmatter,
-        title: patch.title ?? existing.frontmatter.title,
-        category: patch.category ?? existing.frontmatter.category,
-        sources: patch.sources ?? existing.frontmatter.sources,
-        updated: new Date().toISOString(),
-      },
-      body: patch.body ?? existing.body,
-    };
-    await fs.writeFile(this.pagePath(slug, userId), serializePage(updated));
-    await this.git.commitAll(`update ${userId}/${slug}`, this.relPath(slug, userId));
-    if (updated.frontmatter.status === 'published') {
-      await this.indexer?.indexPage(this.toIndexable(updated, userId));
-    }
-    return updated;
+    return this.lock.run(`${userId}/${slug}`, async () => {
+      const existing = await this.getPage(slug, userId);
+      if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
+      const updated: WikiPage = {
+        slug,
+        frontmatter: {
+          ...existing.frontmatter,
+          title: patch.title ?? existing.frontmatter.title,
+          category: patch.category ?? existing.frontmatter.category,
+          sources: patch.sources ?? existing.frontmatter.sources,
+          updated: new Date().toISOString(),
+        },
+        body: patch.body ?? existing.body,
+      };
+      await fs.writeFile(this.pagePath(slug, userId), serializePage(updated));
+      await this.git.commitAll(`update ${userId}/${slug}`, this.relPath(slug, userId));
+      if (updated.frontmatter.status === 'published') {
+        await this.indexer?.indexPage(this.toIndexable(updated, userId));
+      }
+      return updated;
+    });
   }
 
   // 페이지 목록. status로 선택 필터링.
@@ -130,42 +139,48 @@ export class WikiEngine {
 
   // draft → published 전환(승인 게이트 통과 시, §6 반영 지점).
   // userId 기본값 DEFAULT_USER — 기존 호출자 하위호환 유지.
+  // read-modify-write 전체를 락으로 감싸 상태 전환 원자성을 보장한다.
   async publishPage(slug: string, userId: string = DEFAULT_USER): Promise<WikiPage> {
-    const existing = await this.getPage(slug, userId);
-    if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
-    const published: WikiPage = {
-      ...existing,
-      frontmatter: {
-        ...existing.frontmatter,
-        status: 'published',
-        updated: new Date().toISOString(),
-      },
-    };
-    await fs.writeFile(this.pagePath(slug, userId), serializePage(published));
-    await this.git.commitAll(`publish ${userId}/${slug}`, this.relPath(slug, userId));
-    await this.indexer?.indexPage(this.toIndexable(published, userId));
-    return published;
+    return this.lock.run(`${userId}/${slug}`, async () => {
+      const existing = await this.getPage(slug, userId);
+      if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
+      const published: WikiPage = {
+        ...existing,
+        frontmatter: {
+          ...existing.frontmatter,
+          status: 'published',
+          updated: new Date().toISOString(),
+        },
+      };
+      await fs.writeFile(this.pagePath(slug, userId), serializePage(published));
+      await this.git.commitAll(`publish ${userId}/${slug}`, this.relPath(slug, userId));
+      await this.indexer?.indexPage(this.toIndexable(published, userId));
+      return published;
+    });
   }
 
   // published → draft 강등(공개 취소). publishPage 대칭.
   // 색인에서 제거한다(§5.2 stale 방지). 이미 draft면 멱등 no-op.
   // userId 기본값 DEFAULT_USER — 기존 호출자 하위호환 유지.
+  // early-return 포함 본문 전체를 락으로 감싸 read-modify-write 원자성을 보장한다.
   async unpublishPage(slug: string, userId: string = DEFAULT_USER): Promise<WikiPage> {
-    const existing = await this.getPage(slug, userId);
-    if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
-    // 이미 draft면 색인 제거 없이 현재 상태 그대로 반환(멱등).
-    if (existing.frontmatter.status === 'draft') return existing;
-    const draft: WikiPage = {
-      ...existing,
-      frontmatter: {
-        ...existing.frontmatter,
-        status: 'draft',
-        updated: new Date().toISOString(),
-      },
-    };
-    await fs.writeFile(this.pagePath(slug, userId), serializePage(draft));
-    await this.git.commitAll(`unpublish ${userId}/${slug}`, this.relPath(slug, userId));
-    await this.indexer?.removePage(slug, userId);
-    return draft;
+    return this.lock.run(`${userId}/${slug}`, async () => {
+      const existing = await this.getPage(slug, userId);
+      if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
+      // 이미 draft면 색인 제거 없이 현재 상태 그대로 반환(멱등).
+      if (existing.frontmatter.status === 'draft') return existing;
+      const draft: WikiPage = {
+        ...existing,
+        frontmatter: {
+          ...existing.frontmatter,
+          status: 'draft',
+          updated: new Date().toISOString(),
+        },
+      };
+      await fs.writeFile(this.pagePath(slug, userId), serializePage(draft));
+      await this.git.commitAll(`unpublish ${userId}/${slug}`, this.relPath(slug, userId));
+      await this.indexer?.removePage(slug, userId);
+      return draft;
+    });
   }
 }
