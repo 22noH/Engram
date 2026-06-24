@@ -7,6 +7,7 @@ import { WikiEngine } from './wiki/wiki-engine';
 import { RagStore } from './rag/rag-store';
 import { EMBEDDER } from './rag/embedder.port';
 import { FakeEmbedder } from './rag/fake-embedder';
+import { CachingEmbedder } from './rag/caching-embedder';
 import { PathResolver } from '../pal/path-resolver';
 
 describe('KnowledgeCoreModule (integration)', () => {
@@ -17,6 +18,16 @@ describe('KnowledgeCoreModule (integration)', () => {
   });
   afterEach(async () => {
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  // EMBEDDER override 없이 compile()만 — .init() 미호출이라 onModuleInit·실모델 로드가 일어나지 않음.
+  it('EMBEDDER는 CachingEmbedder로 래핑된다', async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [KnowledgeCoreModule] })
+      .overrideProvider(PathResolver).useValue(new PathResolver(dir))
+      .compile(); // .init() 호출 안 함 → onModuleInit 미실행 → 실모델 로드 없음
+    const embedder = moduleRef.get(EMBEDDER);
+    expect(embedder).toBeInstanceOf(CachingEmbedder);
+    await moduleRef.close();
   });
 
   it('publish한 페이지를 RagStore에서 검색할 수 있다', async () => {
