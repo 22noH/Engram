@@ -15,7 +15,7 @@ describe('PinoLogger', () => {
     tmps.push(tmp);
     const logger = new PinoLogger(new PathResolver(tmp));
     logger.log('hello-engram', 'TestCtx');
-    await new Promise((r) => setTimeout(r, 30)); // 디스크 flush 여유
+    // sync:true 목적지이므로 log() 반환 시점에 이미 디스크 기록 완료(sleep 불필요).
     const content = await fs.readFile(
       path.join(tmp, 'logs', 'engram.log'),
       'utf8',
