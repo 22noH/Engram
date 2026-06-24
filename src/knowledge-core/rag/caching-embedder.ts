@@ -20,21 +20,26 @@ export class CachingEmbedder implements IEmbedder {
   }
 
   async embed(texts: string[]): Promise<number[][]> {
-    // 캐시 미스만 모아 한 번에 위임(배치 유지) 후 원래 순서로 재조립한다.
+    // 캐시 적중은 그대로 채우고, 미스는 중복 제거해 unique만 한 번씩 위임한다(배치 내 중복 재임베딩 방지).
     const result: (number[] | undefined)[] = texts.map((t) => this.cache.get(t));
-    const missIdx: number[] = [];
-    const missTexts: string[] = [];
+    const uniqueMisses: string[] = [];
+    const seen = new Set<string>();
     result.forEach((v, i) => {
-      if (v === undefined) {
-        missIdx.push(i);
-        missTexts.push(texts[i]);
+      if (v === undefined && !seen.has(texts[i])) {
+        seen.add(texts[i]);
+        uniqueMisses.push(texts[i]);
       }
     });
-    if (missTexts.length > 0) {
-      const embedded = await this.inner.embed(missTexts);
-      embedded.forEach((vec, j) => {
-        this.cache.set(texts[missIdx[j]], vec);
-        result[missIdx[j]] = vec;
+    if (uniqueMisses.length > 0) {
+      const embedded = await this.inner.embed(uniqueMisses);
+      // embedded 배열에서 직접 매핑한다(작은 max로 축출돼도 안전 — 캐시 재조회 금지).
+      const byText = new Map<string, number[]>();
+      uniqueMisses.forEach((t, j) => {
+        byText.set(t, embedded[j]);
+        this.cache.set(t, embedded[j]);
+      });
+      result.forEach((v, i) => {
+        if (v === undefined) result[i] = byText.get(texts[i])!;
       });
     }
     return result as number[][];

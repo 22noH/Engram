@@ -29,6 +29,16 @@ describe('CachingEmbedder', () => {
     expect(out[0]).toEqual(out[2]);
   });
 
+  it('한 번의 호출에서 중복 미스를 한 번만 임베딩한다', async () => {
+    const inner = new FakeEmbedder();
+    const spy = jest.spyOn(inner, 'embed');
+    const c = new CachingEmbedder(inner);
+    const out = await c.embed(['x', 'x']); // 둘 다 콜드 미스
+    expect(spy).toHaveBeenCalledWith(['x']); // 중복 제거 → 'x' 한 번만 위임
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual(out[1]);
+  });
+
   it('max 초과 시 가장 오래된 키를 축출한다', async () => {
     const inner = new FakeEmbedder();
     const spy = jest.spyOn(inner, 'embed');
