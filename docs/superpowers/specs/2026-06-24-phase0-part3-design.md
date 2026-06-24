@@ -46,9 +46,9 @@
 ### 3.1 멀티유저 네임스페이싱 (먼저 — 정체성 변경)
 
 - **`PathResolver`**: `DEFAULT_USER = 'default'` 상수 export. `getWikiPagesDir(userId = DEFAULT_USER)` → `wiki/pages/{userId}`. `getLogsDir()` 신설 → `runtime/logs` (pino용). git 루트(`getWikiDir`)는 불변 = `wiki/` (단일 repo).
-- **`WikiEngine`**: 모든 공개 메서드 첫 인자에 `userId = DEFAULT_USER` 추가 — `createPage(userId, input)`, `getPage(userId, slug)`, `updatePage(userId, slug, patch)`, `listPages(userId, filter?)`, `publishPage(userId, slug)`, `unpublishPage(userId, slug)`. `pagePath`는 `getWikiPagesDir(userId)` 기반.
+- **`WikiEngine`**: 모든 공개 메서드에 `userId`를 **후행 옵셔널**(`= DEFAULT_USER`)로 추가 — `createPage(input, userId?)`, `getPage(slug, userId?)`, `updatePage(slug, patch, userId?)`, `listPages(filter?, userId?)`, `publishPage(slug, userId?)`, `unpublishPage(slug, userId?)`. (선행 기본값 인자는 TS에서 건너뛸 수 없어 기존 호출부가 다 깨지므로 후행. 정체성은 개념상 `(userId, slug)`.) `pagePath`는 `getWikiPagesDir(userId)` 기반.
 - **git 경로-스코프**: `commitAll(message)` → `commitAll(message, relPath)`. `relPath = pages/{userId}/{slug}.md`(wiki 루트 기준 상대). `add('.')` → `add(relPath)`. 삭제도 `add`가 스테이징(tracked 파일 삭제 기록).
-- **`rag.types`**: `IndexablePage`에 `userId` 추가. `PageIndexer.removePage(slug)` → `removePage(userId, slug)`. `SearchResult`에 `userId` 추가(선택적 노출).
+- **`rag.types`**: `IndexablePage`에 `userId?` 추가(옵셔널 → 생산자 무수정, RagStore가 `?? DEFAULT_USER`). `PageIndexer.removePage(slug)` → `removePage(slug, userId?)`. `SearchResult`에 `userId` 추가(선택적 노출).
 - **`RagStore`**: schema에 `userId: Utf8` 컬럼. chunk id = `${userId}/${slug}#${i}`. 멱등 delete 술어 = `userId = ? AND slug = ?`. `search(query, limit, userId = DEFAULT_USER)` — `.where(userId = ?)` 프리필터로 사용자 격리(벡터·FTS 양쪽 leg에 적용되는지 구현 시 확인). **스키마 마이그레이션**: RAG는 wiki에서 파생·시작 시 reindex되는 disposable store → init에서 기존 테이블에 `userId` 컬럼 없으면 drop+recreate(데이터 손실 없음).
 - **`WikiWatcher`**: 감시 디렉토리 = `getWikiPagesDir(DEFAULT_USER)`의 **부모**(`wiki/pages`) 재귀 감시. 파일 경로에서 `{userId}/{slug}` 파싱(`path.relative(pagesRoot, file)` → split). `handleChange(userId, slug, event)`. RAG 호출에 userId 전달.
 
@@ -62,7 +62,7 @@
 
 ### 3.3 unpublish 주경로
 
-- **`WikiEngine.unpublishPage(userId, slug)`**: `publishPage` 대칭. getPage → 없으면 에러(`publishPage`와 동일); 이미 draft면 멱등 no-op으로 기존 페이지 반환; published면 `status='draft'` + `updated` 갱신 → writeFile → `commitAll('unpublish ...', relPath)` → `indexer?.removePage(userId, slug)`. 락으로 감쌈.
+- **`WikiEngine.unpublishPage(userId, slug)`**: `publishPage` 대칭. getPage → 없으면 에러(`publishPage`와 동일); 이미 draft면 멱등 no-op으로 기존 페이지 반환; published면 `status='draft'` + `updated` 갱신 → writeFile → `commitAll('unpublish ...', relPath)` → `indexer?.removePage(slug, userId)`. 락으로 감쌈.
 - `UpdatePageInput`에 `status` 추가하지 **않음**(상태전환은 명시적 메서드로만).
 
 ### 3.4 FTS optimize()
