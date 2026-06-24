@@ -2,9 +2,11 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import chokidar, { FSWatcher } from 'chokidar';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { PathResolver } from '../../pal/path-resolver';
+import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { RagStore } from './rag-store';
 import { WikiEngine } from '../wiki/wiki-engine';
+import { KeyedLock } from '../keyed-lock';
+import { PinoLogger } from '../../pal/logger';
 
 const DEBOUNCE_MS = 300; // 윈도우 파일 잠금·연속 쓰기 흡수
 
@@ -18,22 +20,22 @@ export class WikiWatcher implements OnModuleDestroy {
     private readonly paths: PathResolver,
     private readonly rag: RagStore,
     private readonly wiki: WikiEngine,
+    private readonly lock: KeyedLock,
+    private readonly logger: PinoLogger,
   ) {}
 
   async start(): Promise<void> {
-    const dir = this.paths.getWikiPagesDir();
-    // chokidar v4에서 글로브 지원이 제거됐으므로 디렉토리를 감시하고 확장자로 필터링한다.
-    // 빈 위키 대비: 디렉토리가 없으면 워처가 붙을 수 없으므로 미리 생성한다.
-    await fs.mkdir(dir, { recursive: true });
-    this.watcher = chokidar.watch(dir, {
+    // wiki/pages 전체(모든 userId 하위)를 재귀 감시하고 .md만 필터.
+    const root = path.dirname(this.paths.getWikiPagesDir(DEFAULT_USER)); // = wiki/pages
+    await fs.mkdir(root, { recursive: true });
+    this.watcher = chokidar.watch(root, {
       ignoreInitial: true,
       ignored: (p, stats) => !!stats?.isFile() && !p.endsWith('.md'),
     });
     this.watcher
-      // 'add'(새 파일)·'change'(수정)는 모두 재색인으로 취급.
-      .on('add', (f) => this.debounce(this.slugOf(f), 'change'))
-      .on('change', (f) => this.debounce(this.slugOf(f), 'change'))
-      .on('unlink', (f) => this.debounce(this.slugOf(f), 'unlink'));
+      .on('add', (f) => this.schedule(f, 'change'))
+      .on('change', (f) => this.schedule(f, 'change'))
+      .on('unlink', (f) => this.schedule(f, 'unlink'));
   }
 
   async stop(): Promise<void> {
@@ -42,46 +44,57 @@ export class WikiWatcher implements OnModuleDestroy {
     await this.watcher?.close();
   }
 
-  // 모듈 파괴 시 워처를 정리한다(jest 핸들 누수·좀비 워처 방지). NestJS app.close() 시 호출됨.
+  // 모듈 파괴 시 워처를 정리한다(jest 핸들 누수·좀비 워처 방지).
   async onModuleDestroy(): Promise<void> {
     await this.stop();
   }
 
-  private slugOf(file: string): string {
-    return path.basename(file, '.md');
+  // wiki/pages 기준 상대경로에서 {userId}/{slug}를 파싱한다. 형식이 아니면 null.
+  private parseFile(file: string): { userId: string; slug: string } | null {
+    const root = path.dirname(this.paths.getWikiPagesDir(DEFAULT_USER));
+    const rel = path.relative(root, file);
+    const parts = rel.split(path.sep);
+    if (parts.length !== 2 || !parts[1].endsWith('.md')) return null; // {userId}/{slug}.md만
+    return { userId: parts[0], slug: parts[1].slice(0, -3) };
   }
 
-  private debounce(slug: string, event: 'change' | 'unlink'): void {
-    const prev = this.timers.get(slug);
+  private schedule(file: string, event: 'change' | 'unlink'): void {
+    const parsed = this.parseFile(file);
+    if (!parsed) return;
+    const key = `${parsed.userId}/${parsed.slug}`;
+    const prev = this.timers.get(key);
     if (prev) clearTimeout(prev);
     this.timers.set(
-      slug,
+      key,
       setTimeout(() => {
-        this.timers.delete(slug);
-        void this.handleChange(slug, event).catch((err) =>
-          console.error(`[WikiWatcher] 재색인 실패 slug=${slug}:`, err),
+        this.timers.delete(key);
+        void this.handleChange(parsed.userId, parsed.slug, event).catch((err) =>
+          this.logger.error(`재색인 실패 ${key}`, String(err), 'WikiWatcher'),
         );
       }, DEBOUNCE_MS),
     );
   }
 
-  // 현재 위키 상태를 보고 색인/제거를 결정한다(published만 색인 대상).
-  async handleChange(slug: string, event: 'change' | 'unlink'): Promise<void> {
-    if (event === 'unlink') {
-      await this.rag.removePage(slug);
-      return;
-    }
-    const page = await this.wiki.getPage(slug);
-    if (page && page.frontmatter.status === 'published') {
-      await this.rag.indexPage({
-        slug: page.slug,
-        title: page.frontmatter.title,
-        category: page.frontmatter.category,
-        sources: page.frontmatter.sources,
-        body: page.body,
-      });
-    } else {
-      await this.rag.removePage(slug); // draft로 내려갔거나 사라짐 → 색인에서 빼기
-    }
+  // 같은 페이지 키로 락을 잡아 WikiEngine 동기색인과 조율한다(멱등 — 중복 색인 무해).
+  async handleChange(userId: string, slug: string, event: 'change' | 'unlink'): Promise<void> {
+    await this.lock.run(`${userId}/${slug}`, async () => {
+      if (event === 'unlink') {
+        await this.rag.removePage(slug, userId);
+        return;
+      }
+      const page = await this.wiki.getPage(slug, userId);
+      if (page && page.frontmatter.status === 'published') {
+        await this.rag.indexPage({
+          userId,
+          slug: page.slug,
+          title: page.frontmatter.title,
+          category: page.frontmatter.category,
+          sources: page.frontmatter.sources,
+          body: page.body,
+        });
+      } else {
+        await this.rag.removePage(slug, userId); // draft로 내려갔거나 사라짐 → 색인 제거
+      }
+    });
   }
 }

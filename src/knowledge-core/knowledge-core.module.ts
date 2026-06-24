@@ -8,14 +8,17 @@ import { RagStore } from './rag/rag-store';
 import { WikiWatcher } from './rag/wiki-watcher';
 import { PAGE_INDEXER } from './rag/rag.types';
 import { KeyedLock } from './keyed-lock';
+import { PinoLogger } from '../pal/logger';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
   providers: [
     { provide: PathResolver, useFactory: () => new PathResolver() },
     WikiGit,
-    // 페이지별 쓰기 직렬화 락 — WikiEngine에 주입된다(§10.3).
+    // 페이지별 쓰기 직렬화 락 — WikiEngine·WikiWatcher 공유(§10.3).
     KeyedLock,
+    // 구조화 로깅(pino) — WikiWatcher에 주입된다.
+    PinoLogger,
     { provide: EMBEDDER, useClass: TransformersEmbedder },
     RagStore,
     { provide: PAGE_INDEXER, useExisting: RagStore },
