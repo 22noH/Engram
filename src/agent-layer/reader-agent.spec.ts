@@ -47,9 +47,20 @@ describe('ReaderAgent', () => {
     const rag = stubRag([{ slug: 'a', title: 'A페이지', text: 'b', score: 1 }]);
     const reader = new ReaderAgent(rag, new FakeBrain({ text: '스트림답', costUsd: 0, isError: false }), logger);
     const chunks: string[] = [];
-    await reader.handle({ text: '질문', userId: 'default' }, (t) => chunks.push(t));
+    const out = await reader.handle({ text: '질문', userId: 'default' }, (t) => chunks.push(t));
     const joined = chunks.join('');
     expect(joined).toContain('스트림답');
     expect(joined).toContain('출처:');
+    expect(out).toBe(joined);
+  });
+
+  it('isError + onChunk일 때 반환값 == 스트리밍 청크의 합', async () => {
+    const rag = stubRag([{ slug: 'a', title: 'A페이지', text: 'b', score: 1 }]);
+    const reader = new ReaderAgent(rag, new FakeBrain({ text: '', costUsd: 0, isError: true }), logger);
+    const chunks: string[] = [];
+    const out = await reader.handle({ text: '질문', userId: 'default' }, (t) => chunks.push(t));
+    const joined = chunks.join('');
+    expect(out).toBe(joined);
+    expect(out).toContain('답변 생성 실패');
   });
 });

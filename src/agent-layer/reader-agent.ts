@@ -33,7 +33,7 @@ export class ReaderAgent {
       const sources = hits.length
         ? `\n\n───\n출처: ${hits.map((h, i) => `[${i + 1}] ${h.title} (${h.slug})`).join(' · ')}`
         : '';
-      emit(sources);
+      if (sources) emit(sources);
       return header + result.text + sources;
     } catch (err) {
       this.logger.error('ReaderAgent.handle 실패', String(err), 'ReaderAgent');
