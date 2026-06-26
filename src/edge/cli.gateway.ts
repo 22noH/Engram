@@ -12,6 +12,9 @@ export class CliGateway {
   async run(argv: string[]): Promise<void> {
     if (argv[0] === 'ask' && argv[1]) {
       await this.ask(argv.slice(1).join(' '));
+    } else if (argv[0] === 'digest') {
+      const s = await this.orchestrator.digest(DEFAULT_USER);
+      process.stdout.write(`다이제스트 완료: 추출 ${s.extracted} · 통과 ${s.gated} · 제안 ${s.proposed}건\n`);
     } else if (argv.length === 0) {
       await this.repl();
     } else {

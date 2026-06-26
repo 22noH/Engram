@@ -22,4 +22,11 @@ describe('CliGateway', () => {
     expect(orch.route).not.toHaveBeenCalled();
     expect(writes.join('')).toContain('사용법');
   });
+
+  it('digest 모드: orchestrator.digest를 호출하고 결과를 출력한다', async () => {
+    const orch = { route: jest.fn(), digest: jest.fn().mockResolvedValue({ extracted: 3, gated: 2, proposed: 1 }) } as any;
+    await new CliGateway(orch).run(['digest']);
+    expect(orch.digest).toHaveBeenCalled();
+    expect(writes.join('')).toContain('제안');
+  });
 });
