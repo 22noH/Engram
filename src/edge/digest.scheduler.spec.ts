@@ -1,4 +1,16 @@
-import { DigestScheduler } from './digest.scheduler';
+import { DigestScheduler, resolveCron } from './digest.scheduler';
+
+describe('resolveCron', () => {
+  it('5~6 필드 표현식은 그대로 쓴다', () => {
+    expect(resolveCron('0 3 * * *')).toBe('0 3 * * *');
+    expect(resolveCron('*/30 * * * * *')).toBe('*/30 * * * * *'); // 6필드(초 포함)
+  });
+  it('미설정·필드 수 불일치는 기본값으로 폴백한다', () => {
+    expect(resolveCron(undefined)).toBe('0 3 * * *');
+    expect(resolveCron('every day')).toBe('0 3 * * *'); // 2필드 — 사람 문구
+    expect(resolveCron('3am')).toBe('0 3 * * *');
+  });
+});
 
 it('tick은 orchestrator.digest를 호출한다', async () => {
   const orch = { digest: jest.fn().mockResolvedValue({ extracted: 0, gated: 0, proposed: 2 }) } as any;

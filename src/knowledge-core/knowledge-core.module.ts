@@ -13,6 +13,7 @@ import { PinoLogger } from '../pal/logger';
 import { ConversationStore } from './conversation-store';
 import { ImportanceGate } from './importance-gate';
 import { ProposalStore } from './proposal-store';
+import { DigestLock } from './digest-lock';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
@@ -38,8 +39,9 @@ import { ProposalStore } from './proposal-store';
     ConversationStore,
     { provide: ImportanceGate, useFactory: () => new ImportanceGate() },
     ProposalStore,
+    DigestLock,
   ],
-  exports: [WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore],
+  exports: [WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore, DigestLock],
 })
 export class KnowledgeCoreModule implements OnModuleInit {
   constructor(

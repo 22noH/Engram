@@ -16,4 +16,9 @@ describe('ImportanceGate', () => {
     const gate = new ImportanceGate({ ENGRAM_IMPORTANCE_THRESHOLD: 'abc' } as any);
     expect(gate.threshold).toBe(3);
   });
+  it('범위(1~5) 밖 숫자 env는 기본 3으로 폴백한다', () => {
+    expect(new ImportanceGate({ ENGRAM_IMPORTANCE_THRESHOLD: '6' } as any).threshold).toBe(3);
+    expect(new ImportanceGate({ ENGRAM_IMPORTANCE_THRESHOLD: '0' } as any).threshold).toBe(3);
+    expect(new ImportanceGate({ ENGRAM_IMPORTANCE_THRESHOLD: '-1' } as any).threshold).toBe(3);
+  });
 });

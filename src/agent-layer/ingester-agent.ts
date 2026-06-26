@@ -4,6 +4,7 @@ import { ImportanceGate, ScoredFact } from '../knowledge-core/importance-gate';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import { ProposalStore, ProposalOp } from '../knowledge-core/proposal-store';
 import { SearchResult } from '../knowledge-core/rag/rag.types';
+import { DigestLock } from '../knowledge-core/digest-lock';
 import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { PinoLogger } from '../pal/logger';
 import { DEFAULT_USER } from '../pal/path-resolver';
@@ -51,6 +52,7 @@ export class IngesterAgent {
     private readonly rag: RagStore,
     private readonly proposals: ProposalStore,
     private readonly logger: PinoLogger,
+    private readonly lock: DigestLock,
   ) {}
 
   async extractFacts(convText: string): Promise<ScoredFact[]> {
@@ -68,6 +70,11 @@ export class IngesterAgent {
   }
 
   async run(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
+    // 크로스프로세스 단일 라이터 보장: 수동 digest와 @Cron tick이 겹치면 건너뛴다(§11 쓰기 경합).
+    if (!(await this.lock.acquire(userId))) {
+      this.logger.log('다른 다이제스트가 진행 중 — 건너뜀', 'IngesterAgent');
+      return { extracted: 0, gated: 0, proposed: 0 };
+    }
     try {
       const cursor = await this.conversations.readCursor(userId);
       const recs = await this.conversations.since(userId, cursor);
@@ -106,6 +113,8 @@ export class IngesterAgent {
     } catch (err) {
       this.logger.error('IngesterAgent.run 실패', String(err), 'IngesterAgent');
       return { extracted: 0, gated: 0, proposed: 0 };
+    } finally {
+      await this.lock.release(userId);
     }
   }
 

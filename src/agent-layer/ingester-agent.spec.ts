@@ -2,7 +2,8 @@ import { IngesterAgent, parseJsonBlock } from './ingester-agent';
 import { FakeBrain } from '../brain/fake-brain';
 import { ImportanceGate } from '../knowledge-core/importance-gate';
 
-const noopLogger = { error: () => {} } as any;
+const noopLogger = { error: () => {}, log: () => {} } as any;
+const fakeLock = { acquire: async () => true, release: async () => {} } as any;
 
 class FakeConv {
   constructor(private recs: any[]) {}
@@ -37,18 +38,18 @@ describe('IngesterAgent.extractFacts', () => {
   ];
   it('writer 출력을 파싱하고 출처없는 항목을 버린다', async () => {
     const writer = new FakeBrain({ text: JSON.stringify(facts), costUsd: 0, isError: false });
-    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger);
+    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger, fakeLock);
     const out = await agent.extractFacts('대화');
     expect(out.map((f) => f.claim)).toEqual(['중요한 사실', '사소']); // 출처없음 제거, 중요도 필터는 run에서
   });
   it('파싱 실패 시 빈 배열 + 경고', async () => {
     const writer = new FakeBrain({ text: '망가진 출력', costUsd: 0, isError: false });
-    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger);
+    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger, fakeLock);
     expect(await agent.extractFacts('대화')).toEqual([]);
   });
   it('writer 오류(isError) 시 빈 배열', async () => {
     const writer = new FakeBrain({ text: '', costUsd: 0, isError: true });
-    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger);
+    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger, fakeLock);
     expect(await agent.extractFacts('대화')).toEqual([]);
   });
 });
@@ -64,7 +65,7 @@ describe('IngesterAgent.run', () => {
       verdict: 'create', targetSlug: 'jungyo', title: '중요', category: 'general', confidence: 0.9, reason: '신규',
     }), costUsd: 0, isError: false });
     const props = new CaptureProposals();
-    const agent = new IngesterAgent(conv as any, new ImportanceGate({} as any), writer, judge, new FakeRag() as any, props as any, noopLogger);
+    const agent = new IngesterAgent(conv as any, new ImportanceGate({} as any), writer, judge, new FakeRag() as any, props as any, noopLogger, fakeLock);
 
     const stats = await agent.run('default');
     expect(stats.extracted).toBe(2);
@@ -79,14 +80,14 @@ describe('IngesterAgent.run', () => {
     const writer = new FakeBrain({ text: JSON.stringify([{ claim: 'c', importance: 5, sourceQuote: 's' }]), costUsd: 0, isError: false });
     const judge = new FakeBrain({ text: JSON.stringify({ verdict: 'reject', confidence: 0.2, reason: '근거부족' }), costUsd: 0, isError: false });
     const props = new CaptureProposals();
-    const agent = new IngesterAgent(conv as any, new ImportanceGate({} as any), writer, judge, new FakeRag() as any, props as any, noopLogger);
+    const agent = new IngesterAgent(conv as any, new ImportanceGate({} as any), writer, judge, new FakeRag() as any, props as any, noopLogger, fakeLock);
     const stats = await agent.run('default');
     expect(stats.proposed).toBe(0);
     expect(props.items).toHaveLength(0);
   });
 
   it('대화 없으면 0건', async () => {
-    const agent = new IngesterAgent(new FakeConv([]) as any, new ImportanceGate({} as any), new FakeBrain() as any, new FakeBrain() as any, new FakeRag() as any, new CaptureProposals() as any, noopLogger);
+    const agent = new IngesterAgent(new FakeConv([]) as any, new ImportanceGate({} as any), new FakeBrain() as any, new FakeBrain() as any, new FakeRag() as any, new CaptureProposals() as any, noopLogger, fakeLock);
     expect(await agent.run('default')).toEqual({ extracted: 0, gated: 0, proposed: 0 });
   });
 
@@ -99,7 +100,7 @@ describe('IngesterAgent.run', () => {
     } as any;
     const writer = new FakeBrain({ text: JSON.stringify([{ claim: 'c', importance: 5, sourceQuote: 's' }]), costUsd: 0, isError: false });
     const throwingRag = { search: async () => { throw new Error('rag down'); } } as any;
-    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, new FakeBrain() as any, throwingRag, new CaptureProposals() as any, noopLogger);
+    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, new FakeBrain() as any, throwingRag, new CaptureProposals() as any, noopLogger, fakeLock);
     const stats = await agent.run('default');
     expect(stats.proposed).toBe(0);  // 실패한 사실은 건너뜀
     expect(cursorWritten).toBe(true); // §10.3: per-fact 격리 → 커서는 정상 전진
@@ -125,10 +126,20 @@ describe('IngesterAgent.run', () => {
     let n = 0;
     const flakyRag = { search: async () => { n++; if (n === 1) throw new Error('rag flake'); return []; } } as any;
     const props = new CaptureProposals();
-    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, judge, flakyRag, props as any, noopLogger);
+    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, judge, flakyRag, props as any, noopLogger, fakeLock);
     const stats = await agent.run('default');
     expect(stats.proposed).toBe(1);       // 첫 사실 드롭, 두 번째 사실 제안
     expect(cursorWritten).toBe(true);     // 커서 정상 전진
     expect(props.items).toHaveLength(1);  // 두 번째 사실만 enqueue됨
+  });
+
+  it('락 획득 실패(다른 다이제스트 진행 중) 시 처리하지 않고 건너뛴다', async () => {
+    const conv = new FakeConv([{ ts: '2026-06-26T01:00:00.000Z', question: 'q', answer: 'a' }]);
+    const writer = new FakeBrain({ text: JSON.stringify([{ claim: 'c', importance: 5, sourceQuote: 's' }]), costUsd: 0, isError: false });
+    const props = new CaptureProposals();
+    const heldLock = { acquire: async () => false, release: async () => {} } as any;
+    const agent = new IngesterAgent(conv as any, new ImportanceGate({} as any), writer, new FakeBrain() as any, new FakeRag() as any, props as any, noopLogger, heldLock);
+    expect(await agent.run('default')).toEqual({ extracted: 0, gated: 0, proposed: 0 });
+    expect(props.items).toHaveLength(0); // 락 못 잡으면 아무것도 안 함
   });
 });
