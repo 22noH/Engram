@@ -26,7 +26,7 @@ export class CliGateway {
     } else if (argv.length === 0) {
       await this.repl();
     } else {
-      process.stdout.write('사용법: engram ask "질문"  |  engram (REPL)\n');
+      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram (REPL)\n');
     }
   }
 

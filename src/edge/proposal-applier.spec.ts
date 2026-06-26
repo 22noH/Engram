@@ -26,6 +26,18 @@ describe('ProposalApplier', () => {
     expect(calls.update.body).toContain('새 내용');
     expect(calls.update.sources).toEqual(expect.arrayContaining(['old', 'conv:1']));
   });
+  it('supersede는 기존 본문을 보존하고 마커+내용을 덧붙인다(덮어쓰기 금지)', async () => {
+    const calls: any = {};
+    const wiki = {
+      getPage: async () => ({ slug: 'alpha', frontmatter: { sources: ['old'] }, body: '기존 본문' }),
+      updatePage: async (_s: string, p: any) => { calls.update = p; return {} as any; },
+    } as any;
+    await new ProposalApplier(wiki, { markApproved: jest.fn() } as any).apply(baseProp('supersede', 'alpha') as any);
+    expect(calls.update.body).toContain('기존 본문');        // 기존 보존(덮어쓰기 아님)
+    expect(calls.update.body).toContain('superseded');       // 마커 존재
+    expect(calls.update.body).toContain('새 내용');          // 새 payload 추가
+    expect(calls.update.body.indexOf('기존 본문')).toBeLessThan(calls.update.body.indexOf('새 내용')); // 기존이 앞
+  });
   it('append 대상이 없으면 create로 강등한다', async () => {
     const calls: any = {};
     const wiki = { getPage: async () => null, createPage: async (i: any) => { calls.create = i; return {} as any; } } as any;
