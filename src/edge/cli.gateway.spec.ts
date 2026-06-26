@@ -11,21 +11,21 @@ describe('CliGateway', () => {
 
   it('ask 모드: 인수를 CoreMessage로 만들어 route하고 스트림을 stdout에 쓴다', async () => {
     const orch = { route: jest.fn(async (_m, onChunk?: (t: string) => void) => { onChunk?.('답변'); return '답변'; }) } as any;
-    await new CliGateway(orch).run(['ask', '안녕', '세계']);
+    await new CliGateway(orch, {} as any, {} as any).run(['ask', '안녕', '세계']);
     expect(orch.route).toHaveBeenCalledWith({ text: '안녕 세계', userId: 'default' }, expect.any(Function));
     expect(writes.join('')).toContain('답변');
   });
 
   it('알 수 없는 인수는 사용법을 출력한다', async () => {
     const orch = { route: jest.fn() } as any;
-    await new CliGateway(orch).run(['bogus']);
+    await new CliGateway(orch, {} as any, {} as any).run(['bogus']);
     expect(orch.route).not.toHaveBeenCalled();
     expect(writes.join('')).toContain('사용법');
   });
 
   it('digest 모드: orchestrator.digest를 호출하고 결과를 출력한다', async () => {
     const orch = { route: jest.fn(), digest: jest.fn().mockResolvedValue({ extracted: 3, gated: 2, proposed: 1 }) } as any;
-    await new CliGateway(orch).run(['digest']);
+    await new CliGateway(orch, {} as any, {} as any).run(['digest']);
     expect(orch.digest).toHaveBeenCalled();
     expect(writes.join('')).toContain('제안');
   });
