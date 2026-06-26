@@ -32,6 +32,15 @@ describe('loadActiveBrain', () => {
     expect(p.concurrency).toBe(1);
   });
 
+  it('비숫자·음수·0 concurrency/timeout env는 무시하고 폴백을 유지한다', () => {
+    const p = loadActiveBrain(dir, {
+      ENGRAM_BRAIN_CONCURRENCY: 'abc',
+      ENGRAM_BRAIN_TIMEOUT_MS: '-5',
+    });
+    expect(p.concurrency).toBe(2); // 기본값 유지(NaN 무력화 방어)
+    expect(p.timeoutMs).toBe(120000);
+  });
+
   it('default가 가리키는 프로필이 없으면 throw', () => {
     fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'x', brains: {} }));
     expect(() => loadActiveBrain(dir, {})).toThrow(/default/);
