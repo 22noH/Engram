@@ -121,7 +121,8 @@ export class IngesterAgent {
     const res = await this.judge.complete(prompt);
     if (res.isError) { this.logger.error('judge 호출 실패', String(res.raw ?? 'judge error'), 'IngesterAgent'); return null; }
     const out = parseJsonBlock<JudgeOut>(res.text);
-    if (!out || typeof out.verdict !== 'string') { this.logger.error('judge JSON 파싱 실패', res.text.slice(0, 200), 'IngesterAgent'); return null; }
+    const valid = out && ['create', 'append', 'supersede', 'reject'].includes(out.verdict);
+    if (!valid) { this.logger.error('judge verdict 무효/파싱 실패', res.text.slice(0, 200), 'IngesterAgent'); return null; }
     return out;
   }
 }

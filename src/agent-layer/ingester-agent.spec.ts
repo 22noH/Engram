@@ -1,7 +1,6 @@
 import { IngesterAgent, parseJsonBlock } from './ingester-agent';
 import { FakeBrain } from '../brain/fake-brain';
 import { ImportanceGate } from '../knowledge-core/importance-gate';
-import { ConversationStore } from '../knowledge-core/conversation-store';
 
 const noopLogger = { error: () => {} } as any;
 
@@ -89,5 +88,20 @@ describe('IngesterAgent.run', () => {
   it('대화 없으면 0건', async () => {
     const agent = new IngesterAgent(new FakeConv([]) as any, new ImportanceGate({} as any), new FakeBrain() as any, new FakeBrain() as any, new FakeRag() as any, new CaptureProposals() as any, noopLogger);
     expect(await agent.run('default')).toEqual({ extracted: 0, gated: 0, proposed: 0 });
+  });
+
+  it('배치 중 예외 시 커서를 전진시키지 않는다(재시도 보장)', async () => {
+    let cursorWritten = false;
+    const conv = {
+      since: async () => [{ ts: '2026-06-26T01:00:00.000Z', question: 'q', answer: 'a' }],
+      readCursor: async () => null,
+      writeCursor: async () => { cursorWritten = true; },
+    } as any;
+    const writer = new FakeBrain({ text: JSON.stringify([{ claim: 'c', importance: 5, sourceQuote: 's' }]), costUsd: 0, isError: false });
+    const throwingRag = { search: async () => { throw new Error('rag down'); } } as any;
+    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, new FakeBrain() as any, throwingRag, new CaptureProposals() as any, noopLogger);
+    const stats = await agent.run('default');
+    expect(stats).toEqual({ extracted: 0, gated: 0, proposed: 0 });
+    expect(cursorWritten).toBe(false); // 예외 시 커서 비전진
   });
 });
