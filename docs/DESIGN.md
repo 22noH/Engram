@@ -262,6 +262,7 @@ OS별로 갈리는 유일한 코드. 설치·시작·정지·재시작 정책을
 - **Phase 1 — A 읽기** ✅ **완료**: ReaderAgent(질문→검색→답) + ✦CLI Gateway(앞단 중립 경계) + Claude CLI 두뇌 + ✦세마포어.
 - **Phase 2 — C 자율쓰기** ✅ **완료**: IngesterAgent(스케줄 digest, writer+judge 2콜) + ✦검증 파이프라인(추출→ImportanceGate→근거→모순→judge) + 승인 게이트(`engram review`) + **ImportanceGate(§5.3) + 수집 경로 B(대화 로그 다이제스트)** + 위키↔RAG 재색인(워처) + ✦@Cron 다이제스트. **스테이징=위키 밖 ProposalStore 결재 대기함**(§5.1 draft-플래그 재해석: 승인 전 라이브 위키 무손상). judge=별도 프로필(작성자≠검증자). 자동반영·다중투표·주기감사(⑧)·golden-question은 후속(§6 "나중").
 - **Phase 3 — B 협업**: Orchestrator + Specialist + 종합 + ✦8팀 + Board Meeting + TaskStore + 동시성/턴 상한.
+  - ✦**rate-limit 소진 시 resume 정책 (착수 시 결정)**: 구독 한도 소진 시 "리셋 시각까지 자동 대기 → 그 지점부터 협업 이어가기"(자율 지속) vs §10.2 기본철학("막히면 사람 알림")의 분기. 현 설계는 §8 예방(세마포어·TurnBudget)·§10 죽음복구만 있고 **소진 후 resume은 미설계**. 자율 회사 비전의 전제 → Phase 3 착수 시 어느 쪽인지 명시.
 - ✦**후순위(확정 포함) — InsightLayer**: 행동 메트릭 + 일일 인사이트 리포트 + 응답 맥락 주입. A/B/C 루프가 돈 뒤 얹음.
 - **운영(PAL)**: Phase 0부터 깔되 OS 순서대로(Win→Mac→Linux) + 감시자.
 
