@@ -33,7 +33,9 @@ export class ConversationStore {
       const text = await fs.readFile(path.join(dir, f), 'utf8');
       for (const line of text.split('\n')) {
         if (!line.trim()) continue;
-        const rec = JSON.parse(line) as ConversationRecord;
+        let rec: ConversationRecord;
+        try { rec = JSON.parse(line) as ConversationRecord; }
+        catch { continue; } // 크래시로 잘린/손상된 줄은 건너뜀(append-only 로그 회복탄력성)
         if (cursorTs === null || rec.ts > cursorTs) out.push(rec);
       }
     }
