@@ -2,10 +2,12 @@
   "name": "engram",
   "version": "0.0.1",
   "private": true,
+  "bin": { "engram": "dist/src/cli.js" },
   "scripts": {
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:cli": "ts-node src/cli.ts",
     "test": "jest",
     "demo": "ts-node scripts/demo.ts"
   },
