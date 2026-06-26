@@ -2,10 +2,17 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConversationStore } from '../knowledge-core/conversation-store';
 import { ImportanceGate, ScoredFact } from '../knowledge-core/importance-gate';
 import { RagStore } from '../knowledge-core/rag/rag-store';
-import { ProposalStore } from '../knowledge-core/proposal-store';
+import { ProposalStore, ProposalOp } from '../knowledge-core/proposal-store';
+import { SearchResult } from '../knowledge-core/rag/rag.types';
 import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { PinoLogger } from '../pal/logger';
 import { DEFAULT_USER } from '../pal/path-resolver';
+
+interface JudgeOut {
+  verdict: ProposalOp | 'reject';
+  targetSlug?: string; title?: string; category?: string;
+  confidence: number; reason: string; conflictSlugs?: string[];
+}
 
 // 코드펜스/잡텍스트에서 첫 균형 잡힌 JSON(객체 또는 배열)을 뽑아 파싱. 실패 시 null.
 // 깊이 카운팅 + 문자열 인식 스캐너로 꼬리 산문의 브래킷·문자열 내부 브래킷을 무시한다.
@@ -60,9 +67,66 @@ export class IngesterAgent {
     return parsed.filter((f) => f && typeof f.claim === 'string' && f.sourceQuote); // 출처없으면 거부(§6)
   }
 
-  // Task 7에서 완성. 지금은 스텁.
   async run(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
-    void userId;
-    return { extracted: 0, gated: 0, proposed: 0 };
+    try {
+      const cursor = await this.conversations.readCursor(userId);
+      const recs = await this.conversations.since(userId, cursor);
+      if (recs.length === 0) return { extracted: 0, gated: 0, proposed: 0 };
+
+      const convText = recs.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n\n');
+      const facts = await this.extractFacts(convText);
+      const gated = this.gate.filter(facts);
+
+      let proposed = 0;
+      for (const fact of gated) {
+        const hits = await this.rag.search(fact.claim, 5, userId);
+        const v = await this.judgeFact(fact, hits);
+        if (!v || v.verdict === 'reject') continue;
+        await this.proposals.enqueue({
+          userId,
+          op: v.verdict,
+          targetSlug: v.targetSlug ?? slugify(fact.claim),
+          title: v.title ?? fact.claim.slice(0, 60),
+          category: v.category ?? 'general',
+          payload: fact.claim,
+          sources: [fact.sourceQuote],
+          importance: fact.importance,
+          verdict: { confidence: v.confidence, reason: v.reason, conflictSlugs: v.conflictSlugs },
+        });
+        proposed++;
+      }
+      // 워터마크 전진 — 마지막 레코드 ts(다음 run은 여기 이후만 읽음)
+      await this.conversations.writeCursor(userId, recs[recs.length - 1].ts);
+      return { extracted: facts.length, gated: gated.length, proposed };
+    } catch (err) {
+      this.logger.error('IngesterAgent.run 실패', String(err), 'IngesterAgent');
+      return { extracted: 0, gated: 0, proposed: 0 };
+    }
   }
+
+  // 별도 judge 콜(작성자≠검증자). 후보 사실 + 검색된 기존 페이지 → verdict.
+  private async judgeFact(fact: ScoredFact, hits: SearchResult[]): Promise<JudgeOut | null> {
+    const ctx = hits.map((h, i) => `[${i + 1}] ${h.title} (slug: ${h.slug})\n${h.text}`).join('\n\n');
+    const prompt = [
+      '아래 후보 사실을 검증하라(너는 작성자가 아닌 검증자다).',
+      '기존 위키와 비교해 판정하라:',
+      '- create: 신규 주제 → 새 페이지',
+      '- append: 기존 페이지에 보강(targetSlug=기존 slug)',
+      '- supersede: 기존과 모순 → 기존을 대체(targetSlug=기존 slug, conflictSlugs 명시, 덮어쓰기 금지)',
+      '- reject: 근거 부족·환각·무가치',
+      '출력은 JSON 객체만: {"verdict","targetSlug","title","category","confidence","reason","conflictSlugs"}',
+      '', `# 후보 사실\n${fact.claim}\n근거: ${fact.sourceQuote}`,
+      '', `# 관련 기존 위키\n${ctx || '(없음)'}`,
+    ].join('\n');
+    const res = await this.judge.complete(prompt);
+    if (res.isError) { this.logger.error('judge 호출 실패', String(res.raw ?? 'judge error'), 'IngesterAgent'); return null; }
+    const out = parseJsonBlock<JudgeOut>(res.text);
+    if (!out || typeof out.verdict !== 'string') { this.logger.error('judge JSON 파싱 실패', res.text.slice(0, 200), 'IngesterAgent'); return null; }
+    return out;
+  }
+}
+
+// 사실 텍스트 → 파일명 안전한 slug(영문·숫자·한글 유지, 나머지는 하이픈).
+function slugify(s: string): string {
+  return s.toLowerCase().trim().replace(/[^a-z0-9가-힣]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled';
 }
