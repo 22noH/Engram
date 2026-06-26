@@ -86,9 +86,12 @@ describe('IngesterAgent.run', () => {
     expect(props.items).toHaveLength(0);
   });
 
-  it('대화 없으면 0건', async () => {
-    const agent = new IngesterAgent(new FakeConv([]) as any, new ImportanceGate({} as any), new FakeBrain() as any, new FakeBrain() as any, new FakeRag() as any, new CaptureProposals() as any, noopLogger, fakeLock);
+  it('대화 없으면 0건이고, 빈 배치에서도 락을 해제한다', async () => {
+    const release = jest.fn();
+    const lock = { acquire: async () => true, release } as any;
+    const agent = new IngesterAgent(new FakeConv([]) as any, new ImportanceGate({} as any), new FakeBrain() as any, new FakeBrain() as any, new FakeRag() as any, new CaptureProposals() as any, noopLogger, lock);
     expect(await agent.run('default')).toEqual({ extracted: 0, gated: 0, proposed: 0 });
+    expect(release).toHaveBeenCalledWith('default'); // early-return에서도 finally가 락 해제(누수 방지)
   });
 
   it('배치 중 예외 시에도 커서를 전진시킨다(per-fact 격리)', async () => {
