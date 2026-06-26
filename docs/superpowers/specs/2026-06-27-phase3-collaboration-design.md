@@ -18,7 +18,7 @@
 - TaskStore(FSM 블랙보드)
 - TurnBudget(협업 총턴 상한)
 - Synthesizer(종합)
-- 두뇌 어댑터 3종: Gemini · Codex · Local(Ollama) + provider→adapter 팩토리
+- 두뇌: ClaudeCliBrain env 확장(로컬LLM 백엔드 흡수) + GeminiBrain·CodexBrain 네이티브 CLI 어댑터 + provider→adapter 팩토리
 - 제네릭 회의 엔진 + `engram meeting` 명령(일/주/월/특수)
 - 도구 권한 울타리(네이티브 권한 설정, default-deny, 경로 스코프)
 - 페르소나별 웹도구(WebSearch/WebFetch) 선언
@@ -42,10 +42,11 @@
 | 8팀 | Manager·Infra·Brand·Career·Academy·Trend·Recon·Record | 사용자 결정 |
 | run-state | 이번엔 seam(자리)만. 제어 명령은 Phase 4 | 사용자 결정 |
 | TaskStore | FSM 포함 정식 프리미티브(공유 1차) | 사용자 결정, DESIGN §4 |
-| 두뇌 어댑터 | Gemini·Codex·Local 3종 이번에 전부(Phase 4 토대) | 사용자 결정 |
+| 로컬 LLM | 별도 어댑터 ❌ → **Claude Code 하네스 + 백엔드 env**(ANTHROPIC_BASE_URL=Ollama 등). 하네스·도구·울타리 공유, Claude 토큰 0 | 사용자 결정(검증완료) |
+| Gemini·Codex | **각자 네이티브 CLI 어댑터**(자기 하네스). Phase 3=텍스트 협업용, 도구배선은 Phase 4 | 사용자 결정 |
 | 회의 | 제네릭 엔진 + 사용자 명령 설정(일/주/월/특수) | 사용자 결정 |
 | Bash/Write | 허용 — default-deny 권한 울타리(사용자 사전승인 범위 내 자율) | 사용자 결정 + DESIGN §3 게이트 |
-| 권한 구현 | 새 엔진 ❌ → Claude Code 네이티브 권한(--allowedTools/--add-dir/settings) 설정만 | ponytail(네이티브 재사용) |
+| 권한 구현 | 새 엔진 ❌ → 각 하네스의 **네이티브 샌드박스**를 config에서 운전. Claude 하네스(진짜 Claude+로컬LLM 백엔드)=--allowedTools/--add-dir | ponytail(네이티브 재사용) |
 | 웹도구 | 페르소나별 `tools:` 선언, 읽기전용 기본 안전 | 사용자 결정 |
 
 ---
@@ -69,8 +70,9 @@ AgentLayer
  └ ReaderAgent(기존)/IngesterAgent(기존)
 
 Brain
- ├ BrainProvider 포트(기존) + ClaudeCliBrain(기존)
- ├ GeminiBrain / CodexBrain / LocalBrain(신규)
+ ├ BrainProvider 포트(기존) + ClaudeCliBrain(기존, +env 프로필)
+ │     └ 백엔드 교체: 진짜 Claude(구독) / 로컬LLM(env ANTHROPIC_BASE_URL=Ollama 등) — 하네스 공유
+ ├ GeminiBrain / CodexBrain(신규)   각자 네이티브 CLI 하네스(텍스트 협업, 도구는 Phase 4)
  └ BrainFactory           brains.json provider → 어댑터 해소
 
 KnowledgeCore
@@ -139,7 +141,7 @@ board: strategy-advisor        # 보드 역할(선택)
 
 - **클래스(.md 정의) vs 객체(런타임 상태) 분리**(DESIGN §7.3).
 - 8팀: Manager(의장)·Infra(Infra Chief)·Brand·Career·Academy·Trend(Strategy Advisor)·Recon·Record(Record Keeper). 웹도구는 Trend·Recon만 기본 선언.
-- **제약(§8과 정합)**: 도구는 Claude Code 하네스 능력이라 `tools:`를 선언하는 페르소나는 **claude-provider 두뇌**여야 한다(Trend·Recon → claude). 저비용 라우팅(Gemini/Local)은 도구 불필요한 텍스트 전용 페르소나(Brand·Career·Academy 등)에 적용. PersonaRegistry가 `tools:` 있는데 비-claude brain이면 경고+도구 무시.
+- **제약(§8과 정합)**: 도구는 *하네스* 능력이라 `tools:` 선언 페르소나는 **Claude Code 하네스 위에서 도는 두뇌**여야 한다 = 진짜 Claude(구독) 또는 **로컬LLM 백엔드**(env로 Ollama 등). 둘 다 같은 하네스라 도구·울타리 동일. Gemini/Codex(자기 네이티브 CLI)는 Phase 3에선 텍스트 전용 → `tools:` 있어도 경고+무시. `brain:` 값은 brains.json 프로필 키(`claude` / `ollama` / `gemini` / `codex` …).
 
 ### 5.3 회의 설정 (runtime/config/meetings.json)
 
@@ -165,19 +167,29 @@ board: strategy-advisor        # 보드 역할(선택)
 
 ---
 
-## 6. 두뇌 어댑터 (Phase 4 토대)
+## 6. 두뇌 — 하네스 1개 + 백엔드 교체 + 네이티브 CLI 어댑터 (Phase 4 토대)
 
-`BrainProvider` 포트(기존: `complete(prompt, onChunk) → BrainResult`)를 3종 추가 구현. 각자 spawn + 출력 파싱, `BrainResult`로 정규화.
+핵심 통찰(검증완료): Claude Code 하네스는 **백엔드 교체 가능**. `claude -p`를 spawn할 때 자식 프로세스에 `ANTHROPIC_BASE_URL`·모델 tier env를 주면 **하네스는 그대로, 추론만 다른 모델**(로컬 Ollama 등)에서 → **Claude 구독 토큰 0**. env는 자식 프로세스별로 격리되므로 페르소나마다 백엔드가 달라도 동시 실행 무간섭.
 
-| 어댑터 | 호출 | 인증(config/env) | 출력 |
+### 6.1 ClaudeCliBrain 확장 — 진짜 Claude + 로컬LLM (한 어댑터)
+
+- **기존 ClaudeCliBrain 재사용.** spawn 옵션에 `env: { ...process.env, ...profile.env }` 추가(현재 [claude-cli.brain.ts:49]는 env 미전달). 출력은 항상 Claude Code stream-json → **파서 하나로 통일**.
+- brains.json 프로필 `env`로 백엔드 결정:
+  - `claude` 프로필 = env 없음 → 진짜 Claude(구독)
+  - `ollama` 프로필 = `env:{ ANTHROPIC_BASE_URL:"http://localhost:11434/v1", ANTHROPIC_DEFAULT_*_MODEL:"qwen2.5-coder", ANTHROPIC_API_KEY:"no-auth" }`
+- **둘 다 같은 하네스** → 도구·권한 울타리(§8) 동일하게 적용. 로컬LLM도 도구 사용 가능(단 작은 모델은 도구호출 신뢰성↓ → 도구·코딩은 센 백엔드로 라우팅).
+- 자원 풀 분리: 진짜 Claude=구독 한도 / 로컬=GPU. 싼 일을 로컬로 내려 한도 절약.
+
+### 6.2 GeminiBrain · CodexBrain — 각자 네이티브 CLI 어댑터 (신규 2종)
+
+| 어댑터 | 호출 | 인증 | Phase 3 범위 |
 |---|---|---|---|
-| GeminiBrain | gemini CLI 또는 API | Google 키 | 스트림→텍스트 정규화 |
-| CodexBrain | codex CLI | OpenAI 키 | 〃 |
-| LocalBrain | Ollama(HTTP localhost:11434 또는 `ollama run`) | 불필요(로컬) | 〃 |
+| GeminiBrain | gemini CLI | Google 키 | 텍스트 협업·종합. 자기 도구/권한 배선은 Phase 4 |
+| CodexBrain | codex CLI | OpenAI 키 | 〃. Codex 고유 코딩 하네스는 Phase 4(이종 *에이전트* 협업) |
 
-- **BrainFactory**: brains.json `provider` 필드 → 어댑터 선택. 현재 `brain.config.ts`가 `provider !== 'claude-cli'` throw하는 가드를 팩토리 분기로 확장.
+- 각자 spawn + 출력 파싱 → `BrainResult` 정규화. 자기 profile.concurrency Semaphore 보유.
+- **BrainFactory**: brains.json `provider`(`claude-cli`|`gemini-cli`|`codex-cli`) → 어댑터 선택. 현재 `brain.config.ts`의 `provider !== 'claude-cli'` throw 가드를 팩토리 분기로 확장. (로컬LLM은 `claude-cli` provider + env 프로필이라 새 provider 불필요.)
 - 모델·CLI 경로·인증 전부 config/env(하드코딩 금지 §3). cross-spawn.
-- **세마포어**: 각 어댑터가 자기 profile.concurrency로 Semaphore 보유(ClaudeCliBrain 패턴 답습) — 두뇌별 독립 상한.
 
 ---
 
@@ -193,13 +205,14 @@ board: strategy-advisor        # 보드 역할(선택)
 
 ## 8. 도구 권한 울타리
 
-**새 권한엔진 안 만듦.** Claude Code(`claude -p`)의 네이티브 권한을 설정으로 운전:
+**새 권한엔진 안 만듦.** 각 하네스의 네이티브 권한을 설정으로 운전. Phase 3에서 도구 쓰는 하네스 = Claude Code 하네스(= 진짜 Claude **또는** 로컬LLM 백엔드, §6.1). 둘은 같은 하네스라 울타리 동일:
 
 - 페르소나 `tools:` 선언 ∩ permissions.json `allow.tools[persona]` = **실제 허용 도구** → SpecialistAgent가 `--allowedTools`로 변환해 spawn args에 추가.
 - 쓰기 도구(Bash/Write/Edit)는 `allow.writePaths` 폴더로 스코프(`--add-dir`/cwd). `denyPaths`(Engram repo·시스템)는 절대 금지 → 자기파괴·자기수정 차단(Phase 4 ③ 보류와 일치).
 - **default-deny**: 허용목록에 없으면 거부. 사용자가 사전승인한 울타리 안에서만 자율(= DESIGN §3 "승인 게이트"를 *범위 사전승인*으로 충족).
 - 읽기전용 웹도구(WebSearch/WebFetch)는 시스템 미변경이라 기본 저위험.
-- 다른 어댑터(Gemini/Codex/Local)는 도구모델이 다름 → Phase 3에서 도구권한은 **Claude 두뇌 페르소나에 한정 적용**, 타 어댑터는 텍스트 생성만(도구 위임은 미래).
+- **로컬LLM 백엔드 주의**: 같은 울타리가 걸리지만 작은 모델은 도구호출이 불안정 → 위험한 쓰기 작업은 신뢰성 높은 백엔드(진짜 Claude)로 라우팅 권고.
+- **Gemini/Codex(네이티브 CLI)**: 자기 샌드박스 모델이 따로라 Phase 3에선 **텍스트 생성만**(도구 위임은 Phase 4에서 각자 네이티브 샌드박스로 배선).
 
 ---
 
@@ -222,8 +235,8 @@ board: strategy-advisor        # 보드 역할(선택)
 - **TaskStore**: FSM 전이(유효/무효), 동시쓰기 직렬화(KeyedLock) 회귀.
 - **PersonaRegistry**: frontmatter 파싱, 누락·잘못된 brain 폴백.
 - **권한 울타리**: tools 교집합·writePath 스코프·denyPath 거부 단위테스트(spawn args 검증).
-- **두뇌 어댑터**: 로직은 FakeBrain. 실 Gemini/Codex/Local은 **opt-in 스모크**(미설치 시 skip — 기존 임베더 패턴).
-- 실 `claude -p` 스모크 1회: 웹도구 켜진 채 1라운드 협업 + 회의 1회.
+- **두뇌**: 로직은 FakeBrain. ClaudeCliBrain env 주입(올바른 env가 spawn에 전달되는지) 단위테스트. 실 Gemini/Codex CLI + 실 Ollama 백엔드는 **opt-in 스모크**(미설치 시 skip — 기존 임베더 패턴).
+- 실 `claude -p` 스모크 1회: 웹도구 켜진 채 1라운드 협업 + 회의 1회. (가능하면 Ollama 백엔드 스모크 1회 추가 — env 교체 동작 확인)
 
 ---
 
@@ -232,7 +245,8 @@ board: strategy-advisor        # 보드 역할(선택)
 - run-state 제어 명령(pause/resume/stop) — 자리만.
 - 자율 코드 검증 하드게이트(테스트·빌드 통과 강제) — Phase 4.
 - self-modification — Phase 4 ③ 보류.
-- 타 어댑터(Gemini/Codex/Local)의 도구 위임 — 텍스트 생성만, 도구는 Claude 페르소나 한정.
+- Gemini/Codex(네이티브 CLI)의 도구 위임 — 텍스트 생성만. (로컬LLM은 Claude 하네스 밑이라 도구 가능)
+- 별도 LocalBrain 어댑터 — 로컬LLM은 ClaudeCliBrain env 백엔드로 흡수(어댑터 안 만듦).
 - InsightLayer(Phase 5)·위키 주기감사·골든질문(DESIGN "나중").
 
 ---
@@ -241,7 +255,7 @@ board: strategy-advisor        # 보드 역할(선택)
 
 토대 먼저, 협업·회의는 그 위에:
 
-1. **토대**: TaskStore(FSM+락) → BrainFactory + 어댑터 3종 → PersonaRegistry → 권한 울타리.
+1. **토대**: TaskStore(FSM+락) → ClaudeCliBrain env 확장(로컬LLM 백엔드) + BrainFactory + GeminiBrain/CodexBrain → PersonaRegistry → 권한 울타리.
 2. **협업 코어**: SpecialistAgent → TurnBudget → Orchestrator 실체화(분해·배정·수집) → Synthesizer.
 3. **회의**: MeetingEngine → `engram meeting` 명령 + Scheduler 배선.
 4. **통합·회귀**: 전체 DI 배선, 실 claude 스모크, 회귀 스위트.
@@ -251,7 +265,8 @@ board: strategy-advisor        # 보드 역할(선택)
 ## 13. 미해결(플랜 단계에서 확정)
 
 - 작업 티켓 정확한 스키마(blackboardRef 형식).
-- 어댑터별 출력 이벤트 파싱 세부(Gemini/Codex/Ollama 각 포맷).
+- GeminiBrain·CodexBrain 출력 이벤트 파싱 세부(각 CLI 포맷). (로컬LLM은 Claude stream-json 재사용 — 파서 불필요)
+- 로컬LLM 백엔드 모델 tier env 매핑 기본값(ANTHROPIC_DEFAULT_*_MODEL) + 권장 모델.
 - 회의 종합 라운드 수 기본값·TurnBudget 기본값.
 - 권한 울타리를 Claude 네이티브 settings 파일로 쓸지 spawn 플래그로 직접 줄지(둘 다 가능).
 - 8팀 페르소나 본문 실내용(사용자 입력 필요할 수 있음).
