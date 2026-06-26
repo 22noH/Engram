@@ -79,21 +79,26 @@ export class IngesterAgent {
 
       let proposed = 0;
       for (const fact of gated) {
-        const hits = await this.rag.search(fact.claim, 5, userId);
-        const v = await this.judgeFact(fact, hits);
-        if (!v || v.verdict === 'reject') continue;
-        await this.proposals.enqueue({
-          userId,
-          op: v.verdict,
-          targetSlug: v.targetSlug ?? slugify(fact.claim),
-          title: v.title ?? fact.claim.slice(0, 60),
-          category: v.category ?? 'general',
-          payload: fact.claim,
-          sources: [fact.sourceQuote],
-          importance: fact.importance,
-          verdict: { confidence: v.confidence, reason: v.reason, conflictSlugs: v.conflictSlugs },
-        });
-        proposed++;
+        try {
+          const hits = await this.rag.search(fact.claim, 5, userId);
+          const v = await this.judgeFact(fact, hits);
+          if (!v || v.verdict === 'reject') continue;
+          await this.proposals.enqueue({
+            userId,
+            op: v.verdict,
+            targetSlug: v.targetSlug ?? slugify(fact.claim),
+            title: v.title ?? fact.claim.slice(0, 60),
+            category: v.category ?? 'general',
+            payload: fact.claim,
+            sources: [fact.sourceQuote],
+            importance: fact.importance,
+            verdict: { confidence: v.confidence, reason: v.reason, conflictSlugs: v.conflictSlugs },
+          });
+          proposed++;
+        } catch (err) {
+          // 한 사실의 실패가 배치 전체를 중단시키지 않게(§10.3). 커서는 정상 전진 → 재실행 중복 제안 방지.
+          this.logger.error('제안 생성 실패(이 사실 건너뜀)', String(err), 'IngesterAgent');
+        }
       }
       // 워터마크 전진 — 마지막 레코드 ts(다음 run은 여기 이후만 읽음)
       await this.conversations.writeCursor(userId, recs[recs.length - 1].ts);

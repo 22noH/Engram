@@ -66,8 +66,10 @@ export class CliGateway {
         `  내용: ${p.payload}\n  출처: ${p.sources.join(', ')}\n  판정: ${p.verdict.reason}\n`,
       );
       const a = (await ask('  [a]승인 / [r]거부 / [s]건너뜀 > ')).trim().toLowerCase();
-      if (a === 'a') { await this.applier.apply(p); process.stdout.write('  → 반영됨\n'); }
-      else if (a === 'r') { await this.applier.reject(p); process.stdout.write('  → 거부됨\n'); }
+      if (a === 'a') {
+        try { await this.applier.apply(p); process.stdout.write('  → 반영됨\n'); }
+        catch (e) { process.stdout.write(`  → 반영 실패(건너뜀): ${String(e)}\n`); } // slug 충돌 등으로 세션 전체가 죽지 않게
+      } else if (a === 'r') { await this.applier.reject(p); process.stdout.write('  → 거부됨\n'); }
       else process.stdout.write('  → 건너뜀\n');
     }
     rl.close();

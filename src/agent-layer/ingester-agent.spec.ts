@@ -90,7 +90,7 @@ describe('IngesterAgent.run', () => {
     expect(await agent.run('default')).toEqual({ extracted: 0, gated: 0, proposed: 0 });
   });
 
-  it('배치 중 예외 시 커서를 전진시키지 않는다(재시도 보장)', async () => {
+  it('배치 중 예외 시에도 커서를 전진시킨다(per-fact 격리)', async () => {
     let cursorWritten = false;
     const conv = {
       since: async () => [{ ts: '2026-06-26T01:00:00.000Z', question: 'q', answer: 'a' }],
@@ -101,7 +101,34 @@ describe('IngesterAgent.run', () => {
     const throwingRag = { search: async () => { throw new Error('rag down'); } } as any;
     const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, new FakeBrain() as any, throwingRag, new CaptureProposals() as any, noopLogger);
     const stats = await agent.run('default');
-    expect(stats).toEqual({ extracted: 0, gated: 0, proposed: 0 });
-    expect(cursorWritten).toBe(false); // 예외 시 커서 비전진
+    expect(stats.proposed).toBe(0);  // 실패한 사실은 건너뜀
+    expect(cursorWritten).toBe(true); // §10.3: per-fact 격리 → 커서는 정상 전진
+  });
+
+  it('첫 사실 rag 오류 시 두 번째 사실은 제안되고 커서도 전진한다(§10.3 per-fact 격리)', async () => {
+    let cursorWritten = false;
+    const conv = {
+      since: async () => [
+        { ts: '2026-06-26T01:00:00.000Z', question: 'q1', answer: 'a1' },
+        { ts: '2026-06-26T02:00:00.000Z', question: 'q2', answer: 'a2' },
+      ],
+      readCursor: async () => null,
+      writeCursor: async () => { cursorWritten = true; },
+    } as any;
+    const writer = new FakeBrain({ text: JSON.stringify([
+      { claim: '첫사실', importance: 4, sourceQuote: '인용1' },
+      { claim: '두번째사실', importance: 4, sourceQuote: '인용2' },
+    ]), costUsd: 0, isError: false });
+    const judge = new FakeBrain({ text: JSON.stringify({
+      verdict: 'create', targetSlug: 'slug', title: '제목', category: 'general', confidence: 0.9, reason: '신규',
+    }), costUsd: 0, isError: false });
+    let n = 0;
+    const flakyRag = { search: async () => { n++; if (n === 1) throw new Error('rag flake'); return []; } } as any;
+    const props = new CaptureProposals();
+    const agent = new IngesterAgent(conv, new ImportanceGate({} as any), writer, judge, flakyRag, props as any, noopLogger);
+    const stats = await agent.run('default');
+    expect(stats.proposed).toBe(1);       // 첫 사실 드롭, 두 번째 사실 제안
+    expect(cursorWritten).toBe(true);     // 커서 정상 전진
+    expect(props.items).toHaveLength(1);  // 두 번째 사실만 enqueue됨
   });
 });

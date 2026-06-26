@@ -10,6 +10,8 @@ import { DEFAULT_USER } from '../pal/path-resolver';
 export class DigestScheduler {
   constructor(private readonly orchestrator: Orchestrator, private readonly logger: PinoLogger) {}
 
+  // 주의: `engram digest`(별도 cli.ts 프로세스)와 이 @Cron 틱이 동시에 실행되면 이중 enqueue 가능.
+  // digest 잠금 없음 — 단일 상주 프로세스 가정. 추후 개선 방향: ingest-cursor에 파일 잠금 도입.
   @Cron(process.env.ENGRAM_DIGEST_CRON ?? '0 3 * * *') // 기본 매일 03:00
   async tick(): Promise<void> {
     try {
