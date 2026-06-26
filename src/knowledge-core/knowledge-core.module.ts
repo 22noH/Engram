@@ -33,7 +33,7 @@ import { PinoLogger } from '../pal/logger';
     WikiWatcher,
     WikiEngine,
   ],
-  exports: [WikiEngine, RagStore],
+  exports: [WikiEngine, RagStore, PinoLogger],
 })
 export class KnowledgeCoreModule implements OnModuleInit {
   constructor(
