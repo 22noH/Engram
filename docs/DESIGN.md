@@ -2,7 +2,7 @@
 
 > **프로젝트명: `Engram`** — 뇌에 저장된 기억의 물리적 흔적(engram). stateful 위키(기억 코어)를 은유.
 >
-> 최종 갱신: 2026-06-26 · 상태: **Phase 0 (KnowledgeCore) 완료 — Phase 1 (A 읽기) 착수 예정**
+> 최종 갱신: 2026-06-26 · 상태: **Phase 0·1·2 완료 (KnowledgeCore + A 읽기 + C 자율쓰기) — Phase 3 (B 협업) 착수 예정**
 
 이 문서는 Engram의 단일 설계 기준선이다. (✦ = 브레인스토밍에서 새로 정하거나 다듬은 것)
 
@@ -259,8 +259,8 @@ OS별로 갈리는 유일한 코드. 설치·시작·정지·재시작 정책을
 > 교훈: **1개부터.** A·B·C 동시 착수는 코어가 흔들려 다 무너진다.
 
 - **Phase 0 — KnowledgeCore (토대)** ✅ **완료**: WikiEngine(✦버전관리형) + RagStore(✦LanceDB + 로컬임베딩 + 하이브리드 + 증분색인 + 파일워처) + ✦상주 위생(lru-cache·pino). 멀티유저·페이지락·CachingEmbedder 포함. (당초 포함했던 **'수집 1경로'·ImportanceGate는 Phase 2로 이관** — 자율쓰기와 함께 묶는 게 자연스러워서.)
-- **Phase 1 — A 읽기**: ReaderAgent(질문→검색→답) + ✦CLI Gateway(앞단 중립 경계) + Claude CLI 두뇌 + ✦세마포어.
-- **Phase 2 — C 자율쓰기**: IngesterAgent(스케줄 digest) + ✦검증 파이프라인 + 승인 게이트 + **ImportanceGate(§5.3) + 수집 1경로**(Phase 0서 이관) + 위키↔RAG 재색인 묶음 + ✦ops 자동화 대부분(@Cron 잡).
+- **Phase 1 — A 읽기** ✅ **완료**: ReaderAgent(질문→검색→답) + ✦CLI Gateway(앞단 중립 경계) + Claude CLI 두뇌 + ✦세마포어.
+- **Phase 2 — C 자율쓰기** ✅ **완료**: IngesterAgent(스케줄 digest, writer+judge 2콜) + ✦검증 파이프라인(추출→ImportanceGate→근거→모순→judge) + 승인 게이트(`engram review`) + **ImportanceGate(§5.3) + 수집 경로 B(대화 로그 다이제스트)** + 위키↔RAG 재색인(워처) + ✦@Cron 다이제스트. **스테이징=위키 밖 ProposalStore 결재 대기함**(§5.1 draft-플래그 재해석: 승인 전 라이브 위키 무손상). judge=별도 프로필(작성자≠검증자). 자동반영·다중투표·주기감사(⑧)·golden-question은 후속(§6 "나중").
 - **Phase 3 — B 협업**: Orchestrator + Specialist + 종합 + ✦8팀 + Board Meeting + TaskStore + 동시성/턴 상한.
 - ✦**후순위(확정 포함) — InsightLayer**: 행동 메트릭 + 일일 인사이트 리포트 + 응답 맥락 주입. A/B/C 루프가 돈 뒤 얹음.
 - **운영(PAL)**: Phase 0부터 깔되 OS 순서대로(Win→Mac→Linux) + 감시자.
