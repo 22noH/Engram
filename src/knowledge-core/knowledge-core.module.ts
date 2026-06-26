@@ -10,6 +10,7 @@ import { WikiWatcher } from './rag/wiki-watcher';
 import { PAGE_INDEXER } from './rag/rag.types';
 import { KeyedLock } from './keyed-lock';
 import { PinoLogger } from '../pal/logger';
+import { ConversationStore } from './conversation-store';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
@@ -32,8 +33,9 @@ import { PinoLogger } from '../pal/logger';
     { provide: PAGE_INDEXER, useExisting: RagStore },
     WikiWatcher,
     WikiEngine,
+    ConversationStore,
   ],
-  exports: [WikiEngine, RagStore, PinoLogger],
+  exports: [WikiEngine, RagStore, PinoLogger, ConversationStore],
 })
 export class KnowledgeCoreModule implements OnModuleInit {
   constructor(
