@@ -24,7 +24,7 @@ Phase 0는 지식 창고(위키 저장 + 하이브리드 검색)까지 만들었
 ```
 src/brain/
  ├ brain.port.ts          IBrainProvider 인터페이스 + BrainResult 타입 + BRAIN DI 토큰
- ├ brain.config.ts        brain.json 로더 (파일 우선, env 덮어쓰기, 기본값)
+ ├ brain.config.ts        brains.json 로더 (복수 프로필 + default, env 덮어쓰기, 기본값)
  ├ claude-cli.brain.ts    claude -p 어댑터 (cross-spawn + p-limit 세마포어 + 스트리밍)
  ├ fake-brain.ts          테스트용 고정 BrainResult 제공자
  └ brain.module.ts
@@ -50,7 +50,7 @@ src/cli.ts                CLI 진입점 (Nest standalone 컨텍스트 → Gatewa
 | 흐름 배선 | Gateway → **미니 Orchestrator 스텁** → ReaderAgent. Gateway는 Orchestrator만 알고 ReaderAgent를 모른다(불변 "모든 흐름 경유"를 1일차부터 박음). |
 | 근거 정책 | **위키 근거 우선 + 출처 명시.** 검색 결과를 우선 근거로, 어느 페이지에서 왔는지 표기. 위키에 없으면 일반 지식으로 답하되 그 사실을 명시. |
 | CLI 형태 | **원샷 기본 + REPL 플래그.** 둘 다 같은 `route(CoreMessage)`로 수렴. |
-| 두뇌 config | **`brain.json` 파일이 1차 소스**(모델·CLI 경로·동시 호출 수·타임아웃). env 변수는 덮어쓰기로만. |
+| 두뇌 config | **`brains.json` 파일이 1차 소스** — 이름 붙인 두뇌 **여러 개** + `default`. env 변수는 활성 두뇌 덮어쓰기로만. Phase 1은 `default` 하나만 구동(claude-cli), 나머지 프로필은 파일에 둬도 무시. |
 | 출력 방식 | **스트리밍.** 글자 단위로 흘러나옴. `onChunk` 콜백을 층 사이로 통과시키는 방식. |
 | 진입점 | `main.ts`(상주) / `cli.ts`(질문) **분리.** |
 | 에이전트 상태 | **매 턴 독립**(stateless 워커, 설계 §3). REPL도 같은 호출 반복, Claude 세션 resume 안 함. |
@@ -89,28 +89,36 @@ export const BRAIN = Symbol('BRAIN'); // DI 토큰
 
 ### 4.3 Config (`brain.config.ts`)
 
-`runtime/config/brain.json`이 1차 소스. 파일이 없으면 기본값으로 1회 생성(사용자가 편집 가능). env 변수는 빠른 테스트용 덮어쓰기.
+`runtime/config/brains.json`이 1차 소스. **이름 붙인 두뇌 프로필 여러 개 + `default`** 형태(설계 §7.5 — 페르소나가 `brain:`으로 고르는 미래를 위해 파일 형식부터 복수형). 파일이 없으면 기본값으로 1회 생성(사용자가 편집 가능). env 변수는 활성(=default) 두뇌에 대한 빠른 테스트용 덮어쓰기.
 
 ```json
 {
-  "provider": "claude-cli",
-  "cli": "claude",
-  "model": "",
-  "concurrency": 2,
-  "timeoutMs": 120000,
-  "extraArgs": []
+  "default": "claude",
+  "brains": {
+    "claude": {
+      "provider": "claude-cli",
+      "cli": "claude",
+      "model": "",
+      "concurrency": 2,
+      "timeoutMs": 120000,
+      "extraArgs": []
+    }
+  }
 }
 ```
 
+**Phase 1 동작**: 로더가 `brains[default]` 프로필 하나만 꺼내 어댑터를 만든다. `provider`가 `claude-cli`가 아니면 명확한 에러로 거부(이후 단계에서 분기 추가). `brains`에 다른 이름이 더 있어도 Phase 1은 무시(Phase 3에서 페르소나·라우팅이 이름으로 해소). 프로필 키:
+
 | 키 | env 덮어쓰기 | 기본 | 의미 |
 |---|---|---|---|
+| `provider` | — | `claude-cli` | 어댑터 종류(Phase 1은 `claude-cli`만) |
 | `cli` | `ENGRAM_BRAIN_CLI` | `claude` | 실행 파일(경로/PATH 이름) |
 | `model` | `ENGRAM_BRAIN_MODEL` | `''`(= CLI 기본) | 모델 ID |
-| `concurrency` | `ENGRAM_BRAIN_CONCURRENCY` | `2` | 동시 호출 상한(세마포어) |
+| `concurrency` | `ENGRAM_BRAIN_CONCURRENCY` | `2` | 동시 호출 상한(세마포어, 프로필별) |
 | `timeoutMs` | `ENGRAM_BRAIN_TIMEOUT_MS` | `120000` | 호출 타임아웃 |
 | `extraArgs` | — | `[]` | CLI 추가 인수 |
 
-`provider`는 Phase 1에선 `claude-cli`만 인식. 다른 값이면 명확한 에러로 거부(이후 단계에서 분기 추가).
+> 세마포어가 프로필별인지 전역(구독 한도 = 총 동시 두뇌 호출)인지는 두뇌가 둘 이상 도는 Phase 3의 관심사. Phase 1은 두뇌 하나뿐이라 프로필별 = 전역.
 
 ---
 
@@ -211,7 +219,7 @@ export interface CoreMessage {
 
 | 대상 | 방법 |
 |---|---|
-| `brain.config` | 파일 있음/없음/env 덮어쓰기 → 병합 결과 검증. |
+| `brain.config` | 파일 있음/없음/env 덮어쓰기 → 병합 결과, `default` 프로필 해소, 비-claude-cli provider 거부. |
 | `ClaudeCliBrain` | spawn 모킹 → NDJSON 스트림 파싱(델타 → onChunk 누적, result → text/cost), 타임아웃 → isError, 세마포어가 동시 호출 수 제한. |
 | `ReaderAgent` | `FakeBrain` + 인메모리/스텁 RagStore → 컨텍스트 조립 형식, 출처 첨부, 무결과 머리말, 에러 경계(brain isError → 실패 메시지). |
 | `Orchestrator` | route가 reader.handle로 위임하고 onChunk를 통과시키는지. |
@@ -229,5 +237,5 @@ export interface CoreMessage {
 4. 두뇌 호출이 `brain.json`의 `concurrency`를 넘지 않는다(세마포어 동작).
 5. CLI 타임아웃·오류가 프로세스를 죽이지 않고 사용자에게 실패 메시지로 전달된다.
 6. Gateway가 `ReaderAgent`를 직접 참조하지 않는다(Orchestrator 경유).
-7. 모델·CLI 경로·동시 수·타임아웃이 코드에 하드코딩되지 않고 `brain.json`에서 온다.
+7. 모델·CLI 경로·동시 수·타임아웃이 코드에 하드코딩되지 않고 `brains.json`(`brains[default]`)에서 온다. 두뇌 프로필 여러 개를 담을 수 있다.
 8. 신규 단위 테스트 통과 + 기존 Phase 0 테스트 무회귀.
