@@ -12,6 +12,12 @@ describe('parseJsonBlock', () => {
     expect(parseJsonBlock('여기 있음: [{"a":1}] 끝')).toEqual([{ a: 1 }]);
   });
   it('JSON 없으면 null', () => { expect(parseJsonBlock('그냥 텍스트')).toBeNull(); });
+  it('꼬리 산문의 브래킷을 무시한다', () => {
+    expect(parseJsonBlock('facts: [{"a":1}]. 자세한 건 [1] 참고')).toEqual([{ a: 1 }]);
+  });
+  it('문자열 내부 브래킷을 무시한다', () => {
+    expect(parseJsonBlock('[{"q":"see ] bracket"}]')).toEqual([{ q: 'see ] bracket' }]);
+  });
 });
 
 describe('IngesterAgent.extractFacts', () => {
@@ -28,6 +34,11 @@ describe('IngesterAgent.extractFacts', () => {
   });
   it('파싱 실패 시 빈 배열 + 경고', async () => {
     const writer = new FakeBrain({ text: '망가진 출력', costUsd: 0, isError: false });
+    const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger);
+    expect(await agent.extractFacts('대화')).toEqual([]);
+  });
+  it('writer 오류(isError) 시 빈 배열', async () => {
+    const writer = new FakeBrain({ text: '', costUsd: 0, isError: true });
     const agent = new IngesterAgent({} as any, new ImportanceGate({} as any), writer, {} as any, {} as any, {} as any, noopLogger);
     expect(await agent.extractFacts('대화')).toEqual([]);
   });
