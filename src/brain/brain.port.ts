@@ -12,3 +12,4 @@ export interface BrainProvider {
 }
 
 export const BRAIN = Symbol('BRAIN'); // DI 토큰
+export const JUDGE_BRAIN = Symbol('JUDGE_BRAIN'); // judge 전용 두뇌 DI 토큰(작성자≠검증자)

@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadActiveBrain } from './brain.config';
+import { loadActiveBrain, loadBrainProfile } from './brain.config';
 
 describe('loadActiveBrain', () => {
   let dir: string;
@@ -52,5 +52,28 @@ describe('loadActiveBrain', () => {
       JSON.stringify({ default: 'g', brains: { g: { provider: 'gemini-api' } } }),
     );
     expect(() => loadActiveBrain(dir, {})).toThrow(/provider/);
+  });
+});
+
+describe('loadBrainProfile', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-cfg-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('loadBrainProfile은 지정 프로필을 해소한다', () => {
+    fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({
+      default: 'w', brains: {
+        w: { provider: 'claude-cli', model: 'opus' },
+        judge: { provider: 'claude-cli', model: 'haiku' },
+      },
+    }));
+    expect(loadBrainProfile(dir, 'judge', {}).model).toBe('haiku');
+  });
+
+  it('없는 프로필은 default로 폴백한다', () => {
+    fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({
+      default: 'w', brains: { w: { provider: 'claude-cli', model: 'opus' } },
+    }));
+    expect(loadBrainProfile(dir, 'judge', {}).model).toBe('opus'); // judge 없음 → default(w)
   });
 });
