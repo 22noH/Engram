@@ -44,4 +44,9 @@ export class PathResolver {
   getRagDir(): string {
     return path.join(this.dataDir, 'rag');
   }
+
+  // 설정(brains.json 등) 디렉토리(설계 §15 runtime/config).
+  getConfigDir(): string {
+    return path.join(this.dataDir, 'config');
+  }
 }

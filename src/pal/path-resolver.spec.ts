@@ -39,4 +39,9 @@ describe('PathResolver', () => {
     const r = new PathResolver(path.join('C:', 'data'));
     expect(r.getLogsDir()).toBe(path.join('C:', 'data', 'logs'));
   });
+
+  it('getConfigDir는 dataDir 아래 config를 반환한다', () => {
+    const r = new PathResolver('/data');
+    expect(r.getConfigDir()).toBe(require('path').join('/data', 'config'));
+  });
 });
