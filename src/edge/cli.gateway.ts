@@ -59,8 +59,19 @@ export class CliGateway {
     const pending = await this.proposals.listPending(DEFAULT_USER);
     if (pending.length === 0) { process.stdout.write('대기 중인 제안이 없습니다.\n'); return; }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (q: string): Promise<string> => new Promise((res) => rl.question(q, res));
+    let closed = false;
+    rl.on('close', () => { closed = true; });
+    // stdin EOF(파이프 끝·Ctrl-D)에 견고하게: 닫힌 rl에 question을 호출하면 ERR_USE_AFTER_CLOSE로 크래시한다.
+    // 이미 닫혔으면 즉시 빈 입력(=건너뜀), 질문 도중 닫히면 close를 레이스로 받아 안전하게 resolve한다.
+    const ask = (q: string): Promise<string> =>
+      new Promise((res) => {
+        if (closed) return res('');
+        const onClose = (): void => res('');
+        rl.once('close', onClose);
+        rl.question(q, (ans) => { rl.removeListener('close', onClose); res(ans); });
+      });
     for (const p of pending) {
+      if (closed) { process.stdout.write('\n입력이 종료되어 남은 제안은 다음 review에서 처리합니다.\n'); break; }
       process.stdout.write(
         `\n[${p.op}] ${p.targetSlug} (중요도 ${p.importance}, 신뢰 ${p.verdict.confidence})\n` +
         `  내용: ${p.payload}\n  출처: ${p.sources.join(', ')}\n  판정: ${p.verdict.reason}\n`,
