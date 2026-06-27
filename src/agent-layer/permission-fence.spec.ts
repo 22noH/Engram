@@ -29,3 +29,28 @@ it('설정 파일 없으면 default-deny(도구 0)', async () => {
   await fence.load();
   expect(fence.allowedTools(persona() as any)).toEqual([]);
 });
+
+it('spawnFlags: denyPaths에 있는 writePath는 --add-dir에서 제외', async () => {
+  const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: { Trend: ['WebSearch'] }, writePaths: ['C:/ok', 'C:/danger'], denyPaths: ['C:/danger'] } }));
+  await fence.load();
+  const flags = fence.spawnFlags(persona({ tools: ['WebSearch'] }) as any);
+  expect(flags).toContain('--allowedTools');
+  expect(flags).toContain('WebSearch');
+  expect(flags).toContain('C:/ok');
+  expect(flags).not.toContain('C:/danger');
+});
+
+it('spawnFlags: 허용 도구 없으면 빈 배열', async () => {
+  const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: ['C:/ok'], denyPaths: [] } }));
+  await fence.load();
+  expect(fence.spawnFlags(persona() as any)).toEqual([]);
+});
+
+it('load: 깨진 JSON도 default-deny로 폴백', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-fence-'));
+  const p = path.join(dir, 'permissions.json');
+  fs.writeFileSync(p, 'not json{{{');
+  const fence = new PermissionFence(p);
+  await fence.load();
+  expect(fence.allowedTools(persona() as any)).toEqual([]);
+});
