@@ -151,7 +151,6 @@ export class Orchestrator {
 
       const fresh = await this.tasks!.get(session.id);
       const open = (fresh?.tickets ?? []).filter((t) => t.status !== 'SUCCESS');
-      if (open.length === 0) return this.exit(session, 'SUCCESS');
 
       // 동시 코딩(공유 체크아웃, N=concurrency). Semaphore가 동시 호출 제한.
       await Promise.all(open.map((ticket) => this.sem!.run(async () => {
@@ -178,17 +177,20 @@ export class Orchestrator {
       const landed = (after?.tickets ?? []).filter((t) => t.status === 'SUCCESS').length;
       const total = after?.tickets?.length ?? 0;
       const allLanded = total > 0 && landed === total;
-      await this.tasks!.recordProgress(session.id, { landed, criteriaMet: allLanded ? project.acceptanceCriteria.length : 0 });
+      // criteriaMet을 한 번만 계산해 recordProgress와 stuck 관측 모두 사용(불일치 방지).
+      const criteriaMet = allLanded ? project.acceptanceCriteria.length : 0;
+      await this.tasks!.recordProgress(session.id, { landed, criteriaMet });
 
       if (allLanded) {
+        // SUCCESS는 리뷰어 승인 경유만 — 오픈 티켓 0이어도 여기서 판정(우회 차단).
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));
         if (review.approved) return this.exit(session, 'SUCCESS');
         await this.tasks!.addTickets(session.id, review.extraTickets.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
       }
 
       if (project.budget.tokens !== null && budgetSpent >= project.budget.tokens) { this.runState = 'paused'; return this.exit(session, 'BUDGET'); }
-      const after2 = await this.tasks!.get(session.id);
-      if (stuck.observe(TaskStore.progressKey(after2 ?? ({} as any)))) { this.runState = 'paused'; return this.exit(session, 'STUCK'); }
+      // 방금 기록한 진전 값으로 stuck 관측(재조회 불필요). progressKey = landed:criteriaMet.
+      if (stuck.observe(`${landed}:${criteriaMet}`)) { this.runState = 'paused'; return this.exit(session, 'STUCK'); }
     }
     return this.exit(session, 'STUCK');
   }
