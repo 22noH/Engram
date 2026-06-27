@@ -11,7 +11,8 @@
     "start:dev": "nest start --watch",
     "start:cli": "ts-node src/cli.ts",
     "test": "jest",
-    "demo": "ts-node scripts/demo.ts"
+    "demo": "ts-node scripts/demo.ts",
+    "smoke:code": "node dist/src/cli.js code"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
