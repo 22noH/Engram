@@ -4,7 +4,22 @@ import * as path from 'path';
 import { KeyedLock } from './keyed-lock';
 
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
-export type TaskKind = 'collaboration' | 'board-decision';
+export type TaskKind = 'collaboration' | 'board-decision' | 'coding';
+
+export interface CodingTicket {
+  id: string;
+  area: string;
+  instruction: string;
+  status: TaskStatus;
+  attempts: number;
+  gate: { pass: boolean; output: string } | null;
+}
+
+export interface TaskProgress {
+  landed: number;
+  criteriaMet: number;
+  criteriaTotal: number;
+}
 
 const VALID: Record<TaskStatus, TaskStatus[]> = {
   PENDING: ['RUNNING', 'FAILED'],
@@ -23,6 +38,9 @@ export interface TaskRecord {
   result: string | null;
   createdAt: string;
   updatedAt: string;
+  projectRef?: string;
+  tickets?: CodingTicket[];
+  progress?: TaskProgress;
 }
 
 // 협업/회의의 공유 블랙보드(설계 §5.1). runtime/state/*.json, 레코드별 KeyedLock 단일라이터.
@@ -59,7 +77,7 @@ export class TaskStore {
     }
   }
 
-  private file(id: string): string {
+  protected file(id: string): string {
     return path.join(this.stateDir, `${id}.json`);
   }
 
@@ -95,5 +113,49 @@ export class TaskStore {
   private async write(rec: TaskRecord): Promise<void> {
     await fs.promises.mkdir(this.stateDir, { recursive: true });
     await fs.promises.writeFile(this.file(rec.id), JSON.stringify(rec, null, 2));
+  }
+
+  async createCoding(input: { question: string; projectRef: string; criteriaTotal: number }): Promise<TaskRecord> {
+    const now = new Date().toISOString();
+    const id = `task_${now.replace(/[:.]/g, '-')}_${(this.seq++).toString(36)}_code`;
+    const rec: TaskRecord = {
+      id, kind: 'coding', status: 'PENDING', question: input.question,
+      assignees: [], blackboard: {}, result: null, createdAt: now, updatedAt: now,
+      projectRef: input.projectRef, tickets: [],
+      progress: { landed: 0, criteriaMet: 0, criteriaTotal: input.criteriaTotal },
+    };
+    await this.lock.run(rec.id, () => this.write(rec));
+    return rec;
+  }
+
+  addTickets(id: string, tickets: Array<{ id: string; area: string; instruction: string }>): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => {
+      rec.tickets = rec.tickets ?? [];
+      for (const t of tickets) rec.tickets.push({ ...t, status: 'PENDING', attempts: 0, gate: null });
+    });
+  }
+
+  updateTicket(id: string, ticketId: string, patch: Partial<CodingTicket>): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => {
+      const t = (rec.tickets ?? []).find((x) => x.id === ticketId);
+      if (!t) throw new Error(`티켓 없음: ${ticketId}`);
+      Object.assign(t, patch);
+    });
+  }
+
+  recordProgress(id: string, patch: Partial<TaskProgress>): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => {
+      rec.progress = { ...(rec.progress ?? { landed: 0, criteriaMet: 0, criteriaTotal: 0 }), ...patch };
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    await fs.promises.rm(this.file(id), { force: true });
+  }
+
+  // 진전 관측키(설계 §5.1 seam #4). 라운드 간 이 값이 안 바뀌면 stuck.
+  static progressKey(rec: TaskRecord): string {
+    const p = rec.progress ?? { landed: 0, criteriaMet: 0, criteriaTotal: 0 };
+    return `${p.landed}:${p.criteriaMet}`;
   }
 }

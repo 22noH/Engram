@@ -50,3 +50,39 @@ describe('TaskStore FSM/blackboard', () => {
     expect(got?.blackboard).toEqual({ A: 'aa', B: 'bb' });
   });
 });
+
+describe('TaskStore 코딩 확장', () => {
+  let dir: string; let store: TaskStore;
+  beforeEach(async () => {
+    dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'engram-task-'));
+    store = new TaskStore(dir, new KeyedLock());
+  });
+  afterEach(async () => { await fs.promises.rm(dir, { recursive: true, force: true }); });
+
+  it('createCoding은 coding kind + 빈 티켓 + progress', async () => {
+    const r = await store.createCoding({ question: '목표', projectRef: 'proj_a', criteriaTotal: 2 });
+    expect(r.kind).toBe('coding');
+    expect(r.tickets).toEqual([]);
+    expect(r.progress).toEqual({ landed: 0, criteriaMet: 0, criteriaTotal: 2 });
+  });
+
+  it('addTickets→updateTicket→recordProgress', async () => {
+    const r = await store.createCoding({ question: 'q', projectRef: 'p', criteriaTotal: 1 });
+    await store.addTickets(r.id, [{ id: 'tk1', area: 'src/a', instruction: 'do' }]);
+    await store.updateTicket(r.id, 'tk1', { status: 'SUCCESS', gate: { pass: true, output: 'ok' } });
+    await store.recordProgress(r.id, { landed: 1, criteriaMet: 1 });
+    const fresh = await store.get(r.id);
+    expect(fresh!.tickets![0]).toMatchObject({ status: 'SUCCESS', gate: { pass: true } });
+    expect(fresh!.progress).toEqual({ landed: 1, criteriaMet: 1, criteriaTotal: 1 });
+  });
+
+  it('progressKey는 landed:criteriaMet', () => {
+    expect(TaskStore.progressKey({ progress: { landed: 2, criteriaMet: 1, criteriaTotal: 3 } } as any)).toBe('2:1');
+  });
+
+  it('remove 후 get은 null', async () => {
+    const r = await store.createCoding({ question: 'q', projectRef: 'p', criteriaTotal: 0 });
+    await store.remove(r.id);
+    expect(await store.get(r.id)).toBeNull();
+  });
+});
