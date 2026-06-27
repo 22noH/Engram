@@ -9,6 +9,7 @@ export interface BrainProfile {
   concurrency: number;
   timeoutMs: number;
   extraArgs: string[];
+  env?: Record<string, string>;
 }
 
 interface BrainsFile {
@@ -23,6 +24,7 @@ const DEFAULTS: BrainProfile = {
   concurrency: 2,
   timeoutMs: 120000,
   extraArgs: [],
+  env: {},
 };
 
 const DEFAULT_FILE: BrainsFile = {

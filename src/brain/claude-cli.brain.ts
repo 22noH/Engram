@@ -46,7 +46,10 @@ export class ClaudeCliBrain implements BrainProvider {
         ...(this.profile.model ? ['--model', this.profile.model] : []),
         ...this.profile.extraArgs,
       ];
-      const child = spawn(this.profile.cli, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(this.profile.cli, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...this.profile.env },
+      });
 
       let buf = '';
       let text = '';

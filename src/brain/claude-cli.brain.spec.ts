@@ -68,4 +68,15 @@ describe('ClaudeCliBrain', () => {
     expect(child.kill).toHaveBeenCalled();
     jest.useRealTimers();
   });
+
+  it('profile.env가 spawn 환경에 병합된다', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain({ ...PROFILE, env: { ANTHROPIC_BASE_URL: 'http://x' } });
+    const p = brain.complete('hi');
+    child.emit('close', 0);
+    await p;
+    const opts = (spawn as unknown as jest.Mock).mock.calls[0][2];
+    expect(opts.env.ANTHROPIC_BASE_URL).toBe('http://x');
+  });
 });
