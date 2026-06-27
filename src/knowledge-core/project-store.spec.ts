@@ -33,4 +33,13 @@ describe('ProjectStore', () => {
     await store.create(base); await store.remove('proj_a');
     expect(await store.get('proj_a')).toBeNull();
   });
+  it('list는 저장된 프로젝트를 모두 반환', async () => {
+    await store.create(base);
+    await store.create({ ...base, id: 'proj_b' });
+    const all = await store.list();
+    expect(all.map((c) => c.id).sort()).toEqual(['proj_a', 'proj_b']);
+  });
+  it('빈 디렉터리는 빈 배열', async () => {
+    expect(await store.list()).toEqual([]);
+  });
 });
