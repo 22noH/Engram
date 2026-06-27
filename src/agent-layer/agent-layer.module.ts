@@ -9,10 +9,15 @@ import { PersonaRegistry } from './persona-registry';
 import { PermissionFence } from './permission-fence';
 import { SpecialistAgent } from './specialist-agent';
 import { CodingSpecialist } from './coding-specialist';
+import { ReviewerAgent } from './reviewer-agent';
+import { ProjectWiki } from './project-wiki';
 import { Synthesizer } from './synthesizer';
 import { MeetingEngine } from './meeting-engine';
 import { TaskStore } from '../knowledge-core/task-store';
+import { ProjectStore } from '../knowledge-core/project-store';
+import { CodingGit } from '../knowledge-core/coding-git';
 import { RagStore } from '../knowledge-core/rag/rag-store';
+import { WikiEngine } from '../knowledge-core/wiki/wiki-engine';
 import { PinoLogger } from '../pal/logger';
 import { PathResolver } from '../pal/path-resolver';
 import { ConversationStore } from '../knowledge-core/conversation-store';
@@ -102,7 +107,20 @@ import { VerificationGate } from './verification-gate';
     },
     MeetingEngine,
     VerificationGate,
-    // Orchestrator: 기존 deps + tasks·specialist·synthesizer·semaphore.
+    // ReviewerAgent: JUDGE_BRAIN 사용(작성자≠검증자, seam #5).
+    {
+      provide: ReviewerAgent,
+      useFactory: (judgeBrain: BrainProvider) => new ReviewerAgent(judgeBrain),
+      inject: [JUDGE_BRAIN],
+    },
+    // ProjectWiki: findings 저장(설계 §5.3). WikiEngine을 KnowledgeCore에서 소비.
+    {
+      provide: ProjectWiki,
+      useFactory: (wiki: WikiEngine) => new ProjectWiki(wiki),
+      inject: [WikiEngine],
+    },
+    // Orchestrator: 코딩 협력자 6개 추가 — 생성자 15인자 순서대로 전달.
+    // inject 배열 순서 = useFactory 인자 순서 (sem은 내부 생성, inject 제외).
     {
       provide: Orchestrator,
       useFactory: (
@@ -113,14 +131,29 @@ import { VerificationGate } from './verification-gate';
         tasks: TaskStore,
         specialist: SpecialistAgent,
         synthesizer: Synthesizer,
+        projects: ProjectStore,
+        gate: VerificationGate,
+        codingGit: CodingGit,
+        coder: CodingSpecialist,
+        reviewer: ReviewerAgent,
+        codeBrain: BrainProvider,
+        fence: PermissionFence,
       ) => {
         const sem = new Semaphore(2);
-        return new Orchestrator(reader, conversations, logger, ingester, tasks, specialist, synthesizer, sem);
+        return new Orchestrator(
+          reader, conversations, logger, ingester, tasks, specialist, synthesizer, sem,
+          projects, gate, codingGit, coder, reviewer, codeBrain, fence,
+        );
       },
-      inject: [ReaderAgent, ConversationStore, PinoLogger, IngesterAgent, TaskStore, SpecialistAgent, Synthesizer],
+      inject: [
+        ReaderAgent, ConversationStore, PinoLogger, IngesterAgent, TaskStore,
+        SpecialistAgent, Synthesizer,
+        ProjectStore, VerificationGate, CodingGit, CodingSpecialist, ReviewerAgent,
+        BRAIN, PermissionFence,
+      ],
     },
   ],
-  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence, VerificationGate, CodingSpecialist],
+  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence, VerificationGate, CodingSpecialist, ReviewerAgent, ProjectWiki],
 })
 export class AgentLayerModule implements OnModuleInit {
   constructor(private readonly registry: PersonaRegistry) {}

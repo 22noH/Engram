@@ -15,6 +15,8 @@ import { ImportanceGate } from './importance-gate';
 import { ProposalStore } from './proposal-store';
 import { DigestLock } from './digest-lock';
 import { TaskStore } from './task-store';
+import { ProjectStore } from './project-store';
+import { CodingGit } from './coding-git';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
@@ -46,8 +48,16 @@ import { TaskStore } from './task-store';
       useFactory: (paths: PathResolver, lock: KeyedLock) => new TaskStore(paths.getStateDir(), lock),
       inject: [PathResolver, KeyedLock],
     },
+    // ProjectStore: config/projects/ 디렉터리 기반 코딩 프로젝트 설정 저장(설계 §5.2).
+    {
+      provide: ProjectStore,
+      useFactory: (paths: PathResolver) => new ProjectStore(paths.getProjectsDir()),
+      inject: [PathResolver],
+    },
+    // CodingGit: 타깃 외부 repo git 운전(설계 §4). 경로는 호출자(Orchestrator)가 제공.
+    CodingGit,
   ],
-  exports: [PathResolver, WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore, DigestLock, TaskStore],
+  exports: [PathResolver, WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore, DigestLock, TaskStore, ProjectStore, CodingGit],
 })
 export class KnowledgeCoreModule implements OnModuleInit {
   constructor(
