@@ -70,3 +70,19 @@ it('codingFlags는 allowedTools + add-dir', () => {
   const flags = f.codingFlags(persona, ['C:/proj']);
   expect(flags).toEqual(['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj']);
 });
+
+it('assertWritable는 denyPath 하위 디렉터리도 거부, writePath 하위는 허용', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: ['C:/proj'], denyPaths: ['C:/engram'] } };
+  expect(() => f.assertWritable('C:/engram/src/main.ts')).toThrow(); // deny 하위
+  expect(() => f.assertWritable('C:/proj/sub/a.ts')).not.toThrow();   // write 하위 허용
+  expect(() => f.assertWritable('C:/PROJ')).not.toThrow();            // Windows 대소문자 무감지
+});
+
+it('codingFlags는 denyPath 하위 writePath를 add-dir에서 제외', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: { Dev: ['Bash'] }, writePaths: [], denyPaths: ['C:/engram'] } };
+  const persona = { name: 'Dev', brain: 'claude', tools: ['Bash'] } as any;
+  const flags = f.codingFlags(persona, ['C:/engram/plugins', 'C:/proj']);
+  expect(flags).toEqual(['--allowedTools', 'Bash', '--add-dir', 'C:/proj']); // engram 하위 제외
+});
