@@ -43,4 +43,25 @@ export class PermissionFence {
     for (const w of writes) flags.push('--add-dir', w);
     return flags;
   }
+
+  // 타깃 경로 쓰기 가능 검증(설계 §9, ③). denyPaths 내거나 writePaths 밖이면 거부.
+  // 자기수정·자기파괴 차단: Engram repo는 denyPaths에 등록.
+  assertWritable(targetPath: string): void {
+    const t = targetPath.replace(/\\/g, '/');
+    const within = (base: string): boolean => {
+      const b = base.replace(/\\/g, '/');
+      return t === b || t.startsWith(b + '/');
+    };
+    if (this.cfg.allow.denyPaths.some(within)) throw new Error(`쓰기 금지 경로(denyPaths): ${targetPath}`);
+    if (!this.cfg.allow.writePaths.some(within)) throw new Error(`허용되지 않은 경로(writePaths 밖): ${targetPath}`);
+  }
+
+  // 코딩 스페셜리스트 spawn 플래그(설계 §9). allowedTools ∩ + 타깃 쓰기 폴더.
+  codingFlags(persona: Persona, writePaths: string[]): string[] {
+    const tools = this.allowedTools(persona);
+    const flags: string[] = [];
+    if (tools.length) flags.push('--allowedTools', tools.join(','));
+    for (const w of writePaths.filter((p) => !this.cfg.allow.denyPaths.includes(p))) flags.push('--add-dir', w);
+    return flags;
+  }
 }

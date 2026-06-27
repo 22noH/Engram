@@ -54,3 +54,19 @@ it('load: 깨진 JSON도 default-deny로 폴백', async () => {
   await fence.load();
   expect(fence.allowedTools(persona() as any)).toEqual([]);
 });
+
+it('assertWritable는 denyPaths 내 타깃을 거부', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: ['C:/proj'], denyPaths: ['C:/engram'] } };
+  expect(() => f.assertWritable('C:/engram')).toThrow();
+  expect(() => f.assertWritable('C:/proj')).not.toThrow();
+  expect(() => f.assertWritable('C:/other')).toThrow(); // writePaths 밖
+});
+
+it('codingFlags는 allowedTools + add-dir', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: { Dev: ['Bash', 'Edit', 'Write'] }, writePaths: [], denyPaths: [] } };
+  const persona = { name: 'Dev', brain: 'claude', tools: ['Bash', 'Edit', 'Write'] } as any;
+  const flags = f.codingFlags(persona, ['C:/proj']);
+  expect(flags).toEqual(['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj']);
+});
