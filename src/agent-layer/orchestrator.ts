@@ -15,6 +15,14 @@ import { parseJsonBlock } from './parse-json-block';
 import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
 import { detectGate } from './gate-detect';
+import { loadPrompt } from './prompt-store';
+
+// prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
+const DECOMPOSE_DEFAULT = [
+  '아래 목표를 작업 조각으로 분할하라.',
+  '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
+  '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
+].join('\n');
 import { CodingGit } from '../knowledge-core/coding-git';
 import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
@@ -96,9 +104,7 @@ export class Orchestrator {
   // 분해=설계(설계 §4-1). 안 겹치는 영역으로 분할 → 티켓. 직접호출 0(seam #1).
   async decompose(goal: string, brain: BrainProvider): Promise<Array<{ id: string; area: string; instruction: string }>> {
     const prompt = [
-      '아래 목표를 작업 조각으로 분할하라.',
-      '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
-      '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
+      loadPrompt('decompose', DECOMPOSE_DEFAULT),
       `\n# 목표\n${goal}`,
       '\n반드시 이 JSON만: {"tickets":[{"area":"디렉터리/영역","instruction":"할 일"}]}',
     ].join('\n');

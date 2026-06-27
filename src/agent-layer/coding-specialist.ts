@@ -5,6 +5,17 @@ import { BrainProvider } from '../brain/brain.port';
 import { PinoLogger } from '../pal/logger';
 import { CodingTicket } from '../knowledge-core/task-store';
 import { ProjectConfig } from '../knowledge-core/project-store';
+import { loadPrompt } from './prompt-store';
+
+// prompts/coding-rules.md 없을 때의 내장 기본값(out-of-box 동작 보장).
+const CODING_RULES_DEFAULT = [
+  '규칙:',
+  '- 타깃 디렉터리의 코드를 직접 편집한다. 네게 주어진 이 조각만 한다.',
+  '- 테스트·빌드 실행은 하지 마라 — 검증은 Engram이 게이트로 직접 한다.',
+  '- 파일 존재 여부·git 상태·CI·절차를 길게 논하지 마라. 코드만 바꾼다.',
+  '- 다른 에이전트/조각과 대화하지 마라.',
+  '- 보고는 사용자 목표와 같은 언어로, 한두 줄만 간결히.',
+].join('\n');
 
 // 제네릭 코딩 워커(설계 §3, §9). stateless. 코드 변경은 도구 부수효과(타깃 cwd).
 // 게이트는 호출자가 별도로 돌린다(에이전트 자기보고 불신, §8.1).
@@ -26,12 +37,7 @@ export class CodingSpecialist {
       `\n# 작업 영역\n${ticket.area}`,
       `\n# 할 일\n${ticket.instruction}`,
       failNote,
-      '\n규칙:',
-      '- 타깃 디렉터리의 코드를 직접 편집한다. 네게 주어진 이 조각만 한다.',
-      '- 테스트·빌드 실행은 하지 마라 — 검증은 Engram이 게이트로 직접 한다.',
-      '- 파일 존재 여부·git 상태·CI·절차를 길게 논하지 마라. 코드만 바꾼다.',
-      '- 다른 에이전트/조각과 대화하지 마라.',
-      '- 보고는 한국어로, 한두 줄만 간결히.',
+      `\n${loadPrompt('coding-rules', CODING_RULES_DEFAULT)}`,
     ].join('\n');
     // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
     const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
