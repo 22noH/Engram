@@ -30,7 +30,7 @@ export class MeetingEngine {
     await this.tasks.transition(decision.id, 'RUNNING');
     await this.tasks.setResult(decision.id, summary);
     await this.tasks.transition(decision.id, 'SUCCESS');
-    this.logger.warn(`회의 완료: ${def.name} → ${slug}`, 'MeetingEngine');
+    this.logger.log(`회의 완료: ${def.name} → ${slug}`, 'MeetingEngine');
     return { minutesSlug: slug, decisionId: decision.id };
   }
 }
