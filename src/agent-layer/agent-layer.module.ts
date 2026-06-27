@@ -46,7 +46,10 @@ import { VerificationGate } from './verification-gate';
     {
       provide: PermissionFence,
       useFactory: async (paths: PathResolver) => {
-        const fence = new PermissionFence(path.join(paths.getConfigDir(), 'permissions.json'));
+        // __dirname = dist/src/agent-layer or src/agent-layer → 두 단계 올라가면 레포 루트.
+        // PersonaRegistry와 동일 패턴: path.join(__dirname, '..', '..') = 레포 루트.
+        const engramRoot = path.join(__dirname, '..', '..');
+        const fence = new PermissionFence(path.join(paths.getConfigDir(), 'permissions.json'), engramRoot);
         await fence.load();
         return fence;
       },

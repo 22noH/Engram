@@ -22,7 +22,8 @@ describe('Orchestrator.codeRun', () => {
       { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
       { work: async () => '코딩함' } as any,
       { review: async () => ({ approved: true, extraTickets: [] }) } as any,
-      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any);
+      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
     const r = await o.codeRun('p', { maxRounds: 5 });
     expect(r.status).toBe('SUCCESS');
   });
@@ -43,7 +44,8 @@ describe('Orchestrator.codeRun', () => {
       { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
       { work: async () => 'x' } as any,
       { review: async () => ({ approved: false, extraTickets: [] }) } as any,
-      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any);
+      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
     const r = await o.codeRun('p', { maxRounds: 10, stuckK: 3 });
     expect(r.status).toBe('STUCK');
   });
@@ -63,7 +65,8 @@ describe('Orchestrator.codeRun', () => {
       { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
       { work: async () => 'x' } as any,
       { review: async () => ({ approved: false, extraTickets: [] }) } as any,  // 영원히 미승인
-      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any);
+      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
     const r = await o.codeRun('p', { maxRounds: 20, stuckK: 3 });
     expect(r.status).toBe('STUCK');   // SUCCESS가 아니어야 한다
   });
@@ -80,10 +83,37 @@ describe('Orchestrator.codeRun', () => {
       { get: async () => project } as any, { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
       { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
       { work: async () => 'x' } as any, { review: async () => ({ approved: false, extraTickets: [] }) } as any,
-      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any);
+      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
     o.setRunState('stopped');
     const r = await o.codeRun('p', { maxRounds: 5 });
     expect(r.status).toBe('STOPPED');
+  });
+});
+
+describe('proposeProject — id 충돌 방지', () => {
+  it('경로 끝 32자가 같아도 전체 경로가 다르면 id가 달라야 한다', async () => {
+    const ids: string[] = [];
+    // 끝 32자 공유 but 전체 경로 다름 → djb2 해시로 구분
+    const paths = [
+      'C:/workspace/alpha/src/agent-layer/some-feature',
+      'C:/workspace/beta/src/agent-layer/some-feature',
+    ];
+    for (const targetPath of paths) {
+      let savedId = '';
+      const projects = { create: async (c: any) => { savedId = c.id; return c; }, update: async () => {}, get: async () => null };
+      const fence = { assertWritable: () => {} };
+      const o = new Orchestrator({} as any, {} as any, logger, {} as any,
+        {} as any, undefined, undefined, { run: (f: any) => f() } as any, projects as any,
+        {} as any, {} as any, {} as any, {} as any,
+        fakeBrain('{"acceptanceCriteria":[],"gate":{"test":"","build":"","typecheck":""}}') as any,
+        fence as any);
+      await o.proposeProject(targetPath, 'goal');
+      ids.push(savedId);
+    }
+    expect(ids[0]).not.toBe(ids[1]);
+    expect(ids[0]).toMatch(/^proj_/);
+    expect(ids[1]).toMatch(/^proj_/);
   });
 });
 

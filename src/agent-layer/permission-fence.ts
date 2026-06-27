@@ -14,7 +14,8 @@ const EMPTY = (): FenceConfig => ({ default: 'deny', allow: { tools: {}, writePa
 @Injectable()
 export class PermissionFence {
   private cfg: FenceConfig = EMPTY();
-  constructor(private readonly configPath: string) {}
+  // engramRoot: 설정 없이도 항상 거부되는 자기 저장소 루트(자기수정 백스톱 §9).
+  constructor(private readonly configPath: string, private readonly engramRoot?: string) {}
 
   async load(): Promise<void> {
     try {
@@ -54,13 +55,17 @@ export class PermissionFence {
   }
 
   // 타깃 경로 쓰기 가능 검증(설계 §9, ③). denyPaths 내거나 writePaths 밖이면 거부.
-  // 자기수정·자기파괴 차단: Engram repo는 denyPaths에 등록.
+  // 자기수정·자기파괴 차단: Engram repo는 engramRoot 하드코딩 + denyPaths에도 등록 가능.
   assertWritable(targetPath: string): void {
+    // 하드 백스톱: 설정과 무관하게 Engram 자기 저장소는 절대 수정 불가.
+    if (this.engramRoot && PermissionFence.isWithin(targetPath, this.engramRoot)) {
+      throw new Error(`Engram 자기 저장소는 수정 불가(자기수정 차단): ${targetPath}`);
+    }
     if (this.cfg.allow.denyPaths.some((d) => PermissionFence.isWithin(targetPath, d))) {
       throw new Error(`쓰기 금지 경로(denyPaths): ${targetPath}`);
     }
     if (!this.cfg.allow.writePaths.some((w) => PermissionFence.isWithin(targetPath, w))) {
-      throw new Error(`허용되지 않은 경로(writePaths 밖): ${targetPath}`);
+      throw new Error(`허용되지 않은 경로(writePaths 밖) — runtime/config/permissions.json의 allow.writePaths에 추가하세요: ${targetPath}`);
     }
   }
 

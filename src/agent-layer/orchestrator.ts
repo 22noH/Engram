@@ -130,7 +130,7 @@ export class Orchestrator {
     ].join('\n');
     const r = await this.codeBrain.complete(prompt);
     const draft = this.parseProposal(r.isError ? '' : r.text);
-    const id = `proj_${targetPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-32)}`;
+    const id = `proj_${targetPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-24)}_${this.hashPath(targetPath)}`;
     const cfg: ProjectConfig = {
       id, targetPath, branch: `engram/${id}`,
       gate: draft.gate, acceptanceCriteria: draft.acceptanceCriteria,
@@ -164,12 +164,15 @@ export class Orchestrator {
     projectId: string,
     opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void } = {},
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
-    if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain) {
+    if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
     }
     const project = await this.projects.get(projectId);
     if (!project) throw new Error(`프로젝트 없음: ${projectId}`);
     if (!project.approved) throw new Error(`완성조건 미승인 — engram code 승인 먼저: ${projectId}`);
+
+    // 심층 방어: codeRun 진입 시점에도 쓰기 권한 재검증(proposeProject 이후 설정 변경 대비).
+    this.fence.assertWritable(project.targetPath);
 
     await this.codingGit.ensureBranch(project.targetPath, project.branch);
     const session = await this.tasks!.createCoding({
@@ -231,6 +234,13 @@ export class Orchestrator {
       if (stuck.observe(`${landed}:${criteriaMet}`)) { this.runState = 'paused'; return this.exit(session, 'STUCK'); }
     }
     return this.exit(session, 'STUCK');
+  }
+
+  // djb2 해시(결정적, 외부 의존 없음). 서로 다른 경로의 id 충돌 방지.
+  private hashPath(s: string): string {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
   }
 
   private pickPersona(_project: ProjectConfig): string {

@@ -86,3 +86,14 @@ it('codingFlags는 denyPath 하위 writePath를 add-dir에서 제외', () => {
   const flags = f.codingFlags(persona, ['C:/engram/plugins', 'C:/proj']);
   expect(flags).toEqual(['--allowedTools', 'Bash', '--add-dir', 'C:/proj']); // engram 하위 제외
 });
+
+it('engramRoot 하드 백스톱: 빈 설정이어도 engramRoot 내부 경로는 항상 거부', () => {
+  // 설정이 완전히 비어있어도(denyPaths=[]) engramRoot를 넘기면 해당 경로·하위 모두 거부.
+  const root = 'C:/engram-repo';
+  const f = new PermissionFence('x', root);
+  // cfg는 EMPTY() 기본값(denyPaths=[], writePaths=[])
+  expect(() => f.assertWritable('C:/engram-repo')).toThrow('Engram 자기 저장소는 수정 불가(자기수정 차단)');
+  expect(() => f.assertWritable('C:/engram-repo/src/agent-layer/foo.ts')).toThrow('Engram 자기 저장소는 수정 불가(자기수정 차단)');
+  // engramRoot 밖이면 일반 writePaths 검사로 이동(여기선 writePaths도 비어 '밖' 오류)
+  expect(() => f.assertWritable('C:/other-proj')).toThrow('writePaths 밖');
+});
