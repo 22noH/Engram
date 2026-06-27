@@ -108,6 +108,9 @@ export class CliGateway {
     process.stdout.write(`작업 폴더: ${targetPath}\n`);
     process.stdout.write(`완성조건 초안:\n${cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`);
     process.stdout.write(`게이트: test=${cfg.gate.test} | build=${cfg.gate.build} | typecheck=${cfg.gate.typecheck}\n`);
+    if (!cfg.gate.test && !cfg.gate.build && !cfg.gate.typecheck) {
+      process.stdout.write('⚠ 하드 게이트 없음(package.json test 스크립트·tsconfig 미탐지) — 리뷰어+사람 확인에만 의존. 실제 검증을 원하면 타깃에 test 스크립트를 두거나 runtime/config/projects/{id}.json의 gate를 편집하라.\n');
+    }
     if (confirm) {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const ans = await new Promise<string>((res) => rl.question('이대로 시작? [y/N] > ', res));

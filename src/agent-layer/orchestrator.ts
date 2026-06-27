@@ -12,8 +12,9 @@ import { Semaphore } from '../brain/semaphore';
 import { TurnBudget } from './turn-budget';
 import { BrainProvider, BRAIN } from '../brain/brain.port';
 import { parseJsonBlock } from './parse-json-block';
-import { ProjectStore, ProjectConfig, GateCommands } from '../knowledge-core/project-store';
+import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
+import { detectGate } from './gate-detect';
 import { CodingGit } from '../knowledge-core/coding-git';
 import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
@@ -95,8 +96,9 @@ export class Orchestrator {
   // 분해=설계(설계 §4-1). 안 겹치는 영역으로 분할 → 티켓. 직접호출 0(seam #1).
   async decompose(goal: string, brain: BrainProvider): Promise<Array<{ id: string; area: string; instruction: string }>> {
     const prompt = [
-      '아래 목표를 서로 겹치지 않는(다른 파일/영역) 작업 조각으로 분할하라.',
-      '각 조각은 독립적으로 코딩·검증 가능해야 한다.',
+      '아래 목표를 작업 조각으로 분할하라.',
+      '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
+      '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
       `\n# 목표\n${goal}`,
       '\n반드시 이 JSON만: {"tickets":[{"area":"디렉터리/영역","instruction":"할 일"}]}',
     ].join('\n');
@@ -119,21 +121,22 @@ export class Orchestrator {
       : [];
   }
 
-  // 시작 게이트(설계 §4-0, D). 완성조건·게이트 명령 추정 → approved=false 저장(사람 승인 대기).
+  // 시작 게이트(설계 §4-0, D). 완성조건은 두뇌 추정, 게이트는 프로젝트 파일에서 *결정적 탐지*
+  // (두뇌 추측 'node x.js'는 로드만 보고 거짓 통과 → detectGate로 package.json/tsconfig 직접 읽음).
   async proposeProject(targetPath: string, goal: string): Promise<ProjectConfig> {
     if (!this.projects || !this.codeBrain || !this.fence) throw new Error('proposeProject 협력자 미주입');
     this.fence.assertWritable(targetPath); // denyPaths/writePaths 밖 거부(자기수정 차단 ③)
     const prompt = [
-      '아래 목표에 대한 완성조건(검증 가능한 항목)과 이 프로젝트의 게이트 명령을 추정하라.',
+      '아래 목표에 대한 완성조건(검증 가능한 항목)을 추정하라.',
       `\n# 목표\n${goal}\n# 타깃 경로\n${targetPath}`,
-      '\n반드시 이 JSON만: {"acceptanceCriteria":["..."],"gate":{"test":"...","build":"...","typecheck":"..."}}',
+      '\n반드시 이 JSON만: {"acceptanceCriteria":["..."]}',
     ].join('\n');
     const r = await this.codeBrain.complete(prompt);
     const draft = this.parseProposal(r.isError ? '' : r.text);
     const id = `proj_${targetPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-24)}_${this.hashPath(targetPath)}`;
     const cfg: ProjectConfig = {
       id, targetPath, branch: `engram/${id}`,
-      gate: draft.gate, acceptanceCriteria: draft.acceptanceCriteria,
+      gate: detectGate(targetPath), acceptanceCriteria: draft.acceptanceCriteria,
       writePaths: [targetPath], concurrency: 1, budget: { tokens: null }, approved: false,
     };
     await this.projects.create(cfg);
@@ -145,14 +148,10 @@ export class Orchestrator {
     await this.projects.update(projectId, { approved: true });
   }
 
-  // 기존 parseJsonBlock 재사용(T8). 새 스캐너 안 만듦.
-  private parseProposal(text: string): { acceptanceCriteria: string[]; gate: GateCommands } {
-    const o = parseJsonBlock<{ acceptanceCriteria?: unknown; gate?: any }>(text);
-    if (!o) return { acceptanceCriteria: [], gate: { test: '', build: '', typecheck: '' } };
-    return {
-      acceptanceCriteria: Array.isArray(o.acceptanceCriteria) ? o.acceptanceCriteria.map(String) : [],
-      gate: { test: String(o.gate?.test ?? ''), build: String(o.gate?.build ?? ''), typecheck: String(o.gate?.typecheck ?? '') },
-    };
+  // 기존 parseJsonBlock 재사용(T8). 게이트는 detectGate가 담당 — 여기선 완성조건만.
+  private parseProposal(text: string): { acceptanceCriteria: string[] } {
+    const o = parseJsonBlock<{ acceptanceCriteria?: unknown }>(text);
+    return { acceptanceCriteria: o && Array.isArray(o.acceptanceCriteria) ? o.acceptanceCriteria.map(String) : [] };
   }
 
   private runState: 'running' | 'paused' | 'stopped' = 'running';

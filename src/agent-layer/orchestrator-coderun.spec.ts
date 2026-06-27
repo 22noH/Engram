@@ -128,12 +128,13 @@ describe('proposeProject/approveProject', () => {
     const o = new Orchestrator({} as any, {} as any, logger, {} as any,
       {} as any, undefined, undefined, { run: (f: any) => f() } as any, projects as any,
       {} as any, {} as any, {} as any, {} as any,
-      fakeBrain('{"acceptanceCriteria":["로그인 토큰 발급"],"gate":{"test":"npm test","build":"npm run build","typecheck":"tsc --noEmit"}}') as any,
+      fakeBrain('{"acceptanceCriteria":["로그인 토큰 발급"]}') as any,
       fence as any);
     const cfg = await o.proposeProject('C:/proj', '로그인 고쳐');
     expect(cfg.approved).toBe(false);
     expect(cfg.acceptanceCriteria).toContain('로그인 토큰 발급');
-    expect(cfg.gate.test).toBe('npm test');
+    // 게이트는 두뇌가 아니라 detectGate가 산출 — 없는 경로(package.json 無)는 빈 게이트(거짓 통과 방지). 탐지 로직은 gate-detect.spec.
+    expect(cfg.gate.test).toBe('');
     await o.approveProject(cfg.id);
     expect(saved.approved).toBe(true);
   });
