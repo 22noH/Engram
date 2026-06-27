@@ -11,7 +11,7 @@ import { MeetingScheduler } from './meeting.scheduler';
 // KnowledgeCoreModule에서 WikiEngine·ProposalStore를 받아 ProposalApplier에 주입.
 // DigestScheduler: 상주 프로세스에서 @Cron으로 자율 다이제스트 실행(설계 §9.2).
 // MeetingScheduler: 등록된 회의를 동적 cron으로 실행(설계 §9.3).
-// PathResolver는 KnowledgeCoreModule이 provide — CliGateway·MeetingScheduler가 @Optional()로 소비.
+// MeetingScheduler는 PathResolver·MeetingEngine을 필수 주입; CliGateway만 @Optional() 소비.
 @Module({
   imports: [AgentLayerModule, KnowledgeCoreModule, ScheduleModule.forRoot()],
   providers: [CliGateway, ProposalApplier, DigestScheduler, MeetingScheduler],
