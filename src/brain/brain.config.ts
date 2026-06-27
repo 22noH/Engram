@@ -58,8 +58,9 @@ function resolve(cfg: BrainsFile, name: string, env: NodeJS.ProcessEnv): BrainPr
   // 비숫자·음수·0 env는 무시(NaN이면 Semaphore 상한·타임아웃이 무력화되므로). 유효할 때만 덮어쓴다.
   profile.concurrency = posIntEnv(env.ENGRAM_BRAIN_CONCURRENCY, profile.concurrency);
   profile.timeoutMs = posIntEnv(env.ENGRAM_BRAIN_TIMEOUT_MS, profile.timeoutMs);
-  if (profile.provider !== 'claude-cli') {
-    throw new Error(`지원하지 않는 provider: ${profile.provider} (Phase 1·2는 claude-cli만)`);
+  const ALLOWED = ['claude-cli', 'gemini-cli', 'codex-cli'];
+  if (!ALLOWED.includes(profile.provider)) {
+    throw new Error(`지원하지 않는 provider: ${profile.provider}`);
   }
   return profile;
 }
