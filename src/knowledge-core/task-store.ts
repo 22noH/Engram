@@ -36,7 +36,10 @@ export class TaskStore {
       id, kind: input.kind, status: 'PENDING', question: input.question,
       assignees: input.assignees, blackboard: {}, result: null, createdAt: now, updatedAt: now,
     };
-    await this.write(rec);
+    // create의 쓰기도 락 경유(공유 상태 직렬화 제약). id가 고유라 사실상 무경쟁이지만
+    // "모든 쓰기는 KeyedLock 경유" 불변을 지킨다. write() 자체는 락을 걸지 않는다 —
+    // 후속 mutate()가 lock.run(id) 안에서 write()를 호출하므로 중첩 시 데드락(재진입 불가).
+    await this.lock.run(rec.id, () => this.write(rec));
     return rec;
   }
 
