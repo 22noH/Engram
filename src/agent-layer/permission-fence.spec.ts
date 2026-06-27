@@ -112,8 +112,15 @@ it('codingAutoFlags: 표준 toolset + 백스톱 밖 폴더만 add-dir', () => {
   (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
   const flags = f.codingAutoFlags(['C:/proj', 'C:/engram/x']);
   expect(flags).toContain('--allowedTools');
-  expect(flags.join(',')).toContain('Bash');
+  expect(flags.join(',')).toContain('Edit'); // 파일 도구
+  expect(flags.join(',')).not.toContain('Bash'); // Bash는 울타리 탈출 위험으로 자동모드 제외
   expect(flags).toContain('--add-dir');
   expect(flags).toContain('C:/proj');
   expect(flags).not.toContain('C:/engram/x'); // 백스톱(자기 repo 하위) 제외
+});
+
+it('assertWritable: C:/ProgramData도 시스템 폴더로 거부', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  expect(() => f.assertWritable('C:/ProgramData/foo')).toThrow('시스템 폴더');
 });
