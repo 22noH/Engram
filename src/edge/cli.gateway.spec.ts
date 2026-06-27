@@ -97,4 +97,26 @@ describe('CliGateway', () => {
       expect(writes.join('')).toContain('회의 없음');
     });
   });
+
+  it('engram pause는 orchestrator.setRunState(paused) 호출', async () => {
+    const calls: string[] = [];
+    const orch = { setRunState: (s: string) => calls.push(s) } as any;
+    const gw = new CliGateway(orch, {} as any, {} as any);
+    await gw.run(['pause']);
+    expect(calls).toEqual(['paused']);
+  });
+
+  it('engram stop은 stopped', async () => {
+    const calls: string[] = [];
+    const gw = new CliGateway({ setRunState: (s: string) => calls.push(s) } as any, {} as any, {} as any);
+    await gw.run(['stop']);
+    expect(calls).toEqual(['stopped']);
+  });
+
+  it('engram resume은 running', async () => {
+    const calls: string[] = [];
+    const gw = new CliGateway({ setRunState: (s: string) => calls.push(s) } as any, {} as any, {} as any);
+    await gw.run(['resume']);
+    expect(calls).toEqual(['running']);
+  });
 });

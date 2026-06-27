@@ -34,10 +34,18 @@ export class CliGateway {
       process.stdout.write(out + '\n');
     } else if (argv[0] === 'meeting') {
       await this.meeting(argv.slice(1));
+    } else if (argv[0] === 'code' && argv[1]) {
+      await this.code(argv[1], argv.slice(2).join(' '));
+    } else if (argv[0] === 'pause') {
+      this.orchestrator.setRunState('paused'); process.stdout.write('일시정지\n');
+    } else if (argv[0] === 'resume') {
+      this.orchestrator.setRunState('running'); process.stdout.write('재개\n');
+    } else if (argv[0] === 'stop') {
+      this.orchestrator.setRunState('stopped'); process.stdout.write('정지\n');
     } else if (argv.length === 0) {
       await this.repl();
     } else {
-      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram (REPL)\n');
+      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram code <path> "goal" | engram pause | engram resume | engram stop | engram (REPL)\n');
     }
   }
 
@@ -87,6 +95,20 @@ export class CliGateway {
     } else {
       process.stdout.write('사용법: engram meeting add|list|remove|run\n');
     }
+  }
+
+  // engram code <path> "goal": 완성조건 초안 → 사람 승인 → 코딩 루프(설계 §4-0).
+  private async code(targetPath: string, goal: string): Promise<void> {
+    const cfg = await this.orchestrator.proposeProject(targetPath, goal);
+    process.stdout.write(`완성조건 초안:\n${cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`);
+    process.stdout.write(`게이트: test=${cfg.gate.test} | build=${cfg.gate.build} | typecheck=${cfg.gate.typecheck}\n`);
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ans = await new Promise<string>((res) => rl.question('이대로 시작? [y/N] > ', res));
+    rl.close();
+    if (ans.trim().toLowerCase() !== 'y') { process.stdout.write('취소\n'); return; }
+    await this.orchestrator.approveProject(cfg.id);
+    const r = await this.orchestrator.codeRun(cfg.id, { onChunk: (t) => process.stdout.write(t) });
+    process.stdout.write(`\n코딩 종료: ${r.status} (세션 ${r.sessionId})\n`);
   }
 
   // 승인 게이트(설계 §6 ⑤). pending 제안을 순서대로 보여주고 사람이 a/r/s로 판정.
