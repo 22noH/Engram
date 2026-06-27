@@ -49,4 +49,9 @@ describe('PathResolver', () => {
     const r = new PathResolver('/tmp/x');
     expect(r.getStateDir()).toBe(require('path').join('/tmp/x', 'state'));
   });
+
+  it('getProjectsDir는 config/projects 아래를 반환한다', () => {
+    const p = new PathResolver('C:/data');
+    expect(p.getProjectsDir().replace(/\\/g, '/')).toBe('C:/data/config/projects');
+  });
 });

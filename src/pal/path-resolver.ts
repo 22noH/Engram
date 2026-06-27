@@ -54,4 +54,9 @@ export class PathResolver {
   getStateDir(): string {
     return path.join(this.dataDir, 'state');
   }
+
+  // 프로젝트별 코딩 config(Phase 4). config/projects/{id}.json.
+  getProjectsDir(): string {
+    return path.join(this.getConfigDir(), 'projects');
+  }
 }
