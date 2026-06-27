@@ -14,6 +14,7 @@ import { ConversationStore } from './conversation-store';
 import { ImportanceGate } from './importance-gate';
 import { ProposalStore } from './proposal-store';
 import { DigestLock } from './digest-lock';
+import { TaskStore } from './task-store';
 
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
@@ -40,8 +41,13 @@ import { DigestLock } from './digest-lock';
     { provide: ImportanceGate, useFactory: () => new ImportanceGate() },
     ProposalStore,
     DigestLock,
+    {
+      provide: TaskStore,
+      useFactory: (paths: PathResolver, lock: KeyedLock) => new TaskStore(paths.getStateDir(), lock),
+      inject: [PathResolver, KeyedLock],
+    },
   ],
-  exports: [WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore, DigestLock],
+  exports: [PathResolver, WikiEngine, RagStore, PinoLogger, ConversationStore, ImportanceGate, ProposalStore, DigestLock, TaskStore],
 })
 export class KnowledgeCoreModule implements OnModuleInit {
   constructor(
