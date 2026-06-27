@@ -19,6 +19,7 @@ import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { Semaphore } from '../brain/semaphore';
 import { createBrain } from '../brain/brain.factory';
 import { loadBrainProfile } from '../brain/brain.config';
+import { VerificationGate } from './verification-gate';
 
 // AgentLayer(설계 §7). 코어(RagStore·PinoLogger)와 두뇌(BRAIN)를 소비.
 @Module({
@@ -77,6 +78,7 @@ import { loadBrainProfile } from '../brain/brain.config';
       inject: [JUDGE_BRAIN],
     },
     MeetingEngine,
+    VerificationGate,
     // Orchestrator: 기존 deps + tasks·specialist·synthesizer·semaphore.
     {
       provide: Orchestrator,
@@ -95,7 +97,7 @@ import { loadBrainProfile } from '../brain/brain.config';
       inject: [ReaderAgent, ConversationStore, PinoLogger, IngesterAgent, TaskStore, SpecialistAgent, Synthesizer],
     },
   ],
-  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence],
+  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence, VerificationGate],
 })
 export class AgentLayerModule implements OnModuleInit {
   constructor(private readonly registry: PersonaRegistry) {}
