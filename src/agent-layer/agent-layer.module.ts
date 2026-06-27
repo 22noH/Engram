@@ -8,6 +8,7 @@ import { IngesterAgent } from './ingester-agent';
 import { PersonaRegistry } from './persona-registry';
 import { PermissionFence } from './permission-fence';
 import { SpecialistAgent } from './specialist-agent';
+import { CodingSpecialist } from './coding-specialist';
 import { Synthesizer } from './synthesizer';
 import { MeetingEngine } from './meeting-engine';
 import { TaskStore } from '../knowledge-core/task-store';
@@ -71,6 +72,28 @@ import { VerificationGate } from './verification-gate';
       },
       inject: [PersonaRegistry, PermissionFence, RagStore, PinoLogger, PathResolver, BRAIN],
     },
+    // CodingSpecialist: SpecialistAgent와 동일 패턴(BRAIN 기본 + 캐시).
+    {
+      provide: CodingSpecialist,
+      useFactory: (
+        registry: PersonaRegistry,
+        fence: PermissionFence,
+        logger: PinoLogger,
+        paths: PathResolver,
+        defaultBrain: BrainProvider,
+      ) => {
+        const cache = new Map<string, BrainProvider>();
+        cache.set('claude', defaultBrain);
+        const resolveBrain = (key: string): BrainProvider => {
+          if (!cache.has(key)) {
+            cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
+          }
+          return cache.get(key)!;
+        };
+        return new CodingSpecialist(registry, fence, resolveBrain, logger);
+      },
+      inject: [PersonaRegistry, PermissionFence, PinoLogger, PathResolver, BRAIN],
+    },
     // Synthesizer: JUDGE_BRAIN 사용(작성자≠종합자, seam #5).
     {
       provide: Synthesizer,
@@ -97,7 +120,7 @@ import { VerificationGate } from './verification-gate';
       inject: [ReaderAgent, ConversationStore, PinoLogger, IngesterAgent, TaskStore, SpecialistAgent, Synthesizer],
     },
   ],
-  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence, VerificationGate],
+  exports: [Orchestrator, MeetingEngine, PersonaRegistry, PermissionFence, VerificationGate, CodingSpecialist],
 })
 export class AgentLayerModule implements OnModuleInit {
   constructor(private readonly registry: PersonaRegistry) {}
