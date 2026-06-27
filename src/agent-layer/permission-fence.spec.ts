@@ -71,28 +71,12 @@ it('assertWritable는 denyPaths 내 타깃을 거부', () => {
   expect(() => f.assertWritable('C:/other')).toThrow(); // writePaths 밖
 });
 
-it('codingFlags는 allowedTools + add-dir', () => {
-  const f = new PermissionFence('x');
-  (f as any).cfg = { default: 'deny', allow: { tools: { Dev: ['Bash', 'Edit', 'Write'] }, writePaths: [], denyPaths: [] } };
-  const persona = { name: 'Dev', brain: 'claude', tools: ['Bash', 'Edit', 'Write'] } as any;
-  const flags = f.codingFlags(persona, ['C:/proj']);
-  expect(flags).toEqual(['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj']);
-});
-
 it('assertWritable는 denyPath 하위 디렉터리도 거부, writePath 하위는 허용', () => {
   const f = new PermissionFence('x');
   (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: ['C:/proj'], denyPaths: ['C:/engram'] } };
   expect(() => f.assertWritable('C:/engram/src/main.ts')).toThrow(); // deny 하위
   expect(() => f.assertWritable('C:/proj/sub/a.ts')).not.toThrow();   // write 하위 허용
   expect(() => f.assertWritable('C:/PROJ')).not.toThrow();            // Windows 대소문자 무감지
-});
-
-it('codingFlags는 denyPath 하위 writePath를 add-dir에서 제외', () => {
-  const f = new PermissionFence('x');
-  (f as any).cfg = { default: 'deny', allow: { tools: { Dev: ['Bash'] }, writePaths: [], denyPaths: ['C:/engram'] } };
-  const persona = { name: 'Dev', brain: 'claude', tools: ['Bash'] } as any;
-  const flags = f.codingFlags(persona, ['C:/engram/plugins', 'C:/proj']);
-  expect(flags).toEqual(['--allowedTools', 'Bash', '--add-dir', 'C:/proj']); // engram 하위 제외
 });
 
 it('engramRoot 하드 백스톱: 빈 설정이어도 engramRoot 내부 경로는 항상 거부', () => {
@@ -102,6 +86,34 @@ it('engramRoot 하드 백스톱: 빈 설정이어도 engramRoot 내부 경로는
   // cfg는 EMPTY() 기본값(denyPaths=[], writePaths=[])
   expect(() => f.assertWritable('C:/engram-repo')).toThrow('Engram 자기 저장소는 수정 불가(자기수정 차단)');
   expect(() => f.assertWritable('C:/engram-repo/src/agent-layer/foo.ts')).toThrow('Engram 자기 저장소는 수정 불가(자기수정 차단)');
-  // engramRoot 밖이면 일반 writePaths 검사로 이동(여기선 writePaths도 비어 '밖' 오류)
-  expect(() => f.assertWritable('C:/other-proj')).toThrow('writePaths 밖');
+  // 자동모드: writePaths 비어 있으면 백스톱 밖 경로는 허용(명시 타깃 = 동의).
+  expect(() => f.assertWritable('C:/other-proj')).not.toThrow();
+});
+
+it('assertWritable: 시스템 폴더는 설정 무관 항상 거부', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  expect(() => f.assertWritable('C:/Windows/System32')).toThrow('시스템 폴더');
+  expect(() => f.assertWritable('C:/Program Files/foo')).toThrow('시스템 폴더');
+});
+
+it('assertWritable: writePaths 비어 있으면 자동 허용, 지정되면 엄격 allowlist', () => {
+  const auto = new PermissionFence('x', 'C:/engram');
+  (auto as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  expect(() => auto.assertWritable('C:/Users/User/proj')).not.toThrow(); // 자동: 백스톱 밖 허용
+  const strict = new PermissionFence('x');
+  (strict as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: ['C:/proj'], denyPaths: [] } };
+  expect(() => strict.assertWritable('C:/proj/sub')).not.toThrow();
+  expect(() => strict.assertWritable('C:/other')).toThrow('writePaths 밖'); // 지정됐으니 밖 거부
+});
+
+it('codingAutoFlags: 표준 toolset + 백스톱 밖 폴더만 add-dir', () => {
+  const f = new PermissionFence('x', 'C:/engram');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  const flags = f.codingAutoFlags(['C:/proj', 'C:/engram/x']);
+  expect(flags).toContain('--allowedTools');
+  expect(flags.join(',')).toContain('Bash');
+  expect(flags).toContain('--add-dir');
+  expect(flags).toContain('C:/proj');
+  expect(flags).not.toContain('C:/engram/x'); // 백스톱(자기 repo 하위) 제외
 });

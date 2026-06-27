@@ -28,7 +28,8 @@ export class CodingSpecialist {
       failNote,
       '\n타깃 작업 디렉터리에서 코드를 직접 수정하라. 다른 에이전트와 대화하지 말고 네 조각만 끝내라.',
     ].join('\n');
-    const flags = this.fence.codingFlags(persona, project.writePaths);
+    // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
+    const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
     const brain = this.resolveBrain(persona.brain);
     const r = await brain.complete(prompt, onChunk, { cwd: project.targetPath, extraArgs: flags });
     if (r.isError) throw new Error(`코딩 두뇌 호출 실패: ${personaName}/${ticket.id}`);

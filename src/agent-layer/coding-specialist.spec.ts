@@ -2,7 +2,7 @@ import { CodingSpecialist } from './coding-specialist';
 
 describe('CodingSpecialist', () => {
   const registry = { get: (n: string) => n === 'Dev' ? { name: 'Dev', brain: 'claude', tools: ['Bash','Edit','Write'], prompt: 'You code.' } : undefined } as any;
-  const fence = { codingFlags: () => ['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj'] } as any;
+  const fence = { codingAutoFlags: () => ['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj'] } as any;
   const project = { targetPath: 'C:/proj', writePaths: ['C:/proj'] } as any;
   const logger = { warn() {}, log() {} } as any;
 
@@ -14,6 +14,8 @@ describe('CodingSpecialist', () => {
     expect(out).toBe('작업함');
     expect(captured.opts.cwd).toBe('C:/proj');
     expect(captured.opts.extraArgs).toContain('--allowedTools');
+    expect(captured.opts.extraArgs).toContain('--permission-mode'); // 자동모드 acceptEdits
+    expect(captured.opts.extraArgs).toContain('acceptEdits');
     expect(captured.prompt).toContain('로그인 고쳐');
   });
 
