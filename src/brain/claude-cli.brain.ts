@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import spawn from 'cross-spawn';
-import { BrainProvider, BrainResult } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 
@@ -33,11 +33,11 @@ export class ClaudeCliBrain implements BrainProvider {
     this.sem = new Semaphore(profile.concurrency);
   }
 
-  complete(prompt: string, onChunk?: (text: string) => void): Promise<BrainResult> {
-    return this.sem.run(() => this.spawnOnce(prompt, onChunk));
+  complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
+    return this.sem.run(() => this.spawnOnce(prompt, onChunk, opts));
   }
 
-  private spawnOnce(prompt: string, onChunk?: (text: string) => void): Promise<BrainResult> {
+  private spawnOnce(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return new Promise<BrainResult>((resolve) => {
       const args = [
         '-p', prompt,
@@ -45,10 +45,12 @@ export class ClaudeCliBrain implements BrainProvider {
         '--verbose',
         ...(this.profile.model ? ['--model', this.profile.model] : []),
         ...this.profile.extraArgs,
+        ...(opts?.extraArgs ?? []),
       ];
       const child = spawn(this.profile.cli, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, ...this.profile.env },
+        cwd: opts?.cwd,
       });
 
       let buf = '';
@@ -67,7 +69,7 @@ export class ClaudeCliBrain implements BrainProvider {
 
       const timer = setTimeout(
         () => finish({ text, costUsd, isError: true, raw: 'timeout' }),
-        this.profile.timeoutMs,
+        opts?.timeoutMs ?? this.profile.timeoutMs,
       );
 
       child.stdout?.on('data', (d: Buffer) => {

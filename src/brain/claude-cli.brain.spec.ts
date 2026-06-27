@@ -79,4 +79,28 @@ describe('ClaudeCliBrain', () => {
     const opts = (spawn as unknown as jest.Mock).mock.calls[0][2];
     expect(opts.env.ANTHROPIC_BASE_URL).toBe('http://x');
   });
+
+  it('opts.cwd·extraArgs를 spawn에 반영한다', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q', undefined, { cwd: 'C:/proj', extraArgs: ['--allowedTools', 'Bash'] });
+    child.emit('close', 0);
+    await p;
+    const [, args, opts] = (spawn as unknown as jest.Mock).mock.calls[0];
+    expect(opts.cwd).toBe('C:/proj');
+    expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Bash']));
+  });
+
+  it('opts.timeoutMs가 profile.timeoutMs를 덮어쓴다', async () => {
+    jest.useFakeTimers();
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain({ ...PROFILE, timeoutMs: 100000 });
+    const p = brain.complete('q', undefined, { timeoutMs: 50 });
+    jest.advanceTimersByTime(60);
+    const r = await p;
+    expect(r.isError).toBe(true);
+    jest.useRealTimers();
+  });
 });

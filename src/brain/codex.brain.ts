@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BrainProvider, BrainResult } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { spawnTextBrain } from './text-brain';
@@ -13,7 +13,7 @@ export class CodexBrain implements BrainProvider {
     this.sem = new Semaphore(profile.concurrency);
   }
 
-  complete(prompt: string, onChunk?: (text: string) => void): Promise<BrainResult> {
+  complete(prompt: string, onChunk?: (text: string) => void, _opts?: CompleteOpts): Promise<BrainResult> {
     // ponytail: codex 실행 플래그·출력은 설치본 따라 보정
     const args = ['exec', prompt, ...this.profile.extraArgs];
     return this.sem.run(() => spawnTextBrain(this.profile, args, onChunk));
