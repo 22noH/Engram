@@ -38,4 +38,14 @@ describe('ProjectWiki', () => {
     expect(page!.body).toContain('첫 사실');
     expect(page!.body).toContain('둘째 사실');
   });
+
+  it('같은 slug 동시 record는 직렬화되어 둘 다 보존', async () => {
+    await Promise.all([
+      pw.record('proj_a', 'notes', '노트', '사실 A'),
+      pw.record('proj_a', 'notes', '노트', '사실 B'),
+    ]);
+    const page = await wiki.getPage('notes', 'projects/proj_a');
+    expect(page!.body).toContain('사실 A');
+    expect(page!.body).toContain('사실 B');
+  });
 });
