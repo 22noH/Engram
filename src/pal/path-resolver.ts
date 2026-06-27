@@ -49,4 +49,9 @@ export class PathResolver {
   getConfigDir(): string {
     return path.join(this.dataDir, 'config');
   }
+
+  // 공유 상태(TaskStore 등) 디렉토리(설계 §15 runtime/state).
+  getStateDir(): string {
+    return path.join(this.dataDir, 'state');
+  }
 }

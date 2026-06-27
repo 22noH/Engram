@@ -44,4 +44,9 @@ describe('PathResolver', () => {
     const r = new PathResolver('/data');
     expect(r.getConfigDir()).toBe(require('path').join('/data', 'config'));
   });
+
+  it('getStateDir는 dataDir/state를 가리킨다', () => {
+    const r = new PathResolver('/tmp/x');
+    expect(r.getStateDir()).toBe(require('path').join('/tmp/x', 'state'));
+  });
 });
