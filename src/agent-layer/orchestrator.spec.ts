@@ -1,5 +1,22 @@
 import { Orchestrator } from './orchestrator';
 
+describe('Orchestrator.decompose', () => {
+  const make = () => new Orchestrator({} as any, {} as any, { warn() {}, log() {} } as any, {} as any);
+  it('JSON 티켓 분할 파싱', async () => {
+    const brain = { complete: () => Promise.resolve({ text: '{"tickets":[{"area":"src/a","instruction":"i1"},{"area":"src/b","instruction":"i2"}]}', costUsd: 0, isError: false }) };
+    const t = await make().decompose('목표', brain as any);
+    expect(t).toHaveLength(2);
+    expect(t[0]).toMatchObject({ area: 'src/a', instruction: 'i1' });
+    expect(t[0].id).toBeTruthy();
+  });
+  it('파싱 실패는 단일 티켓 폴백', async () => {
+    const brain = { complete: () => Promise.resolve({ text: 'JSON 아님', costUsd: 0, isError: false }) };
+    const t = await make().decompose('목표', brain as any);
+    expect(t).toHaveLength(1);
+    expect(t[0].instruction).toContain('목표');
+  });
+});
+
 describe('Orchestrator (스텁)', () => {
   it('route는 reader.handle로 위임하고 onChunk를 통과시킨다', async () => {
     const reader = { handle: jest.fn(async () => '답') } as any;
