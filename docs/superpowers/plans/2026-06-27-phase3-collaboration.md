@@ -428,50 +428,93 @@ git commit -m "feat(brain): BrainFactory provider 분기 + provider 허용목록
 ## Task 5: GeminiBrain 어댑터 (네이티브 gemini CLI)
 
 **Files:**
+- Create: `src/brain/text-brain.ts` (Gemini·Codex 공유 spawn 헬퍼)
 - Create: `src/brain/gemini.brain.ts`
 - Create: `src/brain/gemini.brain.spec.ts`
+- Create: `src/brain/text-brain.spec.ts`
 
 **Interfaces:**
-- Produces: `class GeminiBrain implements BrainProvider`(생성자 `(profile: BrainProfile)`). `complete()`가 `gemini` CLI를 spawn해 텍스트 생성, `BrainResult`로 정규화. Semaphore 보유.
+- Produces:
+  - `spawnTextBrain(profile: BrainProfile, args: string[], onChunk?): Promise<BrainResult>` — 하네스 없는 CLI(Gemini/Codex) 공유: stdout 텍스트를 BrainResult로 정규화, timeout·spawn-error·settled-once 가드. **Task 6 CodexBrain이 그대로 재사용**(중복 제거).
+  - `class GeminiBrain implements BrainProvider`(생성자 `(profile: BrainProfile)`). args만 만들고 spawnTextBrain 호출. Semaphore 보유.
 
-> **calibration:** 실제 `gemini` CLI의 비대화 출력 플래그·포맷은 설치본마다 다를 수 있다(spec §13 미해결). 아래는 합리적 기본 — 출력 파서는 `profile.extraArgs`로 조정 가능하게 두고, 실 스모크(opt-in)로 보정한다. `// ponytail: gemini 출력형식은 설치본 따라 보정 — extraArgs/파서가 조정 노브`.
+> **calibration:** 실제 `gemini` CLI의 비대화 출력 플래그·포맷은 설치본마다 다를 수 있다(spec §13). args가 조정 노브 — 실 스모크(opt-in)로 보정. `// ponytail: gemini 출력형식은 설치본 따라 보정 — args가 노브`.
 
-- [ ] **Step 1: 실패 테스트(spawn 모킹 — 표준출력 텍스트 수집)**
+- [ ] **Step 1: 공유 헬퍼 실패 테스트**
 
-`gemini.brain.spec.ts`:
+`text-brain.spec.ts`:
 ```typescript
-it('gemini stdout 텍스트를 BrainResult.text로 모은다', async () => {
-  jest.spyOn(require('cross-spawn'), 'default').mockImplementation(() => {
-    const handlers: any = {};
-    const child: any = {
-      stdout: { on: (k: string, f: Function) => { if (k === 'data') setImmediate(() => f(Buffer.from('안녕'))); } },
-      stderr: { on: () => {} },
-      on: (k: string, f: Function) => { handlers[k] = f; if (k === 'close') setImmediate(() => f(0)); },
-      kill: () => {},
-    };
-    return child;
-  });
-  const { GeminiBrain } = require('./gemini.brain');
-  const r = await new GeminiBrain({ provider: 'gemini-cli', cli: 'gemini', model: '', concurrency: 1, timeoutMs: 1000, extraArgs: [], env: {} }).complete('hi');
+it('spawnTextBrain은 stdout을 모아 BrainResult로 정규화', async () => {
+  jest.spyOn(require('cross-spawn'), 'default').mockImplementation(() => ({
+    stdout: { on: (k: string, f: Function) => { if (k === 'data') setImmediate(() => f(Buffer.from('안녕'))); } },
+    stderr: { on: () => {} },
+    on: (k: string, f: Function) => { if (k === 'close') setImmediate(() => f(0)); },
+    kill: () => {},
+  }));
+  const { spawnTextBrain } = require('./text-brain');
+  const r = await spawnTextBrain({ provider: 'gemini-cli', cli: 'g', model: '', concurrency: 1, timeoutMs: 1000, extraArgs: [], env: {} }, ['-p', 'hi']);
   expect(r.isError).toBe(false);
   expect(r.text).toContain('안녕');
 });
+
+it('비정상 종료코드는 isError', async () => {
+  jest.spyOn(require('cross-spawn'), 'default').mockImplementation(() => ({
+    stdout: { on: () => {} }, stderr: { on: () => {} },
+    on: (k: string, f: Function) => { if (k === 'close') setImmediate(() => f(1)); },
+    kill: () => {},
+  }));
+  const { spawnTextBrain } = require('./text-brain');
+  const r = await spawnTextBrain({ provider: 'gemini-cli', cli: 'g', model: '', concurrency: 1, timeoutMs: 1000, extraArgs: [], env: {} }, []);
+  expect(r.isError).toBe(true);
+});
+```
+`gemini.brain.spec.ts`:
+```typescript
+it('GeminiBrain은 args를 만들어 spawnTextBrain에 위임', async () => {
+  jest.spyOn(require('cross-spawn'), 'default').mockImplementation((cli: string, args: string[]) => {
+    expect(args[0]).toBe('-p');
+    return { stdout: { on: (k: string, f: Function) => { if (k === 'data') setImmediate(() => f(Buffer.from('Gemini답'))); } }, stderr: { on: () => {} }, on: (k: string, f: Function) => { if (k === 'close') setImmediate(() => f(0)); }, kill: () => {} };
+  });
+  const { GeminiBrain } = require('./gemini.brain');
+  const r = await new GeminiBrain({ provider: 'gemini-cli', cli: 'gemini', model: '', concurrency: 1, timeoutMs: 1000, extraArgs: [], env: {} }).complete('hi');
+  expect(r.text).toContain('Gemini답');
+});
 ```
 
-- [ ] **Step 2: 실패 확인** — Run: `npx jest gemini.brain`. Expected: FAIL.
+- [ ] **Step 2: 실패 확인** — Run: `npx jest text-brain gemini.brain`. Expected: FAIL.
 
-- [ ] **Step 3: 구현**
+- [ ] **Step 3: 헬퍼 + GeminiBrain 구현**
 
+`text-brain.ts`:
+```typescript
+import spawn from 'cross-spawn';
+import { BrainResult } from './brain.port';
+import { BrainProfile } from './brain.config';
+
+// 하네스 없는 CLI(Gemini/Codex) 공유 spawn(설계 §6.2). stdout 텍스트를 BrainResult로 정규화.
+// timeout·spawn-error·settled-once 가드. ClaudeCliBrain은 stream-json 파싱이 달라 별도 유지.
+export function spawnTextBrain(profile: BrainProfile, args: string[], onChunk?: (t: string) => void): Promise<BrainResult> {
+  return new Promise<BrainResult>((resolve) => {
+    const child = spawn(profile.cli, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...profile.env } });
+    let text = '';
+    let settled = false;
+    const finish = (r: BrainResult): void => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); resolve(r); };
+    const timer = setTimeout(() => finish({ text, costUsd: 0, isError: true, raw: 'timeout' }), profile.timeoutMs);
+    child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); text += s; onChunk?.(s); });
+    child.on('error', () => finish({ text: '', costUsd: 0, isError: true, raw: 'spawn-error' }));
+    child.on('close', (code: number) => finish({ text, costUsd: 0, isError: code !== 0 }));
+  });
+}
+```
 `gemini.brain.ts`:
 ```typescript
 import { Injectable } from '@nestjs/common';
-import spawn from 'cross-spawn';
 import { BrainProvider, BrainResult } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
+import { spawnTextBrain } from './text-brain';
 
 // Gemini CLI 어댑터(설계 §6.2). Phase 3=텍스트 생성. 도구 위임은 Phase 4.
-// ponytail: gemini 출력형식은 설치본 따라 보정 — extraArgs/파서가 조정 노브.
 @Injectable()
 export class GeminiBrain implements BrainProvider {
   private readonly sem: Semaphore;
@@ -480,31 +523,19 @@ export class GeminiBrain implements BrainProvider {
   }
 
   complete(prompt: string, onChunk?: (t: string) => void): Promise<BrainResult> {
-    return this.sem.run(() => this.spawnOnce(prompt, onChunk));
-  }
-
-  private spawnOnce(prompt: string, onChunk?: (t: string) => void): Promise<BrainResult> {
-    return new Promise<BrainResult>((resolve) => {
-      const args = ['-p', prompt, ...(this.profile.model ? ['-m', this.profile.model] : []), ...this.profile.extraArgs];
-      const child = spawn(this.profile.cli, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...this.profile.env } });
-      let text = '';
-      let settled = false;
-      const finish = (r: BrainResult): void => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); resolve(r); };
-      const timer = setTimeout(() => finish({ text, costUsd: 0, isError: true, raw: 'timeout' }), this.profile.timeoutMs);
-      child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); text += s; onChunk?.(s); });
-      child.on('error', () => finish({ text: '', costUsd: 0, isError: true, raw: 'spawn-error' }));
-      child.on('close', (code: number) => finish({ text, costUsd: 0, isError: code !== 0 }));
-    });
+    // ponytail: gemini 출력형식은 설치본 따라 보정 — args가 노브
+    const args = ['-p', prompt, ...(this.profile.model ? ['-m', this.profile.model] : []), ...this.profile.extraArgs];
+    return this.sem.run(() => spawnTextBrain(this.profile, args, onChunk));
   }
 }
 ```
 
-- [ ] **Step 4: 통과 확인** — Run: `npx jest gemini.brain`. Expected: PASS.
+- [ ] **Step 4: 통과 확인** — Run: `npx jest text-brain gemini.brain`. Expected: PASS.
 
 - [ ] **Step 5: 커밋**
 ```bash
-git add src/brain/gemini.brain.ts src/brain/gemini.brain.spec.ts
-git commit -m "feat(brain): GeminiBrain 네이티브 CLI 어댑터(텍스트 생성)"
+git add src/brain/text-brain.ts src/brain/text-brain.spec.ts src/brain/gemini.brain.ts src/brain/gemini.brain.spec.ts
+git commit -m "feat(brain): GeminiBrain + 공유 spawnTextBrain 헬퍼(Codex와 공유)"
 ```
 
 ---
@@ -516,7 +547,8 @@ git commit -m "feat(brain): GeminiBrain 네이티브 CLI 어댑터(텍스트 생
 - Create: `src/brain/codex.brain.spec.ts`
 
 **Interfaces:**
-- Produces: `class CodexBrain implements BrainProvider`. Task 5와 동형(spawn+stdout 수집+Semaphore). 호출 args만 codex용.
+- Consumes: Task 5 `spawnTextBrain`.
+- Produces: `class CodexBrain implements BrainProvider`. **Task 5의 spawnTextBrain 재사용**(중복 없음) — codex용 args만 다름.
 
 > **calibration:** `codex` CLI의 비대화 실행 플래그도 설치본 의존(spec §13). `// ponytail: codex 실행 플래그·출력은 설치본 따라 보정`.
 
@@ -541,11 +573,29 @@ it('codex stdout 텍스트를 BrainResult.text로 모은다', async () => {
 
 - [ ] **Step 2: 실패 확인** — Run: `npx jest codex.brain`. Expected: FAIL.
 
-- [ ] **Step 3: 구현** — `codex.brain.ts`는 `gemini.brain.ts`를 복제하되 클래스명 `CodexBrain`, 주석 codex용, args:
+- [ ] **Step 3: 구현** — `codex.brain.ts`(Task 5 `spawnTextBrain` 재사용):
 ```typescript
-      const args = ['exec', prompt, ...this.profile.extraArgs]; // ponytail: codex 실행 플래그·출력은 설치본 따라 보정
+import { Injectable } from '@nestjs/common';
+import { BrainProvider, BrainResult } from './brain.port';
+import { BrainProfile } from './brain.config';
+import { Semaphore } from './semaphore';
+import { spawnTextBrain } from './text-brain';
+
+// Codex CLI 어댑터(설계 §6.2). Phase 3=텍스트 생성. 고유 코딩 하네스는 Phase 4.
+@Injectable()
+export class CodexBrain implements BrainProvider {
+  private readonly sem: Semaphore;
+  constructor(private readonly profile: BrainProfile) {
+    this.sem = new Semaphore(profile.concurrency);
+  }
+
+  complete(prompt: string, onChunk?: (t: string) => void): Promise<BrainResult> {
+    // ponytail: codex 실행 플래그·출력은 설치본 따라 보정
+    const args = ['exec', prompt, ...this.profile.extraArgs];
+    return this.sem.run(() => spawnTextBrain(this.profile, args, onChunk));
+  }
+}
 ```
-(나머지 spawnOnce 본문은 Task 5와 동일하게 작성 — 복제. 코드를 줄이려 공유 베이스 추출은 YAGNI, 두 어댑터뿐.)
 
 - [ ] **Step 4: 통과 확인** — Run: `npx jest codex.brain`. Expected: PASS.
 
