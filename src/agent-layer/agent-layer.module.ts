@@ -20,6 +20,7 @@ import { RagStore } from '../knowledge-core/rag/rag-store';
 import { WikiEngine } from '../knowledge-core/wiki/wiki-engine';
 import { PinoLogger } from '../pal/logger';
 import { PathResolver } from '../pal/path-resolver';
+import { findRepoRoot } from '../pal/repo-root';
 import { ConversationStore } from '../knowledge-core/conversation-store';
 import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { Semaphore } from '../brain/semaphore';
@@ -37,8 +38,8 @@ import { VerificationGate } from './verification-gate';
     {
       provide: PersonaRegistry,
       useFactory: (logger: PinoLogger) => {
-        // __dirname = dist/src/agent-layer or src/agent-layer → 두 단계 올라가면 프로젝트 루트.
-        const personasDir = path.join(__dirname, '..', '..', 'personas');
+        // 빌드 레이아웃 무관하게 레포 루트(package.json 보유)를 찾아 personas 해소.
+        const personasDir = path.join(findRepoRoot(__dirname), 'personas');
         return new PersonaRegistry(personasDir, logger);
       },
       inject: [PinoLogger],
@@ -46,9 +47,9 @@ import { VerificationGate } from './verification-gate';
     {
       provide: PermissionFence,
       useFactory: async (paths: PathResolver) => {
-        // __dirname = dist/src/agent-layer or src/agent-layer → 두 단계 올라가면 레포 루트.
-        // PersonaRegistry와 동일 패턴: path.join(__dirname, '..', '..') = 레포 루트.
-        const engramRoot = path.join(__dirname, '..', '..');
+        // 자기수정 백스톱(§9 ③): engramRoot는 빌드(dist)/테스트(src) 무관하게 *진짜* 레포 루트여야 한다.
+        // __dirname 깊이 의존은 빌드 시 dist/를 가리켜 백스톱을 무력화하므로 package.json 탐색으로 해소.
+        const engramRoot = findRepoRoot(__dirname);
         const fence = new PermissionFence(path.join(paths.getConfigDir(), 'permissions.json'), engramRoot);
         await fence.load();
         return fence;
