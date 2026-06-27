@@ -24,8 +24,11 @@ describe('Orchestrator.codeRun', () => {
       { review: async () => ({ approved: true, extraTickets: [] }) } as any,
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
       { assertWritable: () => {}, codingFlags: () => [] } as any);
-    const r = await o.codeRun('p', { maxRounds: 5 });
+    const progress: string[] = [];
+    const r = await o.codeRun('p', { maxRounds: 5, onProgress: (m) => progress.push(m) });
     expect(r.status).toBe('SUCCESS');
+    expect(progress.some((m) => m.includes('분해 완료'))).toBe(true); // 진행 narrate 호출 확인
+    expect(progress.some((m) => m.includes('착지'))).toBe(true);
   });
 
   it('게이트 계속 빨강 + 진전 없으면 STUCK', async () => {

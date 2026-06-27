@@ -162,11 +162,13 @@ export class Orchestrator {
   // 코딩 루프(설계 §4). 유일 배정구(seam #1). run-state로 stop·stuck·budget 통합(§6).
   async codeRun(
     projectId: string,
-    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void } = {},
+    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void } = {},
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
     if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
     }
+    // 진행 narrate(블랙박스 방지). CLI가 stdout으로 흘린다.
+    const report = opts.onProgress ?? ((): void => {});
     const project = await this.projects.get(projectId);
     if (!project) throw new Error(`프로젝트 없음: ${projectId}`);
     if (!project.approved) throw new Error(`완성조건 미승인 — engram code 승인 먼저: ${projectId}`);
@@ -180,8 +182,10 @@ export class Orchestrator {
       criteriaTotal: project.acceptanceCriteria.length,
     });
     await this.tasks!.transition(session.id, 'RUNNING');
+    report(`작업 분해 중… (두뇌 호출)`);
     const initial = await this.decompose(project.acceptanceCriteria.join('\n'), this.codeBrain);
     await this.tasks!.addTickets(session.id, initial);
+    report(`분해 완료 — 작업 ${initial.length}개`);
 
     const stuck = new StuckDetector(opts.stuckK ?? 3);
     const maxRounds = opts.maxRounds ?? 100;
@@ -192,21 +196,26 @@ export class Orchestrator {
 
       const fresh = await this.tasks!.get(session.id);
       const open = (fresh?.tickets ?? []).filter((t) => t.status !== 'SUCCESS');
+      report(`라운드 ${round + 1}: 작업 ${open.length}개 진행`);
 
       // 동시 코딩(공유 체크아웃, N=concurrency). Semaphore가 동시 호출 제한.
       await Promise.all(open.map((ticket) => this.sem!.run(async () => {
         if (this.runState !== 'running') return;
         try {
+          report(`  코딩 중: ${ticket.area} — ${ticket.instruction}`);
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'RUNNING', attempts: ticket.attempts + 1 });
           const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk);
           budgetSpent += 1; // ponytail: 호출 수 근사. 실토큰 회계는 후속(§14).
+          report(`  게이트 실행 중: ${ticket.area}`);
           const result = await this.gate!.run(project.targetPath, project.gate);
           if (result.pass) {
             await this.codingGit!.commitAll(project.targetPath, `engram: ${ticket.id} ${ticket.area}`);
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'SUCCESS', gate: { pass: true, output: summary } });
             await this.tasks!.contribute(session.id, ticket.id, summary);
+            report(`  ✓ 착지: ${ticket.area}`);
           } else {
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'PENDING', gate: { pass: false, output: result.output } });
+            report(`  ✗ 게이트 빨강(재시도 대기): ${ticket.area} [${result.failed ?? '실패'}]`);
           }
         } catch (err) {
           this.logger.warn(`코딩 티켓 실패(재시도 대기) ${ticket.id}: ${String(err)}`, 'Orchestrator');
@@ -224,8 +233,10 @@ export class Orchestrator {
 
       if (allLanded) {
         // SUCCESS는 리뷰어 승인 경유만 — 오픈 티켓 0이어도 여기서 판정(우회 차단).
+        report(`완성조건 리뷰 중…`);
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));
-        if (review.approved) return this.exit(session, 'SUCCESS');
+        if (review.approved) { report(`✓ 완성조건 충족 — 완료`); return this.exit(session, 'SUCCESS'); }
+        report(`리뷰어 추가 작업 ${review.extraTickets.length}개`);
         await this.tasks!.addTickets(session.id, review.extraTickets.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
       }
 

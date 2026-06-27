@@ -103,6 +103,7 @@ export class CliGateway {
   // engram code <path> "goal": 완성조건 초안 → 사람 승인 → 코딩 루프(설계 §4-0).
   // engram code <path> "goal" [--confirm]: 폴더 인자 = 동의(자동 기본). --confirm이면 시작 전 확인.
   private async code(targetPath: string, goal: string, confirm = false): Promise<void> {
+    process.stdout.write('완성조건·게이트 작성 중… (두뇌 호출, 잠시 걸림)\n');
     const cfg = await this.orchestrator.proposeProject(targetPath, goal);
     process.stdout.write(`작업 폴더: ${targetPath}\n`);
     process.stdout.write(`완성조건 초안:\n${cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`);
@@ -116,7 +117,10 @@ export class CliGateway {
       process.stdout.write('자동모드 — 바로 자율 코딩 시작(시작 전 확인은 --confirm)\n');
     }
     await this.orchestrator.approveProject(cfg.id);
-    const r = await this.orchestrator.codeRun(cfg.id, { onChunk: (t) => process.stdout.write(t) });
+    const r = await this.orchestrator.codeRun(cfg.id, {
+      onProgress: (m) => process.stdout.write(`· ${m}\n`),
+      onChunk: (t) => process.stdout.write(t),
+    });
     process.stdout.write(`\n코딩 종료: ${r.status} (세션 ${r.sessionId})\n`);
   }
 
