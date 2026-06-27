@@ -6,6 +6,13 @@ import { KeyedLock } from './keyed-lock';
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 export type TaskKind = 'collaboration' | 'board-decision';
 
+const VALID: Record<TaskStatus, TaskStatus[]> = {
+  PENDING: ['RUNNING', 'FAILED'],
+  RUNNING: ['SUCCESS', 'FAILED'],
+  SUCCESS: [],
+  FAILED: [],
+};
+
 export interface TaskRecord {
   id: string;
   kind: TaskKind;
@@ -54,6 +61,35 @@ export class TaskStore {
 
   private file(id: string): string {
     return path.join(this.stateDir, `${id}.json`);
+  }
+
+  transition(id: string, to: TaskStatus): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => {
+      if (!VALID[rec.status].includes(to)) {
+        throw new Error(`잘못된 전이: ${rec.status} → ${to} (${id})`);
+      }
+      rec.status = to;
+    });
+  }
+
+  contribute(id: string, persona: string, text: string): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => { rec.blackboard[persona] = text; });
+  }
+
+  setResult(id: string, result: string): Promise<TaskRecord> {
+    return this.mutate(id, (rec) => { rec.result = result; });
+  }
+
+  // 같은 레코드 동시변경을 KeyedLock으로 직렬화(read→수정→write 원자성).
+  private mutate(id: string, fn: (rec: TaskRecord) => void): Promise<TaskRecord> {
+    return this.lock.run(id, async () => {
+      const rec = await this.get(id);
+      if (!rec) throw new Error(`레코드 없음: ${id}`);
+      fn(rec);
+      rec.updatedAt = new Date().toISOString();
+      await this.write(rec);
+      return rec;
+    });
   }
 
   private async write(rec: TaskRecord): Promise<void> {
