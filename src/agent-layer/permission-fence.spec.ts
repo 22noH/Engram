@@ -46,6 +46,14 @@ it('spawnFlags: 허용 도구 없으면 빈 배열', async () => {
   expect(fence.spawnFlags(persona() as any)).toEqual([]);
 });
 
+it('spawnFlags: denyPath 하위 writePath도 --add-dir에서 제외(완전일치 아님)', async () => {
+  const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: { Trend: ['WebSearch'] }, writePaths: ['C:/engram/plugins', 'C:/ok'], denyPaths: ['C:/engram'] } }));
+  await fence.load();
+  const flags = fence.spawnFlags(persona({ tools: ['WebSearch'] }) as any);
+  expect(flags).toContain('C:/ok');
+  expect(flags).not.toContain('C:/engram/plugins'); // engram 하위 → codingFlags·assertWritable과 동일하게 제외
+});
+
 it('load: 깨진 JSON도 default-deny로 폴백', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-fence-'));
   const p = path.join(dir, 'permissions.json');

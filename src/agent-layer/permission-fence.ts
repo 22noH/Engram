@@ -49,7 +49,10 @@ export class PermissionFence {
     const tools = this.allowedTools(persona);
     if (tools.length === 0) return [];
     const flags = ['--allowedTools', tools.join(',')];
-    const writes = this.cfg.allow.writePaths.filter((p) => !this.cfg.allow.denyPaths.includes(p));
+    // denyPaths 하위까지 제외(완전일치 아님 — codingFlags·assertWritable과 동일 isWithin).
+    const writes = this.cfg.allow.writePaths.filter(
+      (p) => !this.cfg.allow.denyPaths.some((d) => PermissionFence.isWithin(p, d)),
+    );
     for (const w of writes) flags.push('--add-dir', w);
     return flags;
   }
