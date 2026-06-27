@@ -120,9 +120,10 @@ export class CliGateway {
       process.stdout.write('자동모드 — 바로 자율 코딩 시작(시작 전 확인은 --confirm)\n');
     }
     await this.orchestrator.approveProject(cfg.id);
+    // 코딩 에이전트의 날것 사고과정(onChunk)은 흘리지 않는다 — 영어 범벅·난잡의 원인.
+    // 누가 무엇을 했는지 구조화된 진행(onProgress)만 보인다.
     const r = await this.orchestrator.codeRun(cfg.id, {
       onProgress: (m) => process.stdout.write(`· ${m}\n`),
-      onChunk: (t) => process.stdout.write(t),
     });
     process.stdout.write(`\n코딩 종료: ${r.status} (세션 ${r.sessionId})\n`);
   }

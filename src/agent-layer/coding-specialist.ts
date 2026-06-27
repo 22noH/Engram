@@ -26,7 +26,12 @@ export class CodingSpecialist {
       `\n# 작업 영역\n${ticket.area}`,
       `\n# 할 일\n${ticket.instruction}`,
       failNote,
-      '\n타깃 작업 디렉터리에서 코드를 직접 수정하라. 다른 에이전트와 대화하지 말고 네 조각만 끝내라.',
+      '\n규칙:',
+      '- 타깃 디렉터리의 코드를 직접 편집한다. 네게 주어진 이 조각만 한다.',
+      '- 테스트·빌드 실행은 하지 마라 — 검증은 Engram이 게이트로 직접 한다.',
+      '- 파일 존재 여부·git 상태·CI·절차를 길게 논하지 마라. 코드만 바꾼다.',
+      '- 다른 에이전트/조각과 대화하지 마라.',
+      '- 보고는 한국어로, 한두 줄만 간결히.',
     ].join('\n');
     // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
     const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
