@@ -262,9 +262,17 @@ OS별로 갈리는 유일한 코드. 설치·시작·정지·재시작 정책을
 - **Phase 1 — A 읽기** ✅ **완료**: ReaderAgent(질문→검색→답) + ✦CLI Gateway(앞단 중립 경계) + Claude CLI 두뇌 + ✦세마포어.
 - **Phase 2 — C 자율쓰기** ✅ **완료**: IngesterAgent(스케줄 digest, writer+judge 2콜) + ✦검증 파이프라인(추출→ImportanceGate→근거→모순→judge) + 승인 게이트(`engram review`) + **ImportanceGate(§5.3) + 수집 경로 B(대화 로그 다이제스트)** + 위키↔RAG 재색인(워처) + ✦@Cron 다이제스트. **스테이징=위키 밖 ProposalStore 결재 대기함**(§5.1 draft-플래그 재해석: 승인 전 라이브 위키 무손상). judge=별도 프로필(작성자≠검증자). 자동반영·다중투표·주기감사(⑧)·golden-question은 후속(§6 "나중").
 - **Phase 3 — B 협업**: Orchestrator + Specialist + 종합 + ✦8팀 + Board Meeting + TaskStore + 동시성/턴 상한.
-- **Phase 4 — ✦자율 코딩 협업** (씨앗 설계 단계, §13.1): 에이전트 무리가 협업해 *코드 산출물*을 자율 생성. Phase 3 토대(허브·이종 두뇌·공유 위키) 위에 얹힘. 현 깊이 = **4대 미해결의 방향 결정 + Phase 3가 지켜야 할 seam 고정**까지(풀 구현 스펙은 Phase 3 실체 후).
+- **Phase 4 — ✦자율 코딩 협업** ✅ **완료**: `engram code <폴더> "목표"` → 분해=설계 → 스페셜리스트가 격리 브랜치에 코드 → **Engram이 직접 게이트(테스트·빌드·타입체크)** → 통과분만 착지 → 완성조건+리뷰어 승인까지 반복. run-state(pause/resume/stop)·stuck·예산. 자기수정 백스톱(자기 repo+시스템 폴더 무조건 거부)·자동 권한 모드(폴더 인자=동의, JSON 설정 0)·결정적 게이트 탐지·에이전트 프롬프트 `prompts/*.md` 외부화. 씨앗 §13.1.
 - **Phase 5 — InsightLayer + 운영(PAL)**: ✦InsightLayer(행동 메트릭 + 일일 인사이트 리포트 + 응답 맥락 주입 — A/B/C 루프가 돈 뒤) + 운영(PAL): OS 순서대로(Win→Mac→Linux) 마감 + 감시자. (PAL 기초 상주는 Phase 0부터 점진적으로 깔고, 여기서 완성.)
 - **Phase 6 — Tag 구현** (미설계 — 착수 시 brainstorming부터): 범위·정의·설계 전부 착수 시 확정.
+- **Phase 7 — ✦배포·패키징 (단일 설치형 앱)** (미설계 — 착수 시 brainstorming부터): 지금까지 개발용 CLI(`node dist/src/cli.js`, 레포에서 실행)를 **Claude Desktop처럼 더블클릭 설치형 한 프로그램**으로 포장하는 마지막 단계. 범위:
+  - **GUI 셸 어댑터**(Electron/Tauri)를 Edge에 추가 — CliGateway 옆에 또 하나의 어댑터. 코어(Orchestrator/에이전트/지식) 무변경(포트+어댑터 seam이 이미 받쳐줌).
+  - **데이터 위치 전환**: `cwd/runtime` → `%APPDATA%/engram`(OS별 사용자 데이터). PathResolver가 이미 자리(생성자 인자·`ENGRAM_DATA_DIR` env) — 기본값만 OS appdata로.
+  - **리소스 번들**: `prompts/`·`personas/`를 앱 리소스로 동봉(findRepoRoot 레포-루트 해소 대신 번들 경로). 사용자 편집본은 appdata 쪽 오버라이드로.
+  - **`claude` 의존 처리(설계 선택)**: 코딩/두뇌가 외부 `claude` CLI를 spawn → 단일 바이너리에 번들 어려움. 설치 감지·안내, 또는 추론 백엔드 동봉(로컬 LLM) 여부 결정.
+  - **임베딩 모델**: 동봉 vs 첫 실행 다운로드.
+  - **인스톨러**: electron-builder/tauri bundler, OS 순서 Win 우선(§13 PAL과 정합 — Phase 5 PAL 마감 뒤).
+  - **전제 seam(이미 존재)**: Edge 포트+어댑터(CLI=첫 어댑터)·PAL 경로 중앙화·`main.ts`(상주)/`cli.ts`(원샷) 분리. → 코어는 CLI를 가정하지 않으므로 GUI가 거저 올라탈 자리가 있다.
 
 > ⚠️ **§13.1 = Phase 4 씨앗 설계.** 현재 깊이는 "4대 미해결의 방향 + Phase 3가 지켜야 할 seam 고정"까지다. 풀 구현 스펙은 Phase 3(토대)가 코드로 존재한 뒤에 쓴다. *미설계*를 구현 약속으로 착각 금지.
 
