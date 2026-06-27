@@ -12,12 +12,13 @@ import { Semaphore } from '../brain/semaphore';
 import { TurnBudget } from './turn-budget';
 import { BrainProvider, BRAIN } from '../brain/brain.port';
 import { parseJsonBlock } from './parse-json-block';
-import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
+import { ProjectStore, ProjectConfig, GateCommands } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
 import { CodingGit } from '../knowledge-core/coding-git';
 import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
 import { StuckDetector } from './stuck-detector';
+import { PermissionFence } from './permission-fence';
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -38,6 +39,7 @@ export class Orchestrator {
     @Optional() private readonly coder?: CodingSpecialist,
     @Optional() private readonly reviewer?: ReviewerAgent,
     @Optional() @Inject(BRAIN) private readonly codeBrain?: BrainProvider,
+    @Optional() private readonly fence?: PermissionFence,
   ) {}
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
@@ -115,6 +117,42 @@ export class Orchestrator {
       ? o.tickets.filter((t: any) => t && typeof t.area === 'string' && typeof t.instruction === 'string')
           .map((t: any) => ({ area: t.area, instruction: t.instruction }))
       : [];
+  }
+
+  // 시작 게이트(설계 §4-0, D). 완성조건·게이트 명령 추정 → approved=false 저장(사람 승인 대기).
+  async proposeProject(targetPath: string, goal: string): Promise<ProjectConfig> {
+    if (!this.projects || !this.codeBrain || !this.fence) throw new Error('proposeProject 협력자 미주입');
+    this.fence.assertWritable(targetPath); // denyPaths/writePaths 밖 거부(자기수정 차단 ③)
+    const prompt = [
+      '아래 목표에 대한 완성조건(검증 가능한 항목)과 이 프로젝트의 게이트 명령을 추정하라.',
+      `\n# 목표\n${goal}\n# 타깃 경로\n${targetPath}`,
+      '\n반드시 이 JSON만: {"acceptanceCriteria":["..."],"gate":{"test":"...","build":"...","typecheck":"..."}}',
+    ].join('\n');
+    const r = await this.codeBrain.complete(prompt);
+    const draft = this.parseProposal(r.isError ? '' : r.text);
+    const id = `proj_${targetPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-32)}`;
+    const cfg: ProjectConfig = {
+      id, targetPath, branch: `engram/${id}`,
+      gate: draft.gate, acceptanceCriteria: draft.acceptanceCriteria,
+      writePaths: [targetPath], concurrency: 1, budget: { tokens: null }, approved: false,
+    };
+    await this.projects.create(cfg);
+    return cfg;
+  }
+
+  async approveProject(projectId: string): Promise<void> {
+    if (!this.projects) throw new Error('projects 미주입');
+    await this.projects.update(projectId, { approved: true });
+  }
+
+  // 기존 parseJsonBlock 재사용(T8). 새 스캐너 안 만듦.
+  private parseProposal(text: string): { acceptanceCriteria: string[]; gate: GateCommands } {
+    const o = parseJsonBlock<{ acceptanceCriteria?: unknown; gate?: any }>(text);
+    if (!o) return { acceptanceCriteria: [], gate: { test: '', build: '', typecheck: '' } };
+    return {
+      acceptanceCriteria: Array.isArray(o.acceptanceCriteria) ? o.acceptanceCriteria.map(String) : [],
+      gate: { test: String(o.gate?.test ?? ''), build: String(o.gate?.build ?? ''), typecheck: String(o.gate?.typecheck ?? '') },
+    };
   }
 
   private runState: 'running' | 'paused' | 'stopped' = 'running';

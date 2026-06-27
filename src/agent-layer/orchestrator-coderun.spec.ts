@@ -86,3 +86,30 @@ describe('Orchestrator.codeRun', () => {
     expect(r.status).toBe('STOPPED');
   });
 });
+
+describe('proposeProject/approveProject', () => {
+  it('완성조건 초안 추정 + approved=false 저장', async () => {
+    let saved: any;
+    const projects = { create: async (c: any) => { saved = c; return c; }, update: async (_id: string, p: any) => { saved = { ...saved, ...p }; return saved; }, get: async () => saved };
+    const fence = { assertWritable: () => {} };
+    const o = new Orchestrator({} as any, {} as any, logger, {} as any,
+      {} as any, undefined, undefined, { run: (f: any) => f() } as any, projects as any,
+      {} as any, {} as any, {} as any, {} as any,
+      fakeBrain('{"acceptanceCriteria":["로그인 토큰 발급"],"gate":{"test":"npm test","build":"npm run build","typecheck":"tsc --noEmit"}}') as any,
+      fence as any);
+    const cfg = await o.proposeProject('C:/proj', '로그인 고쳐');
+    expect(cfg.approved).toBe(false);
+    expect(cfg.acceptanceCriteria).toContain('로그인 토큰 발급');
+    expect(cfg.gate.test).toBe('npm test');
+    await o.approveProject(cfg.id);
+    expect(saved.approved).toBe(true);
+  });
+
+  it('denyPaths 타깃은 거부', async () => {
+    const fence = { assertWritable: () => { throw new Error('금지'); } };
+    const o = new Orchestrator({} as any, {} as any, logger, {} as any,
+      {} as any, undefined, undefined, { run: (f: any) => f() } as any, { create: async (c: any) => c } as any,
+      {} as any, {} as any, {} as any, {} as any, fakeBrain('{}') as any, fence as any);
+    await expect(o.proposeProject('C:/engram', 'x')).rejects.toThrow();
+  });
+});
