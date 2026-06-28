@@ -28,6 +28,8 @@ import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
 import { StuckDetector } from './stuck-detector';
 import { PermissionFence } from './permission-fence';
+import { InsightReporter } from './insight-reporter';
+import { DayInsight } from '../knowledge-core/insight/insight-store';
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -49,17 +51,25 @@ export class Orchestrator {
     @Optional() private readonly reviewer?: ReviewerAgent,
     @Optional() @Inject(BRAIN) private readonly codeBrain?: BrainProvider,
     @Optional() private readonly fence?: PermissionFence,
+    @Optional() private readonly reporter?: InsightReporter,
   ) {}
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
     return this.ingester.run(userId);
   }
 
+  // 일일 인사이트 생성(설계 §5.4). DigestScheduler→digest와 동렬: 스케줄러·CLI가 호출.
+  insight(userId: string = DEFAULT_USER): Promise<DayInsight | null> {
+    if (!this.reporter) throw new Error('InsightReporter 미주입(Orchestrator)');
+    return this.reporter.run(userId);
+  }
+
   async route(msg: CoreMessage, onChunk?: (t: string) => void): Promise<string> {
-    const answer = await this.reader.handle(msg, onChunk);
+    let sources: string[] = [];
+    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; });
     try {
       await this.conversations.append(msg.userId, {
-        ts: new Date().toISOString(), question: msg.text, answer,
+        ts: new Date().toISOString(), question: msg.text, answer, sources,
       });
     } catch (err) {
       // 부수효과(대화 적재) 실패가 답변 경로를 죽이지 않게(§10.3)

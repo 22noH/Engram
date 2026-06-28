@@ -25,7 +25,7 @@ describe('Orchestrator (스텁)', () => {
     const cb = jest.fn();
     const out = await orch.route({ text: 'q', userId: 'default' }, cb);
     expect(out).toBe('답');
-    expect(reader.handle).toHaveBeenCalledWith({ text: 'q', userId: 'default' }, cb);
+    expect(reader.handle).toHaveBeenCalledWith({ text: 'q', userId: 'default' }, cb, expect.any(Function));
   });
 
   it('route 후 대화를 ConversationStore에 적재한다', async () => {
@@ -55,5 +55,24 @@ describe('Orchestrator (스텁)', () => {
     const orch = new Orchestrator({} as any, {} as any, { warn: () => {} } as any, ingester);
     expect(await orch.digest('default')).toEqual({ extracted: 2, gated: 1, proposed: 1 });
     expect(ingester.run).toHaveBeenCalledWith('default');
+  });
+
+  it('route는 reader가 노출한 인용 slug를 대화기록 sources에 적재한다', async () => {
+    const reader = { handle: async (_m: any, _c: any, onSources?: (s: string[]) => void) => { onSources?.(['p1', 'p2']); return '답'; } };
+    const appended: any[] = [];
+    const conversations = { append: async (_u: string, rec: any) => { appended.push(rec); } };
+    const logger = { warn: () => {} };
+    const orch = new Orchestrator(reader as any, conversations as any, logger as any, {} as any);
+    await orch.route({ text: 'q', userId: 'default' });
+    expect(appended[0].sources).toEqual(['p1', 'p2']);
+  });
+
+  it('insight()는 reporter에 위임한다', async () => {
+    const reporter = { run: async () => ({ date: '2026-06-28', metrics: {} as any, report: 'r' }) };
+    const orch = new Orchestrator(
+      {} as any, {} as any, { warn: () => {} } as any, {} as any,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, reporter as any,
+    );
+    expect((await orch.insight('default'))?.report).toBe('r');
   });
 });
