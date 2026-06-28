@@ -1,6 +1,16 @@
 import { ReaderAgent } from './reader-agent';
 import { FakeBrain } from '../brain/fake-brain';
 import { SearchResult } from '../knowledge-core/rag/rag.types';
+import { InsightContext } from '../knowledge-core/insight/insight-context';
+import { PathResolver } from '../pal/path-resolver';
+import { PinoLogger } from '../pal/logger';
+import { RagStore } from '../knowledge-core/rag/rag-store';
+
+const ragWith = (hits: { slug: string; title: string; text: string }[]): RagStore =>
+  ({ search: async () => hits } as unknown as RagStore);
+const brainEcho = (capture?: (p: string) => void) => ({
+  complete: async (prompt: string) => { capture?.(prompt); return { text: '답', costUsd: 0, isError: false }; },
+});
 
 // RagStore의 search만 쓰는 최소 스텁.
 function stubRag(results: SearchResult[]) {
@@ -62,5 +72,32 @@ describe('ReaderAgent', () => {
     const joined = chunks.join('');
     expect(out).toBe(joined);
     expect(out).toContain('답변 생성 실패');
+  });
+});
+
+describe('ReaderAgent 인사이트 주입', () => {
+  const insightLogger = new PinoLogger(new PathResolver(require('os').tmpdir()));
+
+  it('onSources로 인용 slug를 노출한다', async () => {
+    let slugs: string[] = [];
+    const reader = new ReaderAgent(ragWith([{ slug: 's1', title: 'T', text: 'x' }]), brainEcho() as any, insightLogger);
+    await reader.handle({ text: 'q', userId: 'default' }, undefined, (s) => { slugs = s; });
+    expect(slugs).toEqual(['s1']);
+  });
+
+  it('InsightContext 주입 시 참고용 섹션을 프롬프트에 넣는다', async () => {
+    let prompt = '';
+    const ctx = { latest: async () => '(2026-06-28 기준) 도커 집중' } as unknown as InsightContext;
+    const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, insightLogger, ctx);
+    await reader.handle({ text: 'q', userId: 'default' });
+    expect(prompt).toContain('참고용 사용자 맥락');
+    expect(prompt).toContain('도커 집중');
+  });
+
+  it('InsightContext 없으면 참고용 섹션이 없다', async () => {
+    let prompt = '';
+    const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, insightLogger);
+    await reader.handle({ text: 'q', userId: 'default' });
+    expect(prompt).not.toContain('참고용 사용자 맥락');
   });
 });
