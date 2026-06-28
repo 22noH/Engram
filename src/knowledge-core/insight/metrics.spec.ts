@@ -29,4 +29,10 @@ describe('computeDayMetrics', () => {
     const m = computeDayMetrics('2026-06-28', [rec('2026-06-28T00:00:00.000Z', 'beta alpha', 'x')]);
     expect(m.topTerms.map((t) => t.term)).toEqual(['alpha', 'beta']);
   });
+
+  it('한국어 동점도 코드포인트 순서로 결정적 정렬', () => {
+    const m = computeDayMetrics('2026-06-28', [rec('2026-06-28T00:00:00.000Z', '환경변수 배포', 'x')]);
+    const terms = m.topTerms.map((t) => t.term);
+    expect(terms).toEqual([...terms].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
 });

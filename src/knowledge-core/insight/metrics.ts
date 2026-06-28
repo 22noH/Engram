@@ -29,7 +29,7 @@ function tokenize(text: string): string[] {
 // 빈도 내림차순 → 동점은 키 오름차순(결정적). 상위 N.
 function topEntries(counts: Map<string, number>, n: number): [string, number][] {
   return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .slice(0, n);
 }
 
