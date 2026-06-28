@@ -64,4 +64,14 @@ export class PathResolver {
   getInsightsDir(userId: string = DEFAULT_USER): string {
     return path.join(this.getStateDir(), 'insights', userId);
   }
+
+  // 상주 생존신호(Phase 5 PAL §3.4). watchdog이 이 파일의 갱신 시각을 폴링한다.
+  getHeartbeatPath(): string {
+    return path.join(this.getStateDir(), 'heartbeat');
+  }
+
+  // 상주 프로세스 PID(watchdog이 멈춤 시 강제종료 대상 식별).
+  getPidPath(): string {
+    return path.join(this.getStateDir(), 'engram.pid');
+  }
 }
