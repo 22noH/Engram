@@ -35,11 +35,13 @@ export async function sendAlert(
   if (cfg.command) {
     const spawnFn = deps.spawnFn ?? ((c: string, a: string[]) => spawn(c, a, { shell: true }));
     await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = (): void => { if (!done) { done = true; resolve(); } };
       try {
         const child = spawnFn(cfg.command!, [event, message]);
-        child.on('exit', () => resolve());
-        child.on('error', () => resolve());
-      } catch { resolve(); }
+        child.on('exit', finish);
+        child.on('error', finish);
+      } catch { finish(); }
     });
   }
 }
