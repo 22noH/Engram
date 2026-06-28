@@ -1,10 +1,38 @@
+import { Service } from 'node-windows';
 import { SupervisorPort, ServiceStatus, ServiceSpec } from './supervisor.port';
 
+type ServiceFactory = (opts: ConstructorParameters<typeof Service>[0]) => Service;
+
+// Windows 서비스 어댑터(spec B2). node-windows로 SCM 등록 — 부팅 자동시작·죽으면 재시작·백오프는 SCM이 네이티브 제공.
 export class WindowsSupervisor implements SupervisorPort {
-  constructor(private readonly spec: ServiceSpec) {}
-  async install(): Promise<void> { throw new Error('미구현(Task 6)'); }
-  async uninstall(): Promise<void> { throw new Error('미구현'); }
-  async start(): Promise<void> { throw new Error('미구현'); }
-  async stop(): Promise<void> { throw new Error('미구현'); }
-  async status(): Promise<ServiceStatus> { return 'not-installed'; }
+  private readonly make: ServiceFactory;
+  constructor(private readonly spec: ServiceSpec, make?: ServiceFactory) {
+    this.make = make ?? ((o) => new Service(o));
+  }
+
+  private build(): Service {
+    return this.make({
+      name: this.spec.name,
+      description: 'Engram 24/7 상주 지식 코어',
+      script: this.spec.scriptPath,
+      env: [{ name: 'ENGRAM_DATA_DIR', value: this.spec.dataDir }],
+      wait: 2,   // 재시작 대기 시작값(초)
+      grow: 0.5, // 백오프 증가율
+    });
+  }
+
+  private once(svc: Service, event: 'install' | 'uninstall' | 'start' | 'stop', action: () => void): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      svc.on(event, () => resolve());
+      svc.on('alreadyinstalled', () => resolve());
+      svc.on('error', (e) => reject(e instanceof Error ? e : new Error(String(e))));
+      action();
+    });
+  }
+
+  async install(): Promise<void> { const s = this.build(); await this.once(s, 'install', () => s.install()); }
+  async uninstall(): Promise<void> { const s = this.build(); await this.once(s, 'uninstall', () => s.uninstall()); }
+  async start(): Promise<void> { const s = this.build(); await this.once(s, 'start', () => s.start()); }
+  async stop(): Promise<void> { const s = this.build(); await this.once(s, 'stop', () => s.stop()); }
+  async status(): Promise<ServiceStatus> { return this.build().exists ? 'running' : 'not-installed'; }
 }
