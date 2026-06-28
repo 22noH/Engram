@@ -32,7 +32,8 @@ export class MemoryMonitor {
 
   constructor(private readonly paths: PathResolver, private readonly logger: PinoLogger, deps: MemoryMonitorDeps = {}) {
     this.limitMb = deps.limitMb ?? Number(process.env.ENGRAM_RSS_LIMIT_MB ?? 1024);
-    this.keepSnapshots = deps.keepSnapshots ?? (Number(process.env.ENGRAM_HEAP_KEEP) || 3);
+    const heapRaw = process.env.ENGRAM_HEAP_KEEP;
+    this.keepSnapshots = deps.keepSnapshots ?? (heapRaw == null || heapRaw.trim() === '' ? 3 : Number(heapRaw));
     this.rssFn = deps.rssFn ?? (() => process.memoryUsage().rss);
     this.alertFn = deps.alertFn ?? ((e, m) => sendAlert(loadAlertConfig(paths.getConfigDir()), e, m));
     this.snapshotFn = deps.snapshotFn ?? (() => v8.writeHeapSnapshot(path.join(paths.getLogsDir(), `heap-${Date.now()}.heapsnapshot`)));
@@ -53,6 +54,7 @@ export class MemoryMonitor {
 
   // 오래된 heap 스냅샷 정리(파일이 커서 누적 방지). 최신 keepSnapshots개만 유지. best-effort.
   private pruneSnapshots(): void {
+    if (!Number.isFinite(this.keepSnapshots) || this.keepSnapshots <= 0) return; // 0/음수 = 무제한(전부 보존)
     try {
       const dir = this.paths.getLogsDir();
       const files = fs.readdirSync(dir).filter((f) => f.startsWith('heap-') && f.endsWith('.heapsnapshot')).sort(); // 파일명 ts = 시간순

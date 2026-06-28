@@ -45,4 +45,22 @@ describe('memory-monitor', () => {
     const remaining = fs.readdirSync(logs).filter((f: string) => f.startsWith('heap-')).sort();
     expect(remaining).toEqual(['heap-003.heapsnapshot', 'heap-004.heapsnapshot']);
   });
+
+  it('keepSnapshots=0은 무제한(스냅샷 정리 안 함)', () => {
+    const fs2 = require('fs'); const p2 = require('path');
+    const dir = fs2.mkdtempSync(p2.join(os.tmpdir(), 'mm0-'));
+    const paths = new PathResolver(dir);
+    const logs = paths.getLogsDir(); fs2.mkdirSync(logs, { recursive: true });
+    for (const t of ['001', '002', '003']) fs2.writeFileSync(p2.join(logs, `heap-${t}.heapsnapshot`), 'x');
+    const logger = new PinoLogger(paths);
+    const m = new MemoryMonitor(paths, logger, {
+      limitMb: 1, keepSnapshots: 0,
+      rssFn: () => 999 * 1024 * 1024,
+      alertFn: async () => {},
+      snapshotFn: () => { const p = p2.join(logs, 'heap-004.heapsnapshot'); fs2.writeFileSync(p, 'x'); return p; },
+    });
+    m.sample();
+    const remaining = fs2.readdirSync(logs).filter((f: string) => f.startsWith('heap-')).sort();
+    expect(remaining).toEqual(['heap-001.heapsnapshot', 'heap-002.heapsnapshot', 'heap-003.heapsnapshot', 'heap-004.heapsnapshot']); // 전부 보존
+  });
 });

@@ -40,7 +40,9 @@ export class InsightReporter {
     const report = result.isError ? '(리포트 생성 실패: 두뇌 오류 — 메트릭만 보존)' : result.text.trim();
     const insight: DayInsight = { date: day, metrics, report };
     await this.store.save(userId, insight);
-    await this.store.prune(userId, Number(process.env.ENGRAM_INSIGHT_KEEP_DAYS) || 90); // 기본 90일 보존
+    const keepRaw = process.env.ENGRAM_INSIGHT_KEEP_DAYS;
+    const keep = keepRaw == null || keepRaw.trim() === '' ? 90 : Number(keepRaw);
+    await this.store.prune(userId, keep); // 미설정=90일, 0/음수=무제한(prune이 no-op)
     this.logger.log(`인사이트 생성: ${day} (질의 ${metrics.queryCount}건)`, 'InsightReporter');
     return insight;
   }
