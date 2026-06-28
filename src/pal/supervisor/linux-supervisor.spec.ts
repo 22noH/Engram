@@ -8,5 +8,7 @@ describe('LinuxSupervisor.buildUnit', () => {
     expect(unit).toContain('ExecStart=');
     expect(unit).toContain('/app/main.js');
     expect(unit).toContain('WatchdogSec=');  // 멈춤 감지 네이티브(설계 §10.1)
+    expect(unit).toContain('ExecStart="');           // 경로 따옴표(공백 안전)
+    expect(unit).toContain('"/app/main.js"');         // scriptPath 따옴표 포함
   });
 });

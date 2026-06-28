@@ -16,7 +16,7 @@ export class LinuxSupervisor implements SupervisorPort {
       '',
       '[Service]',
       'Type=simple',
-      `ExecStart=${process.execPath} ${this.spec.scriptPath}`,
+      `ExecStart="${process.execPath}" "${this.spec.scriptPath}"`,
       `Environment=ENGRAM_DATA_DIR=${this.spec.dataDir}`,
       'Restart=always',
       'RestartSec=2',
@@ -41,7 +41,7 @@ export class LinuxSupervisor implements SupervisorPort {
   }
   async uninstall(): Promise<void> {
     execFileSync('systemctl', ['--user', 'disable', this.spec.name]);
-    try { fs.unlinkSync(this.unitPath()); } catch { /* 이미 없음 */ }
+    try { fs.unlinkSync(this.unitPath()); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; } // 이미 없음만 무시
     execFileSync('systemctl', ['--user', 'daemon-reload']);
   }
   async start(): Promise<void> { execFileSync('systemctl', ['--user', 'start', this.spec.name]); }
