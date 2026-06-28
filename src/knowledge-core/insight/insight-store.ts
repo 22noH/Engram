@@ -37,7 +37,10 @@ export class InsightStore {
   }
 
   private async readFile(userId: string, name: string): Promise<DayInsight | null> {
-    try { return JSON.parse(await fs.readFile(path.join(this.paths.getInsightsDir(userId), name), 'utf8')) as DayInsight; }
+    let text: string;
+    try { text = await fs.readFile(path.join(this.paths.getInsightsDir(userId), name), 'utf8'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
+    try { return JSON.parse(text) as DayInsight; }
+    catch { return null; } // 손상/반쓰기 파일은 인사이트 없음으로 강등(읽기 경로 보호)
   }
 }

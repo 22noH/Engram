@@ -34,4 +34,13 @@ describe('InsightStore', () => {
     expect((await store.get('default', '2026-06-28'))?.report).toBe('report-2026-06-28');
     expect(await store.get('default', '2026-06-01')).toBeNull();
   });
+
+  it('손상된 인사이트 파일은 throw 없이 null로 강등', async () => {
+    const paths = new PathResolver(dir);
+    const insDir = paths.getInsightsDir('default');
+    await fs.mkdir(insDir, { recursive: true });
+    await fs.writeFile(path.join(insDir, '2026-06-28.json'), '{ broken json');
+    expect(await store.get('default', '2026-06-28')).toBeNull();
+    expect(await store.latest('default')).toBeNull();
+  });
 });
