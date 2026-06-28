@@ -6,6 +6,7 @@ import { ProposalStore } from '../knowledge-core/proposal-store';
 import { ProposalApplier } from './proposal-applier';
 import { MeetingEngine } from '../agent-layer/meeting-engine';
 import { loadMeetings, saveMeetings } from './meeting-config';
+import { InsightStore } from '../knowledge-core/insight/insight-store';
 
 // CLI 어댑터(설계 §9.1). 인수 파싱·프롬프트·stdout 쓰기 등 CLI 특유의 것을 여기 가둔다.
 // 코어는 CoreMessage만 본다. 원샷·REPL 모두 같은 orchestrator.route()로 수렴.
@@ -17,6 +18,7 @@ export class CliGateway {
     private readonly applier: ProposalApplier,
     @Optional() private readonly paths?: PathResolver,
     @Optional() private readonly meetingEngine?: MeetingEngine,
+    @Optional() private readonly insights?: InsightStore,
   ) {}
 
   async run(argv: string[]): Promise<void> {
@@ -34,6 +36,14 @@ export class CliGateway {
       process.stdout.write(out + '\n');
     } else if (argv[0] === 'meeting') {
       await this.meeting(argv.slice(1));
+    } else if (argv[0] === 'insights') {
+      if (argv[1] === 'run') {
+        const ins = await this.orchestrator.insight(DEFAULT_USER);
+        process.stdout.write(ins ? `인사이트 생성: ${ins.date} (질의 ${ins.metrics.queryCount}건)\n` : '대화 기록이 없어 생략\n');
+      } else {
+        const ins = this.insights ? await this.insights.latest(DEFAULT_USER) : null;
+        process.stdout.write(ins ? `[${ins.date}]\n${ins.report}\n` : '인사이트가 아직 없습니다. engram insights run 으로 생성.\n');
+      }
     } else if (argv[0] === 'code' && argv[1]) {
       const rest = argv.slice(2);
       const confirm = rest.includes('--confirm');
@@ -48,7 +58,7 @@ export class CliGateway {
     } else if (argv.length === 0) {
       await this.repl();
     } else {
-      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram (REPL)\n');
+      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram insights [run] | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram (REPL)\n');
     }
   }
 

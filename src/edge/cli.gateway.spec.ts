@@ -119,4 +119,24 @@ describe('CliGateway', () => {
     await gw.run(['resume']);
     expect(calls).toEqual(['running']);
   });
+
+  it('insights run은 orchestrator.insight를 호출하고 생성 결과를 출력', async () => {
+    const out: string[] = [];
+    jest.spyOn(process.stdout, 'write').mockImplementation((s: any) => { out.push(String(s)); return true; });
+    const orch = { insight: async () => ({ date: '2026-06-28', metrics: { queryCount: 3 } as any, report: '도커 집중' }) };
+    const gw = new CliGateway(orch as any, {} as any, {} as any);
+    await gw.run(['insights', 'run']);
+    expect(out.join('')).toContain('2026-06-28');
+    (process.stdout.write as any).mockRestore();
+  });
+
+  it('insights는 InsightStore.latest를 출력(없으면 안내)', async () => {
+    const out: string[] = [];
+    jest.spyOn(process.stdout, 'write').mockImplementation((s: any) => { out.push(String(s)); return true; });
+    const store = { latest: async () => null };
+    const gw = new CliGateway({} as any, {} as any, {} as any, undefined, undefined, store as any);
+    await gw.run(['insights']);
+    expect(out.join('')).toContain('아직');
+    (process.stdout.write as any).mockRestore();
+  });
 });
