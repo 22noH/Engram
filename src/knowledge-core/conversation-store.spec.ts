@@ -46,4 +46,16 @@ describe('ConversationStore', () => {
     const all = await store.since('default', null);
     expect(all.map((r) => r.question)).toEqual(['q1', 'q2']); // 손상 줄은 건너뜀
   });
+
+  it('readDay는 해당 날짜 기록만, sources 포함해 읽는다', async () => {
+    await store.append('default', { ts: '2026-06-28T01:00:00.000Z', question: 'q1', answer: 'a1', sources: ['s-a', 's-b'] });
+    await store.append('default', { ts: '2026-06-29T01:00:00.000Z', question: 'q2', answer: 'a2' });
+    const day = await store.readDay('default', '2026-06-28');
+    expect(day.map((r) => r.question)).toEqual(['q1']);
+    expect(day[0].sources).toEqual(['s-a', 's-b']);
+  });
+
+  it('readDay는 없는 날짜에 빈 배열', async () => {
+    expect(await store.readDay('default', '1999-01-01')).toEqual([]);
+  });
 });

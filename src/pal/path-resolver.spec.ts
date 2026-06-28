@@ -54,4 +54,9 @@ describe('PathResolver', () => {
     const p = new PathResolver('C:/data');
     expect(p.getProjectsDir().replace(/\\/g, '/')).toBe('C:/data/config/projects');
   });
+
+  it('getInsightsDir는 state/insights/{userId} 경로를 준다', () => {
+    const r = new PathResolver('/data');
+    expect(r.getInsightsDir('default').replace(/\\/g, '/')).toBe('/data/state/insights/default');
+  });
 });

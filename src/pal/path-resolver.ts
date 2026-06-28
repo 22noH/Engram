@@ -59,4 +59,9 @@ export class PathResolver {
   getProjectsDir(): string {
     return path.join(this.getConfigDir(), 'projects');
   }
+
+  // 일일 인사이트(Phase 5) 저장 디렉터리. state/insights/{userId}/{day}.json.
+  getInsightsDir(userId: string = DEFAULT_USER): string {
+    return path.join(this.getStateDir(), 'insights', userId);
+  }
 }

@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PathResolver, DEFAULT_USER } from '../pal/path-resolver';
 
-export interface ConversationRecord { ts: string; question: string; answer: string }
+export interface ConversationRecord { ts: string; question: string; answer: string; sources?: string[] }
 
 @Injectable()
 export class ConversationStore {
@@ -40,6 +40,20 @@ export class ConversationStore {
       }
     }
     return out.sort((a, b) => a.ts.localeCompare(b.ts));
+  }
+
+  // 특정 날짜(YYYY-MM-DD) 한 파일만 읽는다(인사이트 일일 집계용 — 전체 스캔 회피).
+  async readDay(userId: string = DEFAULT_USER, day: string): Promise<ConversationRecord[]> {
+    const file = path.join(this.convDir(userId), `${day}.jsonl`);
+    let text: string;
+    try { text = await fs.readFile(file, 'utf8'); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw e; }
+    const out: ConversationRecord[] = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line) as ConversationRecord); } catch { continue; } // 손상 줄 건너뜀
+    }
+    return out;
   }
 
   async readCursor(userId: string = DEFAULT_USER): Promise<string | null> {
