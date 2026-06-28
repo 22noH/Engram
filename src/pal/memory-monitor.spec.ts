@@ -6,6 +6,10 @@ import { PathResolver } from './path-resolver';
 import { PinoLogger } from './logger';
 
 describe('memory-monitor', () => {
+  afterEach(() => {
+    delete process.env.ENGRAM_HEAP_KEEP;
+  });
+
   it('isOverLimit은 MB 임계치를 바이트와 비교', () => {
     expect(isOverLimit(600 * 1024 * 1024, 512)).toBe(true);
     expect(isOverLimit(100 * 1024 * 1024, 512)).toBe(false);
@@ -62,5 +66,25 @@ describe('memory-monitor', () => {
     m.sample();
     const remaining = fs2.readdirSync(logs).filter((f: string) => f.startsWith('heap-')).sort();
     expect(remaining).toEqual(['heap-001.heapsnapshot', 'heap-002.heapsnapshot', 'heap-003.heapsnapshot', 'heap-004.heapsnapshot']); // 전부 보존
+  });
+
+  it('ENGRAM_HEAP_KEEP 미설정이면 무제한(정리 안 함)', () => {
+    const fs2 = require('fs'); const p2 = require('path');
+    delete process.env.ENGRAM_HEAP_KEEP;
+    const dir = fs2.mkdtempSync(p2.join(os.tmpdir(), 'mmd-'));
+    const paths = new PathResolver(dir);
+    const logs = paths.getLogsDir(); fs2.mkdirSync(logs, { recursive: true });
+    for (const t of ['001', '002', '003']) fs2.writeFileSync(p2.join(logs, `heap-${t}.heapsnapshot`), 'x');
+    const logger = new PinoLogger(paths);
+    // keepSnapshots는 deps에서 빼서 env(미설정→NaN→무제한) 경로를 탄다
+    const m = new MemoryMonitor(paths, logger, {
+      limitMb: 1,
+      rssFn: () => 999 * 1024 * 1024,
+      alertFn: async () => {},
+      snapshotFn: () => { const p = p2.join(logs, 'heap-004.heapsnapshot'); fs2.writeFileSync(p, 'x'); return p; },
+    });
+    m.sample();
+    const remaining = fs2.readdirSync(logs).filter((f: string) => f.startsWith('heap-')).sort();
+    expect(remaining).toEqual(['heap-001.heapsnapshot', 'heap-002.heapsnapshot', 'heap-003.heapsnapshot', 'heap-004.heapsnapshot']);
   });
 });

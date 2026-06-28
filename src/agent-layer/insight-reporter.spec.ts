@@ -22,6 +22,10 @@ describe('InsightReporter', () => {
     logger = new PinoLogger(paths);
   });
 
+  afterEach(() => {
+    delete process.env.ENGRAM_INSIGHT_KEEP_DAYS;
+  });
+
   it('그날 대화가 없으면 null, 저장도 안 함', async () => {
     const r = new InsightReporter(conv, store, okBrain('x'), logger);
     expect(await r.run('default', '2026-06-28')).toBeNull();
@@ -76,6 +80,16 @@ describe('InsightReporter', () => {
     await r.run('default', '2026-06-28');
     expect(await store.get('default', '2026-06-27')).not.toBeNull(); // 오래된 것도 보존
     expect(await store.get('default', '2026-06-28')).not.toBeNull();
+  });
+
+  it('ENGRAM_INSIGHT_KEEP_DAYS 미설정이면 무제한(정리 안 함)', async () => {
     delete process.env.ENGRAM_INSIGHT_KEEP_DAYS;
+    await conv.append('default', { ts: '2026-06-27T01:00:00.000Z', question: 'q', answer: 'a' });
+    await conv.append('default', { ts: '2026-06-28T01:00:00.000Z', question: 'q', answer: 'a' });
+    const r = new InsightReporter(conv, store, okBrain('보고서'), logger);
+    await r.run('default', '2026-06-27');
+    await r.run('default', '2026-06-28');
+    expect(await store.get('default', '2026-06-27')).not.toBeNull(); // 미설정=보존
+    expect(await store.get('default', '2026-06-28')).not.toBeNull();
   });
 });

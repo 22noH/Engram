@@ -32,8 +32,8 @@ export class MemoryMonitor {
 
   constructor(private readonly paths: PathResolver, private readonly logger: PinoLogger, deps: MemoryMonitorDeps = {}) {
     this.limitMb = deps.limitMb ?? Number(process.env.ENGRAM_RSS_LIMIT_MB ?? 1024);
-    const heapRaw = process.env.ENGRAM_HEAP_KEEP;
-    this.keepSnapshots = deps.keepSnapshots ?? (heapRaw == null || heapRaw.trim() === '' ? 3 : Number(heapRaw));
+    // 미설정/빈값/0/음수 = 무제한(pruneSnapshots가 no-op), 양수 = 그만큼 유지.
+    this.keepSnapshots = deps.keepSnapshots ?? Number(process.env.ENGRAM_HEAP_KEEP);
     this.rssFn = deps.rssFn ?? (() => process.memoryUsage().rss);
     this.alertFn = deps.alertFn ?? ((e, m) => sendAlert(loadAlertConfig(paths.getConfigDir()), e, m));
     this.snapshotFn = deps.snapshotFn ?? (() => v8.writeHeapSnapshot(path.join(paths.getLogsDir(), `heap-${Date.now()}.heapsnapshot`)));
