@@ -1,4 +1,5 @@
 import * as readline from 'readline';
+import * as path from 'path';
 import { Injectable, Optional } from '@nestjs/common';
 import { Orchestrator } from '../agent-layer/orchestrator';
 import { DEFAULT_USER, PathResolver } from '../pal/path-resolver';
@@ -7,6 +8,9 @@ import { ProposalApplier } from './proposal-applier';
 import { MeetingEngine } from '../agent-layer/meeting-engine';
 import { loadMeetings, saveMeetings } from './meeting-config';
 import { InsightStore } from '../knowledge-core/insight/insight-store';
+import { createSupervisor } from '../pal/supervisor/supervisor.factory';
+import { SupervisorPort } from '../pal/supervisor/supervisor.port';
+import { findRepoRoot } from '../pal/repo-root';
 
 // CLI 어댑터(설계 §9.1). 인수 파싱·프롬프트·stdout 쓰기 등 CLI 특유의 것을 여기 가둔다.
 // 코어는 CoreMessage만 본다. 원샷·REPL 모두 같은 orchestrator.route()로 수렴.
@@ -49,6 +53,8 @@ export class CliGateway {
       const confirm = rest.includes('--confirm');
       const goal = rest.filter((a) => a !== '--confirm').join(' ');
       await this.code(argv[1], goal, confirm);
+    } else if (argv[0] === 'service') {
+      await this.service(argv.slice(1));
     } else if (argv[0] === 'pause') {
       this.orchestrator.setRunState('paused'); process.stdout.write('일시정지\n');
     } else if (argv[0] === 'resume') {
@@ -58,7 +64,7 @@ export class CliGateway {
     } else if (argv.length === 0) {
       await this.repl();
     } else {
-      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram insights [run] | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram (REPL)\n');
+      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram insights [run] | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram service install|uninstall|start|stop|status | engram (REPL)\n');
     }
   }
 
@@ -136,6 +142,26 @@ export class CliGateway {
       onProgress: (m) => process.stdout.write(`· ${m}\n`),
     });
     process.stdout.write(`\n코딩 종료: ${r.status} (세션 ${r.sessionId})\n`);
+  }
+
+  // OS 서비스 등록(설계 §10.1). install/uninstall/start/stop/status. 실제 SCM/systemd/launchd 조작.
+  private async service(args: string[]): Promise<void> {
+    const verb = args[0];
+    if (!['install', 'uninstall', 'start', 'stop', 'status'].includes(verb)) {
+      process.stdout.write('사용법: engram service install|uninstall|start|stop|status\n');
+      return;
+    }
+    const dataDir = this.paths ? this.paths.getDataDir() : process.cwd();
+    const scriptPath = path.join(findRepoRoot(__dirname), 'dist', 'src', 'main.js');
+    let sup: SupervisorPort;
+    try {
+      sup = createSupervisor(process.platform, { name: 'Engram', scriptPath, dataDir });
+    } catch (e) { process.stdout.write(`${String(e)}\n`); return; }
+    try {
+      if (verb === 'status') { process.stdout.write(`서비스 상태: ${await sup.status()}\n`); return; }
+      await (sup as unknown as Record<string, () => Promise<void>>)[verb]();
+      process.stdout.write(`서비스 ${verb} 완료\n`);
+    } catch (e) { process.stdout.write(`서비스 ${verb} 실패: ${String(e)}\n`); }
   }
 
   // 승인 게이트(설계 §6 ⑤). pending 제안을 순서대로 보여주고 사람이 a/r/s로 판정.

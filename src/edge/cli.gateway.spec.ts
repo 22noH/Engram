@@ -139,4 +139,13 @@ describe('CliGateway', () => {
     expect(out.join('')).toContain('아직');
     (process.stdout.write as any).mockRestore();
   });
+
+  it('service는 알 수 없는/빈 동사에 사용법을 출력', async () => {
+    const out: string[] = [];
+    jest.spyOn(process.stdout, 'write').mockImplementation((s: any) => { out.push(String(s)); return true; });
+    const gw = new CliGateway({} as any, {} as any, {} as any);
+    await gw.run(['service', '봉봉']);            // 미지원 동사 → 사용법(슈퍼바이저 미생성, OS 무접촉)
+    expect(out.join('')).toContain('engram service');
+    (process.stdout.write as any).mockRestore();
+  });
 });
