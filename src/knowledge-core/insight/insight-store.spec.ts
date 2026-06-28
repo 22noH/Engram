@@ -35,6 +35,19 @@ describe('InsightStore', () => {
     expect(await store.get('default', '2026-06-01')).toBeNull();
   });
 
+  it('prune는 최신 keep개만 남긴다', async () => {
+    for (const d of ['2026-06-24', '2026-06-25', '2026-06-26', '2026-06-27', '2026-06-28']) await store.save('default', insight(d));
+    await store.prune('default', 2);
+    const files = (await fs.readdir(new PathResolver(dir).getInsightsDir('default'))).sort();
+    expect(files).toEqual(['2026-06-27.json', '2026-06-28.json']);
+  });
+
+  it('prune keep<=0은 무동작', async () => {
+    await store.save('default', insight('2026-06-28'));
+    await store.prune('default', 0);
+    expect(await store.latest('default')).not.toBeNull();
+  });
+
   it('손상된 인사이트 파일은 throw 없이 null로 강등', async () => {
     const paths = new PathResolver(dir);
     const insDir = paths.getInsightsDir('default');

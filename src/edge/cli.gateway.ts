@@ -8,7 +8,7 @@ import { ProposalApplier } from './proposal-applier';
 import { MeetingEngine } from '../agent-layer/meeting-engine';
 import { loadMeetings, saveMeetings } from './meeting-config';
 import { InsightStore } from '../knowledge-core/insight/insight-store';
-import { createSupervisor } from '../pal/supervisor/supervisor.factory';
+import { createSupervisor, buildServiceSpecs } from '../pal/supervisor/supervisor.factory';
 import { SupervisorPort } from '../pal/supervisor/supervisor.port';
 import { findRepoRoot } from '../pal/repo-root';
 
@@ -144,7 +144,7 @@ export class CliGateway {
     process.stdout.write(`\n코딩 종료: ${r.status} (세션 ${r.sessionId})\n`);
   }
 
-  // OS 서비스 등록(설계 §10.1). install/uninstall/start/stop/status. 실제 SCM/systemd/launchd 조작.
+  // OS 서비스 등록(설계 §10.1) — 상주 + watchdog 둘 다. install/uninstall/start/stop/status.
   private async service(args: string[]): Promise<void> {
     const verb = args[0];
     if (!['install', 'uninstall', 'start', 'stop', 'status'].includes(verb)) {
@@ -152,16 +152,17 @@ export class CliGateway {
       return;
     }
     const dataDir = this.paths ? this.paths.getDataDir() : process.cwd();
-    const scriptPath = path.join(findRepoRoot(__dirname), 'dist', 'src', 'main.js');
-    let sup: SupervisorPort;
-    try {
-      sup = createSupervisor(process.platform, { name: 'Engram', scriptPath, dataDir });
-    } catch (e) { process.stdout.write(`${String(e)}\n`); return; }
-    try {
-      if (verb === 'status') { process.stdout.write(`서비스 상태: ${await sup.status()}\n`); return; }
-      await (sup as unknown as Record<string, () => Promise<void>>)[verb]();
-      process.stdout.write(`서비스 ${verb} 완료\n`);
-    } catch (e) { process.stdout.write(`서비스 ${verb} 실패: ${String(e)}\n`); }
+    const specs = buildServiceSpecs(findRepoRoot(__dirname), dataDir);
+    let sups: SupervisorPort[];
+    try { sups = specs.map((s) => createSupervisor(process.platform, s)); }
+    catch (e) { process.stdout.write(`${String(e)}\n`); return; }
+    for (let i = 0; i < sups.length; i++) {
+      const name = specs[i].name;
+      try {
+        if (verb === 'status') { process.stdout.write(`${name} 상태: ${await sups[i].status()}\n`); }
+        else { await (sups[i] as unknown as Record<string, () => Promise<void>>)[verb](); process.stdout.write(`${name} ${verb} 완료\n`); }
+      } catch (e) { process.stdout.write(`${name} ${verb} 실패: ${String(e)}\n`); }
+    }
   }
 
   // 승인 게이트(설계 §6 ⑤). pending 제안을 순서대로 보여주고 사람이 a/r/s로 판정.

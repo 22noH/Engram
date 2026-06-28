@@ -31,6 +31,16 @@ export class InsightStore {
     return this.readFile(userId, `${date}.json`);
   }
 
+  // 오래된 일일 인사이트 정리(보존정책). 최신 keep개만 남기고 삭제. keep<=0/비유한이면 무동작.
+  async prune(userId: string = DEFAULT_USER, keep: number): Promise<void> {
+    if (!Number.isFinite(keep) || keep <= 0) return;
+    const files = await this.listDays(userId); // 날짜 오름차순
+    const remove = files.slice(0, Math.max(0, files.length - keep));
+    for (const f of remove) {
+      await fs.unlink(path.join(this.paths.getInsightsDir(userId), f)).catch(() => {}); // best-effort
+    }
+  }
+
   private async listDays(userId: string): Promise<string[]> {
     try { return (await fs.readdir(this.paths.getInsightsDir(userId))).filter((f) => f.endsWith('.json')).sort(); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw e; }

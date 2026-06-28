@@ -54,4 +54,16 @@ describe('InsightReporter', () => {
     expect(ins?.metrics.queryCount).toBe(1);
     expect((await store.latest('default'))?.metrics.queryCount).toBe(1);
   });
+
+  it('run은 보존정책으로 오래된 인사이트를 정리한다', async () => {
+    process.env.ENGRAM_INSIGHT_KEEP_DAYS = '1';
+    await conv.append('default', { ts: '2026-06-27T01:00:00.000Z', question: 'q', answer: 'a' });
+    await conv.append('default', { ts: '2026-06-28T01:00:00.000Z', question: 'q', answer: 'a' });
+    const r = new InsightReporter(conv, store, okBrain('보고서'), logger);
+    await r.run('default', '2026-06-27');
+    await r.run('default', '2026-06-28');
+    expect((await store.latest('default'))?.date).toBe('2026-06-28');
+    expect(await store.get('default', '2026-06-27')).toBeNull(); // 오래된 건 삭제됨
+    delete process.env.ENGRAM_INSIGHT_KEEP_DAYS;
+  });
 });
