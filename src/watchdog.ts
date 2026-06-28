@@ -1,0 +1,38 @@
+import { PathResolver } from './pal/path-resolver';
+import { isStale, readHeartbeat } from './pal/watchdog-core';
+import { loadAlertConfig, sendAlert } from './pal/alerter';
+import * as fs from 'fs';
+
+// 초경량 감시자(설계 §10.2). Nest·두뇌 0. heartbeat 폴링 → 멈춤 시 상주 강제종료(→OS 서비스 재시작) + 외부 알림.
+// 빠른 재시도 1~2회 후 즉시 알림(고정 장애는 재시도로 안 고쳐짐).
+const POLL_MS = Number(process.env.ENGRAM_WATCHDOG_POLL_MS ?? 30_000);
+const STALE_MS = Number(process.env.ENGRAM_WATCHDOG_STALE_MS ?? 180_000);
+
+async function tick(paths: PathResolver, configDir: string, strikes: { n: number }): Promise<void> {
+  const last = readHeartbeat(paths.getHeartbeatPath());
+  if (!isStale(Date.now(), last, STALE_MS)) { strikes.n = 0; return; }
+  strikes.n++;
+  if (strikes.n < 2) return; // 빠른 재시도 1회 유예(일시적 일시정지 흡수)
+  // 멈춘 상주 강제종료 → OS 서비스가 재시작
+  try {
+    const pid = Number(fs.readFileSync(paths.getPidPath(), 'utf8').trim());
+    if (Number.isFinite(pid)) process.kill(pid, 'SIGKILL');
+  } catch { /* pid 없음/이미 죽음 */ }
+  await sendAlert(loadAlertConfig(configDir), 'engram-down', `심장박동 ${STALE_MS}ms 이상 끊김 — 강제종료·재시작 시도`);
+  strikes.n = 0;
+}
+
+async function main(): Promise<void> {
+  const paths = new PathResolver();
+  const configDir = paths.getConfigDir();
+  const strikes = { n: 0 };
+  process.stderr.write(`watchdog 시작 (poll ${POLL_MS}ms, stale ${STALE_MS}ms)\n`);
+  // 단순 무한 루프(setInterval 누적 회피 — 한 틱 끝나고 다음 대기).
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    await tick(paths, configDir, strikes);
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+}
+
+void main();
