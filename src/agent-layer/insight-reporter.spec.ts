@@ -10,6 +10,7 @@ import { BrainProvider } from '../brain/brain.port';
 
 const okBrain = (text: string): BrainProvider => ({ complete: async () => ({ text, costUsd: 0, isError: false }) });
 const errBrain = (): BrainProvider => ({ complete: async () => ({ text: '', costUsd: 0, isError: true }) });
+const throwBrain = (): BrainProvider => ({ complete: async () => { throw new Error('network down'); } });
 
 describe('InsightReporter', () => {
   let dir: string; let conv: ConversationStore; let store: InsightStore; let logger: PinoLogger;
@@ -43,5 +44,14 @@ describe('InsightReporter', () => {
     const ins = await r.run('default', '2026-06-28');
     expect(ins?.report).toContain('실패');
     expect(ins?.metrics.queryCount).toBe(1);
+  });
+
+  it('두뇌가 throw해도 메트릭은 저장된다', async () => {
+    await conv.append('default', { ts: '2026-06-28T01:00:00.000Z', question: 'q', answer: 'a' });
+    const r = new InsightReporter(conv, store, throwBrain(), logger);
+    const ins = await r.run('default', '2026-06-28');
+    expect(ins?.report).toContain('실패');
+    expect(ins?.metrics.queryCount).toBe(1);
+    expect((await store.latest('default'))?.metrics.queryCount).toBe(1);
   });
 });

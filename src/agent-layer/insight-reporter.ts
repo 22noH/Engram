@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { BRAIN, BrainProvider } from '../brain/brain.port';
+import { BRAIN, BrainProvider, BrainResult } from '../brain/brain.port';
 import { ConversationStore, ConversationRecord } from '../knowledge-core/conversation-store';
 import { InsightStore, DayInsight } from '../knowledge-core/insight/insight-store';
 import { computeDayMetrics, DayMetrics } from '../knowledge-core/insight/metrics';
@@ -31,7 +31,12 @@ export class InsightReporter {
       return null;
     }
     const metrics = computeDayMetrics(day, records);
-    const result = await this.brain.complete(this.buildPrompt(metrics, records));
+    let result: BrainResult;
+    try {
+      result = await this.brain.complete(this.buildPrompt(metrics, records));
+    } catch {
+      result = { text: '', costUsd: 0, isError: true };
+    }
     const report = result.isError ? '(리포트 생성 실패: 두뇌 오류 — 메트릭만 보존)' : result.text.trim();
     const insight: DayInsight = { date: day, metrics, report };
     await this.store.save(userId, insight);
