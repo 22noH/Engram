@@ -27,6 +27,7 @@ import { Semaphore } from '../brain/semaphore';
 import { createBrain } from '../brain/brain.factory';
 import { loadBrainProfile } from '../brain/brain.config';
 import { VerificationGate } from './verification-gate';
+import { InsightReporter } from './insight-reporter';
 
 // AgentLayer(설계 §7). 코어(RagStore·PinoLogger)와 두뇌(BRAIN)를 소비.
 @Module({
@@ -111,6 +112,7 @@ import { VerificationGate } from './verification-gate';
     },
     MeetingEngine,
     VerificationGate,
+    InsightReporter,
     // ReviewerAgent: JUDGE_BRAIN 사용(작성자≠검증자, seam #5).
     {
       provide: ReviewerAgent,
