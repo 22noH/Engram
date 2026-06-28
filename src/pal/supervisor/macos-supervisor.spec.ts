@@ -10,4 +10,10 @@ describe('MacosSupervisor.buildPlist', () => {
     expect(plist).toContain('ENGRAM_DATA_DIR');
     expect(plist).toContain('/app/main.js');
   });
+
+  it('plist는 XML 특수문자를 이스케이프한다', () => {
+    const plist = new MacosSupervisor({ name: 'com.engram', scriptPath: '/a & b/main.js', dataDir: '/d' }).buildPlist();
+    expect(plist).toContain('/a &amp; b/main.js');
+    expect(plist).not.toContain('/a & b/main.js');
+  });
 });

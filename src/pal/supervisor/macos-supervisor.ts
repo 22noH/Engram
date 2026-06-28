@@ -5,6 +5,10 @@ import { execFileSync } from 'child_process';
 import { SupervisorPort, ServiceStatus, ServiceSpec } from './supervisor.port';
 
 // macOS launchd 어댑터(설계 §10.1). LaunchAgent plist — KeepAlive(죽으면 재시작) + RunAtLoad(부팅 시작).
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
 export class MacosSupervisor implements SupervisorPort {
   constructor(private readonly spec: ServiceSpec) {}
 
@@ -15,11 +19,11 @@ export class MacosSupervisor implements SupervisorPort {
       '<plist version="1.0">',
       '<dict>',
       '  <key>Label</key>',
-      `  <string>${this.spec.name}</string>`,
+      `  <string>${xmlEscape(this.spec.name)}</string>`,
       '  <key>ProgramArguments</key>',
-      `  <array><string>${process.execPath}</string><string>${this.spec.scriptPath}</string></array>`,
+      `  <array><string>${xmlEscape(process.execPath)}</string><string>${xmlEscape(this.spec.scriptPath)}</string></array>`,
       '  <key>EnvironmentVariables</key>',
-      `  <dict><key>ENGRAM_DATA_DIR</key><string>${this.spec.dataDir}</string></dict>`,
+      `  <dict><key>ENGRAM_DATA_DIR</key><string>${xmlEscape(this.spec.dataDir)}</string></dict>`,
       '  <key>KeepAlive</key><true/>',
       '  <key>RunAtLoad</key><true/>',
       '</dict>',
@@ -44,6 +48,7 @@ export class MacosSupervisor implements SupervisorPort {
   }
   async start(): Promise<void> { execFileSync('launchctl', ['start', this.spec.name]); }
   async stop(): Promise<void> { execFileSync('launchctl', ['stop', this.spec.name]); }
+  // 참고: launchctl list 성공 = 에이전트 '로드됨'(설치됨)일 뿐 실제 실행 보장 아님 — status는 coarse. 진짜 생존신호는 watchdog.
   async status(): Promise<ServiceStatus> {
     try {
       execFileSync('launchctl', ['list', this.spec.name]);

@@ -17,7 +17,7 @@ export class LinuxSupervisor implements SupervisorPort {
       '[Service]',
       'Type=simple',
       `ExecStart="${process.execPath}" "${this.spec.scriptPath}"`,
-      `Environment=ENGRAM_DATA_DIR=${this.spec.dataDir}`,
+      `Environment="ENGRAM_DATA_DIR=${this.spec.dataDir}"`,
       'Restart=always',
       'RestartSec=2',
       'WatchdogSec=120',
