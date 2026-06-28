@@ -10,6 +10,11 @@ describe('resolveCron', () => {
     expect(resolveCron('every day')).toBe('0 3 * * *'); // 2필드 — 사람 문구
     expect(resolveCron('3am')).toBe('0 3 * * *');
   });
+  it('resolveCron은 def 인자로 기본값을 바꿀 수 있다', () => {
+    expect(resolveCron(undefined, '0 4 * * *')).toBe('0 4 * * *');
+    expect(resolveCron('잘못된 문구', '0 4 * * *')).toBe('0 4 * * *');
+    expect(resolveCron('0 9 * * *', '0 4 * * *')).toBe('0 9 * * *');
+  });
 });
 
 it('tick은 orchestrator.digest를 호출한다', async () => {

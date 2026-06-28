@@ -6,8 +6,7 @@ import { DEFAULT_USER } from '../pal/path-resolver';
 
 // cron 표현식은 5~6개 공백 구분 필드. 잘못된 env(필드 수 불일치 — 예: 사람이 읽는 문구)는
 // 부팅 시 크래시 대신 기본값으로 폴백한다. (필드 값 자체가 틀린 경우는 cron 라이브러리가 잡는다.)
-export function resolveCron(raw: string | undefined): string {
-  const def = '0 3 * * *'; // 매일 03:00
+export function resolveCron(raw: string | undefined, def = '0 3 * * *'): string {
   if (!raw) return def;
   const n = raw.trim().split(/\s+/).length;
   return n === 5 || n === 6 ? raw.trim() : def;

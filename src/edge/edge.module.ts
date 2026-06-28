@@ -5,6 +5,7 @@ import { KnowledgeCoreModule } from '../knowledge-core/knowledge-core.module';
 import { CliGateway } from './cli.gateway';
 import { ProposalApplier } from './proposal-applier';
 import { DigestScheduler } from './digest.scheduler';
+import { InsightScheduler } from './insight.scheduler';
 import { MeetingScheduler } from './meeting.scheduler';
 
 // Edge(설계 §9). Gateway 어댑터를 AgentLayer(Orchestrator) 앞단에 둔다.
@@ -14,7 +15,7 @@ import { MeetingScheduler } from './meeting.scheduler';
 // MeetingScheduler는 PathResolver·MeetingEngine을 필수 주입; CliGateway만 @Optional() 소비.
 @Module({
   imports: [AgentLayerModule, KnowledgeCoreModule, ScheduleModule.forRoot()],
-  providers: [CliGateway, ProposalApplier, DigestScheduler, MeetingScheduler],
+  providers: [CliGateway, ProposalApplier, DigestScheduler, InsightScheduler, MeetingScheduler],
   exports: [CliGateway],
 })
 export class EdgeModule {}
