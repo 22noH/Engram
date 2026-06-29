@@ -24,6 +24,7 @@ import { PermissionFence } from './permission-fence';
 import { InsightReporter } from './insight-reporter';
 import { DayInsight } from '../knowledge-core/insight/insight-store';
 import { PersonaRegistry } from './persona-registry';
+import { MentionTracker, TrackedTask } from './mention-tracker';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -43,6 +44,10 @@ const TRIAGE_DEFAULT = [
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
 @Injectable()
 export class Orchestrator {
+  // 멘션 작업 상태(in-memory) + 백그라운드 inflight(테스트 drain용). ponytail: 재시작 소실은 6b-3.
+  private readonly tracker = new MentionTracker();
+  private readonly inflight: Promise<void>[] = [];
+
   constructor(
     private readonly reader: ReaderAgent,
     private readonly conversations: ConversationStore,
@@ -87,30 +92,89 @@ export class Orchestrator {
     return answer;
   }
 
-  // 멘션 진입점(Phase 6a, the colleague brain). 허브가 유일 배정구(§7.1) 유지.
-  // 두뇌 1콜로 {chat | collaborate, team}을 받아 기존 엔진으로 디스패치. 막다른 길 없음.
-  async handleMention(msg: CoreMessage, onAck?: (t: string) => Promise<void>): Promise<string> {
+  // 멘션 진입점(Phase 6a→6b-1, the colleague brain). 허브가 유일 배정구(§7.1) 유지.
+  // post 콜백 모델: ack·진행·결과·상태를 여러 번 게시. collaborate는 백그라운드로 detach.
+  async handleMention(
+    msg: CoreMessage,
+    post: (text: string) => Promise<void>,
+    threadKey: string = msg.userId,
+  ): Promise<void> {
     const trimmed = msg.text.trim();
 
-    // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행 — 두뇌 판단이 빗나갈 때 수동 우회.
+    // 상태 조회: 이 스레드의 진행/최근 작업 보고.
+    if (trimmed === '상태' || trimmed === 'status') {
+      await post(this.formatStatus(this.tracker.status(threadKey)));
+      return;
+    }
+    // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행.
     if (trimmed.startsWith('team ')) {
       const rest = trimmed.slice('team '.length);
       const sp = rest.indexOf(' ');
       const names = (sp < 0 ? rest : rest.slice(0, sp)).split(',').map((s) => s.trim()).filter(Boolean);
       const q = sp < 0 ? '' : rest.slice(sp + 1);
-      return this.collaborate(q, names.length ? names : ['Manager'], msg.userId);
+      const team = names.length ? names : ['Manager'];
+      await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
+      this.launchCollaboration(q, team, msg.userId, threadKey, post);
+      return;
     }
     if (trimmed.startsWith('ask ')) {
-      return this.route({ text: trimmed.slice('ask '.length), userId: msg.userId });
+      await post(await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }));
+      return;
     }
 
     const decision = await this.classify(trimmed);
     if (decision.kind === 'collaborate') {
       const team = decision.team.length ? decision.team : ['Manager'];
-      if (onAck) await onAck('알아볼게요');
-      return this.collaborate(msg.text, team, msg.userId);
+      await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
+      this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
+      return;
     }
-    return this.route(msg);
+    await post(await this.route(msg));
+  }
+
+  // collaborate를 백그라운드로 detach. 끝나면 결과 게시 + 대화로그 적재 + 트래커 종료.
+  // 자체 try/catch로 상주를 불사(unhandled rejection 0). inflight는 테스트 drain용.
+  private launchCollaboration(
+    question: string,
+    team: string[],
+    userId: string,
+    threadKey: string,
+    post: (text: string) => Promise<void>,
+  ): void {
+    const t = this.tracker.start(threadKey, { question, team });
+    const work = (async (): Promise<void> => {
+      try {
+        const result = await this.collaborate(question, team, userId);
+        // 채널 기억: 결과를 대화로그에 적재(후속 맥락·B수집 소스). 부수효과 실패는 무시.
+        await this.conversations
+          .append(userId, { ts: new Date().toISOString(), question, answer: result, sources: [] })
+          .catch(() => {});
+        this.tracker.finish(threadKey, t.id, 'done');
+        await post(result);
+      } catch (err) {
+        this.tracker.finish(threadKey, t.id, 'failed');
+        this.logger.warn(`백그라운드 협업 실패: ${String(err)}`, 'Orchestrator');
+        try { await post('작업 중 문제가 생겼어요 🙏'); } catch { /* post도 실패하면 포기 */ }
+      }
+    })();
+    this.inflight.push(work);
+  }
+
+  // @Engram 상태 출력. 질문은 40자 잘라 표시(상대시간은 비범위 — 단순화).
+  private formatStatus(tasks: TrackedTask[]): string {
+    if (tasks.length === 0) return '지금 진행 중이거나 최근 완료한 작업이 없어요.';
+    const line = (t: TrackedTask): string => `  - "${t.question.slice(0, 40)}" (팀: ${t.team.join('·') || '-'})`;
+    const running = tasks.filter((t) => t.state === 'running');
+    const finished = tasks.filter((t) => t.state !== 'running');
+    const parts: string[] = [];
+    if (running.length) parts.push(`진행 중 ${running.length}건:\n${running.map(line).join('\n')}`);
+    if (finished.length) parts.push(`최근 완료:\n${finished.map(line).join('\n')}`);
+    return parts.join('\n');
+  }
+
+  // 테스트 전용: detach된 백그라운드 작업이 끝날 때까지 대기. ponytail: 테스트 훅(운영 무관).
+  async drainForTest(): Promise<void> {
+    await Promise.all(this.inflight);
   }
 
   // 멘션 분류 + 로스터 선택(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
