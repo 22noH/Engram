@@ -16,6 +16,14 @@ import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
 import { detectGate } from './gate-detect';
 import { loadPrompt } from './prompt-store';
+import { CodingGit } from '../knowledge-core/coding-git';
+import { CodingSpecialist } from './coding-specialist';
+import { ReviewerAgent } from './reviewer-agent';
+import { StuckDetector } from './stuck-detector';
+import { PermissionFence } from './permission-fence';
+import { InsightReporter } from './insight-reporter';
+import { DayInsight } from '../knowledge-core/insight/insight-store';
+import { PersonaRegistry } from './persona-registry';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -30,14 +38,6 @@ const TRIAGE_DEFAULT = [
   'collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).',
   '확실치 않으면 chat을 택하라.',
 ].join('\n');
-import { CodingGit } from '../knowledge-core/coding-git';
-import { CodingSpecialist } from './coding-specialist';
-import { ReviewerAgent } from './reviewer-agent';
-import { StuckDetector } from './stuck-detector';
-import { PermissionFence } from './permission-fence';
-import { InsightReporter } from './insight-reporter';
-import { DayInsight } from '../knowledge-core/insight/insight-store';
-import { PersonaRegistry } from './persona-registry';
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -104,7 +104,7 @@ export class Orchestrator {
       return this.route({ text: trimmed.slice('ask '.length), userId: msg.userId });
     }
 
-    const decision = await this.classify(msg.text);
+    const decision = await this.classify(trimmed);
     if (decision.kind === 'collaborate') {
       const team = decision.team.length ? decision.team : ['Manager'];
       if (onAck) await onAck('알아볼게요');

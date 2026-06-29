@@ -7,6 +7,7 @@ import { PinoLogger } from './pal/logger';
 import { loadMessengerConfig } from './edge/messenger/messenger.config';
 import { createMessenger } from './edge/messenger/messenger.factory';
 import { bindMessenger } from './edge/messenger/messenger-bridge';
+import { MessengerPort } from './edge/messenger/messenger.port';
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -17,7 +18,7 @@ async function bootstrap(): Promise<void> {
   const paths = app.get(PathResolver);
   const logger = app.get(PinoLogger);
   const cfg = loadMessengerConfig(paths.getConfigDir());
-  let port = null;
+  let port: MessengerPort | null = null;
   try {
     port = createMessenger(cfg);
   } catch (e) {
