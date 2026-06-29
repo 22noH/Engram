@@ -166,7 +166,8 @@ export class Orchestrator {
   // @Engram 상태 출력. 질문은 40자 잘라 표시(상대시간은 비범위 — 단순화).
   private formatStatus(tasks: TrackedTask[]): string {
     if (tasks.length === 0) return '지금 진행 중이거나 최근 완료한 작업이 없어요.';
-    const line = (t: TrackedTask): string => `  - "${t.question.slice(0, 40)}" (팀: ${t.team.join('·') || '-'})`;
+    const line = (t: TrackedTask): string =>
+      `  - "${t.question.slice(0, 40)}" (팀: ${t.team.join('·') || '-'})${t.state === 'failed' ? ' (실패)' : ''}`;
     const running = tasks.filter((t) => t.state === 'running');
     const finished = tasks.filter((t) => t.state !== 'running');
     const parts: string[] = [];

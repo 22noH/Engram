@@ -107,3 +107,13 @@ it('백그라운드 실패 → 사과 post(상주 불사)', async () => {
   await (o as any).drainForTest();
   expect(posts.some((p) => p.includes('문제가 생겼어요'))).toBe(true);
 });
+
+it('상태 — 실패한 작업은 (실패)로 표시', async () => {
+  const o = orc('{"kind":"collaborate","team":["Manager"]}');
+  (o as any).collaborate = async () => { throw new Error('boom'); };
+  await o.handleMention({ text: '분석', userId: 'c1' }, async () => {});
+  await (o as any).drainForTest();
+  const posts: string[] = [];
+  await o.handleMention({ text: '상태', userId: 'c1' }, async (t) => { posts.push(t); });
+  expect(posts[0]).toContain('(실패)');
+});
