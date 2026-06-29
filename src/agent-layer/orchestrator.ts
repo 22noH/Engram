@@ -142,7 +142,7 @@ export class Orchestrator {
     post: (text: string) => Promise<void>,
   ): void {
     const t = this.tracker.start(threadKey, { question, team });
-    const work = (async (): Promise<void> => {
+    const work: Promise<void> = (async (): Promise<void> => {
       try {
         const result = await this.collaborate(question, team, userId);
         // 채널 기억: 결과를 대화로그에 적재(후속 맥락·B수집 소스). 부수효과 실패는 무시.
@@ -156,7 +156,10 @@ export class Orchestrator {
         this.logger.warn(`백그라운드 협업 실패: ${String(err)}`, 'Orchestrator');
         try { await post('작업 중 문제가 생겼어요 🙏'); } catch { /* post도 실패하면 포기 */ }
       }
-    })();
+    })().finally(() => {
+      const idx = this.inflight.indexOf(work);
+      if (idx !== -1) this.inflight.splice(idx, 1);
+    });
     this.inflight.push(work);
   }
 
@@ -173,7 +176,7 @@ export class Orchestrator {
   }
 
   // 테스트 전용: detach된 백그라운드 작업이 끝날 때까지 대기. ponytail: 테스트 훅(운영 무관).
-  async drainForTest(): Promise<void> {
+  private async drainForTest(): Promise<void> {
     await Promise.all(this.inflight);
   }
 
