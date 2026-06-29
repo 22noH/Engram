@@ -23,6 +23,13 @@ const DECOMPOSE_DEFAULT = [
   '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
   '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
 ].join('\n');
+
+// prompts/triage.md 없을 때의 내장 기본값. JSON 계약은 classify()가 코드에서 덧붙인다.
+const TRIAGE_DEFAULT = [
+  '사용자 메시지가 (1) 단순 질문/잡담인지 "chat", (2) 여러 전문가가 머리를 맞대야 하는 일인지 "collaborate"인지 판정하라.',
+  'collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).',
+  '확실치 않으면 chat을 택하라.',
+].join('\n');
 import { CodingGit } from '../knowledge-core/coding-git';
 import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
@@ -30,6 +37,7 @@ import { StuckDetector } from './stuck-detector';
 import { PermissionFence } from './permission-fence';
 import { InsightReporter } from './insight-reporter';
 import { DayInsight } from '../knowledge-core/insight/insight-store';
+import { PersonaRegistry } from './persona-registry';
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -52,6 +60,7 @@ export class Orchestrator {
     @Optional() @Inject(BRAIN) private readonly codeBrain?: BrainProvider,
     @Optional() private readonly fence?: PermissionFence,
     @Optional() private readonly reporter?: InsightReporter,
+    @Optional() private readonly registry?: PersonaRegistry,
   ) {}
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
@@ -76,6 +85,54 @@ export class Orchestrator {
       this.logger.warn(`대화 적재 실패(답변은 정상 반환): ${String(err)}`, 'Orchestrator');
     }
     return answer;
+  }
+
+  // 멘션 진입점(Phase 6a, the colleague brain). 허브가 유일 배정구(§7.1) 유지.
+  // 두뇌 1콜로 {chat | collaborate, team}을 받아 기존 엔진으로 디스패치. 막다른 길 없음.
+  async handleMention(msg: CoreMessage, onAck?: (t: string) => Promise<void>): Promise<string> {
+    const trimmed = msg.text.trim();
+
+    // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행 — 두뇌 판단이 빗나갈 때 수동 우회.
+    if (trimmed.startsWith('team ')) {
+      const rest = trimmed.slice('team '.length);
+      const sp = rest.indexOf(' ');
+      const names = (sp < 0 ? rest : rest.slice(0, sp)).split(',').map((s) => s.trim()).filter(Boolean);
+      const q = sp < 0 ? '' : rest.slice(sp + 1);
+      return this.collaborate(q, names.length ? names : ['Manager'], msg.userId);
+    }
+    if (trimmed.startsWith('ask ')) {
+      return this.route({ text: trimmed.slice('ask '.length), userId: msg.userId });
+    }
+
+    const decision = await this.classify(msg.text);
+    if (decision.kind === 'collaborate') {
+      const team = decision.team.length ? decision.team : ['Manager'];
+      if (onAck) await onAck('알아볼게요');
+      return this.collaborate(msg.text, team, msg.userId);
+    }
+    return this.route(msg);
+  }
+
+  // 멘션 분류 + 로스터 선택(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
+  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate'; team: string[] }> {
+    if (!this.codeBrain) return { kind: 'chat', team: [] };
+    const roster = (this.registry?.all() ?? []).map((p) => `- ${p.name}: ${p.role}`).join('\n');
+    const prompt = [
+      loadPrompt('triage', TRIAGE_DEFAULT),
+      `\n# 사용 가능한 전문가\n${roster || '(없음)'}`,
+      `\n# 사용자 메시지\n${text}`,
+      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate","team":["이름",...]}',
+    ].join('\n');
+    try {
+      const r = await this.codeBrain.complete(prompt);
+      if (r.isError) return { kind: 'chat', team: [] };
+      const o = parseJsonBlock<{ kind?: unknown; team?: unknown }>(r.text);
+      const kind = o && o.kind === 'collaborate' ? 'collaborate' : 'chat';
+      const team = o && Array.isArray(o.team) ? o.team.map(String) : [];
+      return { kind, team };
+    } catch {
+      return { kind: 'chat', team: [] };
+    }
   }
 
   // B 협업(설계 §4): 분해는 호출자가 결정(personas), 여기서 배정·수집·종합. 유일 배정구(seam #1).

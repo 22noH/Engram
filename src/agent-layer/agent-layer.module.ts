@@ -145,18 +145,19 @@ import { InsightReporter } from './insight-reporter';
         codeBrain: BrainProvider,
         fence: PermissionFence,
         reporter: InsightReporter,
+        registry: PersonaRegistry,
       ) => {
         const sem = new Semaphore(2);
         return new Orchestrator(
           reader, conversations, logger, ingester, tasks, specialist, synthesizer, sem,
-          projects, gate, codingGit, coder, reviewer, codeBrain, fence, reporter,
+          projects, gate, codingGit, coder, reviewer, codeBrain, fence, reporter, registry,
         );
       },
       inject: [
         ReaderAgent, ConversationStore, PinoLogger, IngesterAgent, TaskStore,
         SpecialistAgent, Synthesizer,
         ProjectStore, VerificationGate, CodingGit, CodingSpecialist, ReviewerAgent,
-        BRAIN, PermissionFence, InsightReporter,
+        BRAIN, PermissionFence, InsightReporter, PersonaRegistry,
       ],
     },
   ],
