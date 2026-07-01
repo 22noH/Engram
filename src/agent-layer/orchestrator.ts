@@ -26,6 +26,7 @@ import { DayInsight } from '../knowledge-core/insight/insight-store';
 import { PersonaRegistry } from './persona-registry';
 import { MentionTracker, TrackedTask } from './mention-tracker';
 import { loadCodeRepos, resolveRepo, CodeReposConfig } from './coderepos';
+import { SchedulerPort, ScheduleEntry } from './schedule-store';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -39,6 +40,7 @@ const TRIAGE_DEFAULT = [
   '사용자 메시지가 (1) 단순 질문/잡담인지 "chat", (2) 여러 전문가가 머리를 맞대야 하는 일인지 "collaborate"인지 판정하라.',
   'collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).',
   '(3) 특정 레포(코드 저장소)에 코드를 쓰거나 고치거나 구현하라는 일이면 "code" — repo에 레포 참조(이름/별칭/경로), goal에 할 일을 넣어라.',
+  '(4) 정해진 시간/주기에 무언가를 하라는 예약이면 "schedule" — cron에 5필드 cron(예: 매일 9시=0 9 * * *), task에 할 일, 반복 아니고 한 번이면 once=true를 넣어라.',
   '확실치 않으면 chat을 택하라.',
 ].join('\n');
 
@@ -57,6 +59,8 @@ export class Orchestrator {
   // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
   private readonly pending = new Map<string, PendingCode>();
   private codeReposCache?: CodeReposConfig;
+  // 예약(스케줄) 포트 — main.ts에서 setter 주입(메신저처럼 DI 밖). 6b-3.
+  private scheduler?: SchedulerPort;
 
   constructor(
     private readonly reader: ReaderAgent,
@@ -87,6 +91,10 @@ export class Orchestrator {
   insight(userId: string = DEFAULT_USER): Promise<DayInsight | null> {
     if (!this.reporter) throw new Error('InsightReporter 미주입(Orchestrator)');
     return this.reporter.run(userId);
+  }
+
+  setScheduler(scheduler: SchedulerPort): void {
+    this.scheduler = scheduler;
   }
 
   async route(msg: CoreMessage, onChunk?: (t: string) => void): Promise<string> {
@@ -151,6 +159,25 @@ export class Orchestrator {
       await this.startCoding(repoRef, goal, threadKey, post);
       return;
     }
+    // 예약(스케줄) 관리 명령
+    if (trimmed === '예약목록' || trimmed === 'schedules') {
+      await post(this.formatSchedules(msg.userId));
+      return;
+    }
+    if (trimmed.startsWith('예약취소 ') || trimmed.startsWith('schedule cancel ')) {
+      const id = (trimmed.startsWith('예약취소 ') ? trimmed.slice('예약취소 '.length) : trimmed.slice('schedule cancel '.length)).trim();
+      const ok = this.scheduler?.remove(id) ?? false;
+      await post(ok ? '취소했어요.' : '그 예약을 못 찾았어요.');
+      return;
+    }
+    if (trimmed.startsWith('schedule ')) {
+      const rest = trimmed.slice('schedule '.length).trim();
+      const parts = rest.split(' ').filter(Boolean);
+      const cron = parts.slice(0, 5).join(' ');
+      const task = parts.slice(5).join(' ');
+      await this.doSchedule(cron, task, false, msg.userId, threadKey, post);
+      return;
+    }
     // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행.
     if (trimmed.startsWith('team ')) {
       const rest = trimmed.slice('team '.length);
@@ -170,6 +197,10 @@ export class Orchestrator {
     const decision = await this.classify(trimmed);
     if (decision.kind === 'code') {
       await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post);
+      return;
+    }
+    if (decision.kind === 'schedule') {
+      await this.doSchedule(decision.cron ?? '', decision.task ?? '', decision.once ?? false, msg.userId, threadKey, post);
       return;
     }
     if (decision.kind === 'collaborate') {
@@ -281,6 +312,21 @@ export class Orchestrator {
     return `⚠️ 코딩 종료: ${why[r.status] ?? r.status} (세션 ${r.sessionId})`;
   }
 
+  private async doSchedule(cron: string, task: string, once: boolean, channelId: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+    if (!this.scheduler) { await post('예약 기능이 준비되지 않았어요.'); return; }
+    const threadId = threadKey !== channelId ? threadKey : undefined;
+    const e = this.scheduler.add({ channelId, threadId, cron, task, once });
+    if (!e) { await post('언제인지 잘 모르겠어요. "매일 아침 9시"처럼 다시 말해줄래요?'); return; }
+    await post(`네, 예약했어요 📅 (예약 #${e.id}, ${e.cron})${once ? ' — 1회' : ''}`);
+  }
+
+  private formatSchedules(channelId: string): string {
+    if (!this.scheduler) return '예약 기능이 준비되지 않았어요.';
+    const list = this.scheduler.list(channelId);
+    if (list.length === 0) return '예약이 없어요.';
+    return list.map((e: ScheduleEntry, i: number) => `${i + 1}. [#${e.id}] ${e.cron} — "${e.task.slice(0, 40)}"${e.once ? ' (1회)' : ''}`).join('\n');
+  }
+
   // @Engram 상태 출력. 질문은 40자 잘라 표시(상대시간은 비범위 — 단순화).
   private formatStatus(tasks: TrackedTask[]): string {
     if (tasks.length === 0) return '지금 진행 중이거나 최근 완료한 작업이 없어요.';
@@ -299,8 +345,8 @@ export class Orchestrator {
     await Promise.all(this.inflight);
   }
 
-  // 멘션 분류 + 로스터/코딩대상 추출(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
-  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate' | 'code'; team: string[]; repoRef?: string; goal?: string }> {
+  // 멘션 분류 + 로스터/코딩대상/예약 추출(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
+  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate' | 'code' | 'schedule'; team: string[]; repoRef?: string; goal?: string; cron?: string; task?: string; once?: boolean }> {
     if (!this.codeBrain) return { kind: 'chat', team: [] };
     const roster = (this.registry?.all() ?? []).map((p) => `- ${p.name}: ${p.role}`).join('\n');
     const aliases = Object.keys(this.codeRepos().aliases);
@@ -309,17 +355,20 @@ export class Orchestrator {
       `\n# 사용 가능한 전문가\n${roster || '(없음)'}`,
       `\n# 코딩 가능한 레포(alias)\n${aliases.join(', ') || '(없음)'}`,
       `\n# 사용자 메시지\n${text}`,
-      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate"|"code","team":["이름",...],"repo":"레포참조","goal":"할 일"}',
+      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate"|"code"|"schedule","team":["이름",...],"repo":"레포참조","goal":"할 일","cron":"0 9 * * *","task":"할 일","once":false}',
     ].join('\n');
     try {
       const r = await this.codeBrain.complete(prompt);
       if (r.isError) return { kind: 'chat', team: [] };
-      const o = parseJsonBlock<{ kind?: unknown; team?: unknown; repo?: unknown; goal?: unknown }>(r.text);
-      const kind = o && (o.kind === 'collaborate' || o.kind === 'code') ? o.kind : 'chat';
+      const o = parseJsonBlock<{ kind?: unknown; team?: unknown; repo?: unknown; goal?: unknown; cron?: unknown; task?: unknown; once?: unknown }>(r.text);
+      const kind = o && (o.kind === 'collaborate' || o.kind === 'code' || o.kind === 'schedule') ? o.kind : 'chat';
       const team = o && Array.isArray(o.team) ? o.team.map(String) : [];
       const repoRef = o && typeof o.repo === 'string' ? o.repo : undefined;
       const goal = o && typeof o.goal === 'string' ? o.goal : undefined;
-      return { kind, team, repoRef, goal };
+      const cron = o && typeof o.cron === 'string' ? o.cron : undefined;
+      const task = o && typeof o.task === 'string' ? o.task : undefined;
+      const once = o && o.once === true ? true : undefined;
+      return { kind, team, repoRef, goal, cron, task, once };
     } catch {
       return { kind: 'chat', team: [] };
     }

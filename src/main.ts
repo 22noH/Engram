@@ -8,6 +8,9 @@ import { loadMessengerConfig } from './edge/messenger/messenger.config';
 import { createMessenger } from './edge/messenger/messenger.factory';
 import { bindMessenger } from './edge/messenger/messenger-bridge';
 import { MessengerPort } from './edge/messenger/messenger.port';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { ScheduleStore } from './agent-layer/schedule-store';
+import { ScheduleService } from './edge/schedule-service';
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -25,7 +28,12 @@ async function bootstrap(): Promise<void> {
     logger.warn(`메신저 설정 오류(비활성): ${String(e)}`, 'Messenger');
   }
   if (port) {
-    bindMessenger(port, app.get(Orchestrator), logger);
+    const orchestrator = app.get(Orchestrator);
+    bindMessenger(port, orchestrator, logger);
+    const store = new ScheduleStore(paths.getConfigDir());
+    const scheduler = new ScheduleService(orchestrator, port, app.get(SchedulerRegistry), store, logger);
+    orchestrator.setScheduler(scheduler);
+    scheduler.start();
     await port.start();
     logger.log(`메신저 가동: ${cfg.provider}`, 'Messenger');
   }
