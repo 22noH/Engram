@@ -273,6 +273,17 @@ OS별로 갈리는 유일한 코드. 설치·시작·정지·재시작 정책을
   - **임베딩 모델**: 동봉 vs 첫 실행 다운로드.
   - **인스톨러**: electron-builder/tauri bundler, OS 순서 Win 우선(§13 PAL과 정합 — Phase 5 PAL 마감 뒤).
   - **전제 seam(이미 존재)**: Edge 포트+어댑터(CLI=첫 어댑터)·PAL 경로 중앙화·`main.ts`(상주)/`cli.ts`(원샷) 분리. → 코어는 CLI를 가정하지 않으므로 GUI가 거저 올라탈 자리가 있다.
+- **Phase 8 — ✦Engram 하네스 (자체 에이전트 하네스)** (미설계 — 착수 시 brainstorming부터): **핵심 통찰** — 지금은 모델뿐 아니라 **하네스(에이전트 도구 루프)까지 외부 CLI(`claude`/`gemini`/`codex`)에서 빌려 쓴다.** "로컬 LLM 사용"조차 [brain.factory.ts](src/brain/brain.factory.ts) 주석대로 *`claude` CLI 껍데기 + env로 모델 엔드포인트만 로컬로* 바꾼 것이라, 하네스는 여전히 `claude`다. **모델 추론은 만들지 않고**(상용 API·로컬 LLM·기존 CLI 중 사용자 선택) 그 위의 **하네스를 Engram 것으로** 갖는 단계. §13.1 궁극 목표("Claude Code를 안 쓰게 되는 것")의 실질 완성. 범위:
+  - **자체 하네스 provider 추가 = 기본값**: 모델 엔드포인트(Anthropic API·OpenAI 호환 로컬 등)를 **직접** 호출하고, 코딩의 도구 루프(파일편집·명령실행·관찰 반복)를 **Engram 코드가 직접** 돈다. `createBrain` 패턴 그대로라 Orchestrator·에이전트·세마포어 무변경. **`brains.json` 기본 provider = engram 하네스.**
+  - **선택권 — 기존 CLI provider 유지**: `claude-cli`/`gemini-cli`/`codex-cli`는 그대로 둔다. CLI 쓰던 유저는 **무변경**, API·로컬 LLM 유저는 **자체 하네스(기본) ↔ `claude` CLI**를 config로 갈아끼운다. 강제 탈피 아님, *선택권*.
+  - **도구 셋 = 파일(읽기/쓰기/편집)·셸·검색 + MCP 클라이언트(기본 내장)**: MCP는 외부 도구·테스트 위임의 **표준 통로**라 *메커니즘은 하네스 기본 능력*으로 박는다(YAGNI 아님). **어떤 MCP 서버를 연결하냐만** config/런타임 선택. 스킬(=프롬프트 주입, `prompts/*.md`·personas 외부화 재사용)·훅(=게이트·PermissionFence로 이미 존재)은 그 위 얇은 규약 — 필요할 때 점진 추가.
+  - **난이도 분리(구현 순서)**: 단발성 호출(chat·collaborate·judge·classify)=API 한 번이라 쉬움 → 먼저. 코딩 호출(`codeRun`)=도구 루프를 직접 구현해야 해 진짜 일 → 나중. PermissionFence(자기repo·시스템 거부)·결정적 게이트·격리 브랜치 seam은 불변.
+  - **한도·resume 재정의**: 외부 CLI의 rate-limit 대신 자체 하네스/모델 기준으로 §13.1 미해결②(진전·예산 상한, resume 정책) 다시 못박음.
+- **Phase 9 — ✦자체 프론트엔드 (Discord 대체 채팅 UI)** (미설계 — 착수 시 brainstorming부터): 로드맵 §11의 "자체 front-end(웹/앱)" 최종 도착점. Phase 7 GUI 셸 위에 **Discord식 채널/스레드 채팅을 얹은 자체 UI**로 Discord 어댑터를 대체한다. 범위:
+  - **메신저 어댑터 추가**: `MessengerPort`의 새 구현(자체 UI) — Phase 6 seam 그대로라 `@Engram` 멘션·스레드·`상태`·진행 중계가 거저 올라탐. provider만 `discord`→`self`, 코어·Orchestrator 무변경.
+  - **채팅 화면**: Phase 7 GUI 셸(Electron/Tauri) 위에 채널·스레드·멘션·진행 중계·인사이트 표시. 코딩 위임(6b-2)의 컨펌/승인도 채팅 UI에서.
+  - **멀티유저=채널이 기억 단위(6a) 모델 유지**: UI는 표현만, `ConversationStore` 네임스페이스(채널 ID) 무변경.
+  - **Discord 병행**: Discord 어댑터는 제거하지 않고 남겨 필요 시 동시 운용 — 기본 진입점만 자체 UI로.
 
 > ⚠️ **§13.1 = Phase 4 씨앗 설계.** 현재 깊이는 "4대 미해결의 방향 + Phase 3가 지켜야 할 seam 고정"까지다. 풀 구현 스펙은 Phase 3(토대)가 코드로 존재한 뒤에 쓴다. *미설계*를 구현 약속으로 착각 금지.
 
