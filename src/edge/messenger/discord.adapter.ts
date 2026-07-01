@@ -49,6 +49,15 @@ export class DiscordAdapter implements MessengerPort {
     await (target as Message).reply(text);
   }
 
+  // 채널 ID로 게시(영속 발사가 되쏠 경로, Phase 6b-3). 스레드 우선.
+  // ponytail: 네트워크 글루, 스모크만.
+  async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
+    const ch = await this.client.channels.fetch(threadId ?? channelId);
+    if (ch && ch.isTextBased()) {
+      await (ch as import('discord.js').TextChannel).send(text);
+    }
+  }
+
   async stop(): Promise<void> {
     await this.client.destroy();
   }

@@ -15,6 +15,7 @@ export interface MentionEvent {
 export interface MessengerPort {
   onMention(handler: (e: MentionEvent) => Promise<void>): void;
   reply(target: ReplyTarget, text: string): Promise<void>;
+  postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

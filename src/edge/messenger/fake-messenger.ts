@@ -4,12 +4,16 @@ import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 export class FakeMessenger implements MessengerPort {
   private handler?: (e: MentionEvent) => Promise<void>;
   readonly replies: Array<{ target: ReplyTarget; text: string }> = [];
+  readonly channelPosts: Array<{ channelId: string; threadId?: string; text: string }> = [];
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
     this.handler = handler;
   }
   async reply(target: ReplyTarget, text: string): Promise<void> {
     this.replies.push({ target, text });
+  }
+  async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
+    this.channelPosts.push({ channelId, threadId, text });
   }
   async start(): Promise<void> {}
   async stop(): Promise<void> {}

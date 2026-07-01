@@ -12,3 +12,13 @@ it('핸들러 미등록이면 emit는 조용히 통과', async () => {
   const m = new FakeMessenger();
   await expect(m.emit({ text: 'x', channelId: 'c', authorId: 'u', target: null })).resolves.toBeUndefined();
 });
+
+it('postToChannel이 channelPosts에 캡처된다', async () => {
+  const m = new FakeMessenger();
+  await m.postToChannel('ch1', '안녕', 'th1');
+  await m.postToChannel('ch2', '두번째');
+  expect(m.channelPosts).toEqual([
+    { channelId: 'ch1', threadId: 'th1', text: '안녕' },
+    { channelId: 'ch2', threadId: undefined, text: '두번째' },
+  ]);
+});
