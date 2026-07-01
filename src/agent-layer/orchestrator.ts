@@ -166,7 +166,9 @@ export class Orchestrator {
     }
     if (trimmed.startsWith('예약취소 ') || trimmed.startsWith('schedule cancel ')) {
       const id = (trimmed.startsWith('예약취소 ') ? trimmed.slice('예약취소 '.length) : trimmed.slice('schedule cancel '.length)).trim();
-      const ok = this.scheduler?.remove(id) ?? false;
+      if (!this.scheduler) { await post('예약 기능이 준비되지 않았어요.'); return; }
+      const mine = this.scheduler.list(msg.userId).some((e) => e.id === id);
+      const ok = mine && this.scheduler.remove(id);
       await post(ok ? '취소했어요.' : '그 예약을 못 찾았어요.');
       return;
     }

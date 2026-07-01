@@ -74,3 +74,20 @@ it('scheduler 미주입 → 안내', async () => {
   await o.handleMention({ text: '매일 9시 X', userId: 'c1' }, async (t) => { posts.push(t); });
   expect(posts[0]).toContain('준비되지 않');
 });
+
+it('예약취소 — 다른 채널 소유 예약은 취소 안 함(채널 스코프)', async () => {
+  const o = orc('{"kind":"chat","team":[]}');
+  // fakeScheduler.list는 어떤 채널이든 id 'x1'을 돌려주니, 다른 id로 소유 아님 검증
+  const sch = fakeScheduler(); o.setScheduler(sch as any);
+  const posts: string[] = [];
+  await o.handleMention({ text: '예약취소 other', userId: 'c1' }, async (t) => { posts.push(t); });
+  expect(sch.calls.remove).toEqual([]); // 소유 아님 → remove 미호출
+  expect(posts[0]).toContain('못 찾');
+});
+
+it('scheduler 미주입 상태의 예약취소 → 준비 안 됨 안내', async () => {
+  const o = orc('{"kind":"chat","team":[]}'); // scheduler 미주입
+  const posts: string[] = [];
+  await o.handleMention({ text: '예약취소 x1', userId: 'c1' }, async (t) => { posts.push(t); });
+  expect(posts[0]).toContain('준비되지 않');
+});

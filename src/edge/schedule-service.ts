@@ -15,6 +15,9 @@ interface MentionRunner {
 // 예약 런타임(Phase 6b-3, plain — main.ts 결선). cron 등록·발사·영속을 담당하고
 // SchedulerPort로 Orchestrator에 노출. 발사는 저장된 task를 handleMention 재주입 → 채널 게시.
 export class ScheduleService implements SchedulerPort {
+  // 발사 중 재진입 깊이(재예약 자기복제 차단, Fix 2).
+  private firingDepth = 0;
+
   constructor(
     private readonly orchestrator: MentionRunner,
     private readonly port: MessengerPort,
@@ -33,6 +36,7 @@ export class ScheduleService implements SchedulerPort {
   }
 
   add(input: { channelId: string; threadId?: string; cron: string; task: string; once?: boolean }): ScheduleEntry | null {
+    if (this.firingDepth > 0) return null; // 발사 중 재예약 금지(재진입 루프 차단)
     if (!this.validCron(input.cron)) return null;
     const e = this.store.add(input);
     try { this.register(e); }
@@ -50,17 +54,20 @@ export class ScheduleService implements SchedulerPort {
   // 발사: 저장된 task를 재주입, 채널에 게시. once면 발사 후 삭제.
   // ponytail: 재주입=완전자율(협업/코딩 뭐든). 매일 협업이면 매일 토큰 — 비용은 사용자 cron 책임.
   fire(e: ScheduleEntry): void {
+    this.firingDepth++;
     void this.orchestrator
       .handleMention(
         { text: e.task, userId: e.channelId },
         (t) => this.port.postToChannel(e.channelId, t, e.threadId),
         e.threadId ?? e.channelId,
       )
-      .catch((err) => this.logger.warn(`예약 실행 실패 ${e.id}: ${String(err)}`, 'Schedule'));
+      .catch((err) => this.logger.warn(`예약 실행 실패 ${e.id}: ${String(err)}`, 'Schedule'))
+      .finally(() => { this.firingDepth--; });
     if (e.once) this.remove(e.id);
   }
 
   private validCron(expr: string): boolean {
+    if (expr.trim().split(/\s+/).length !== 5) return false;
     try { new CronTime(expr); return true; } catch { return false; }
   }
 

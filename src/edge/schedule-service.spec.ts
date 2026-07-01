@@ -74,3 +74,22 @@ it('start: 저장된 예약을 로드·등록', () => {
   svc.start();
   expect(reg.added).toHaveLength(2);
 });
+
+it('add: 6필드(초 단위) cron → null(5필드만 허용)', () => {
+  const store = tmpStore();
+  const svc = service({}, new FakeMessenger(), fakeRegistry(), store);
+  expect(svc.add({ channelId: 'c1', cron: '* * * * * *', task: 'X' })).toBeNull();
+  expect(store.all()).toHaveLength(0);
+});
+
+it('발사 중에는 재예약(add) 거부 — 재진입 루프 차단', async () => {
+  const store = tmpStore();
+  let svc: any;
+  let reAdd: any = 'notset';
+  const orchestrator = { handleMention: async () => { reAdd = svc.add({ channelId: 'c1', cron: '0 9 * * *', task: '재예약' }); } };
+  svc = service(orchestrator, new FakeMessenger(), fakeRegistry(), store);
+  const e = store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'X' });
+  svc.fire(e);
+  await new Promise((r) => setImmediate(r));
+  expect(reAdd).toBeNull();
+});
