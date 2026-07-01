@@ -111,3 +111,15 @@ it('codeRun STUCK → 경고 메시지', async () => {
   await (o as any).drainForTest();
   expect(posts.some((p) => p.includes('⚠️'))).toBe(true);
 });
+
+it('모호 선택 중 비숫자 대화가 오면 대기를 비워 스테일 번호선택 방지', async () => {
+  const o = orc('{"kind":"chat","team":[]}');
+  (o as any).resolveRepoPaths = () => ['C:/a/app-web', 'C:/a/app-api'];
+  let proposed = false;
+  (o as any).proposeProject = async () => { proposed = true; return { id: 'p', acceptanceCriteria: ['x'], gate: { test: false, build: false, typecheck: false } }; };
+  (o as any).route = async () => '네';
+  await o.handleMention({ text: 'code app 고쳐', userId: 'c1' }, async () => {}); // 2개 → 모호(disambiguate)
+  await o.handleMention({ text: '안녕', userId: 'c1' }, async () => {});          // 비숫자 → 대기 비움
+  await o.handleMention({ text: '1', userId: 'c1' }, async () => {});            // 스테일 없음 → 후보선택 안 함
+  expect(proposed).toBe(false);
+});

@@ -49,3 +49,9 @@ it('resolveRepo: 매칭 없음 → 빈 배열', () => {
   fs.mkdirSync(path.join(root, 'zzz'));
   expect(resolveRepo('nope', { aliases: {}, searchRoots: [root] })).toEqual([]);
 });
+
+it('alias 값이 문자열이 아니면 걸러낸다', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'coderepos.json'), JSON.stringify({ aliases: { api: 'C:/repos/api', bad: 123 }, searchRoots: [] }));
+  expect(loadCodeRepos(dir)).toEqual({ aliases: { api: 'C:/repos/api' }, searchRoots: [] });
+});

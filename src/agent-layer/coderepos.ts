@@ -10,8 +10,14 @@ export interface CodeReposConfig {
 export function loadCodeRepos(configDir: string): CodeReposConfig {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'coderepos.json'), 'utf8')) as Partial<CodeReposConfig>;
+    const aliases: Record<string, string> = {};
+    if (raw.aliases && typeof raw.aliases === 'object') {
+      for (const [k, v] of Object.entries(raw.aliases as Record<string, unknown>)) {
+        if (typeof v === 'string') aliases[k] = v;
+      }
+    }
     return {
-      aliases: raw.aliases && typeof raw.aliases === 'object' ? raw.aliases : {},
+      aliases,
       searchRoots: Array.isArray(raw.searchRoots) ? raw.searchRoots.map(String) : [],
     };
   } catch {

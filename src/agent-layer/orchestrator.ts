@@ -120,22 +120,25 @@ export class Orchestrator {
     // 코딩 위임 대기 처리(pending 있을 때만 — 없으면 통과해 일반 대화로).
     const p = this.pending.get(threadKey);
     if (p) {
-      if (p.kind === 'disambiguate' && /^\d+$/.test(trimmed)) {
-        const n = parseInt(trimmed, 10);
-        if (n < 1 || n > p.candidates.length) { await post(`1~${p.candidates.length} 중에서 골라주세요.`); return; }
-        this.pending.delete(threadKey);
-        await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post);
-        return;
-      }
-      if (p.kind === 'approve' && (trimmed === '승인' || trimmed === 'approve')) {
-        this.pending.delete(threadKey);
-        await this.approveProject(p.projectId);
-        this.launchCoding(p.projectId, p.path, threadKey, post);
-        return;
-      }
       if (trimmed === '취소' || trimmed === '아니오' || trimmed === 'cancel') {
         this.pending.delete(threadKey);
         await post('취소했어요.');
+        return;
+      }
+      if (p.kind === 'disambiguate') {
+        if (/^\d+$/.test(trimmed)) {
+          const n = parseInt(trimmed, 10);
+          if (n < 1 || n > p.candidates.length) { await post(`1~${p.candidates.length} 중에서 골라주세요.`); return; }
+          this.pending.delete(threadKey);
+          await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post);
+          return;
+        }
+        // 비숫자·비취소 → 이 스레드의 모호선택을 포기(스테일 방지), 아래 일반 처리로 흐름.
+        this.pending.delete(threadKey);
+      } else if (p.kind === 'approve' && (trimmed === '승인' || trimmed === 'approve')) {
+        this.pending.delete(threadKey);
+        await this.approveProject(p.projectId);
+        this.launchCoding(p.projectId, p.path, threadKey, post);
         return;
       }
     }
