@@ -4,7 +4,7 @@ import { ConversationStore } from '../knowledge-core/conversation-store';
 import { PinoLogger } from '../pal/logger';
 import { CoreMessage } from '../edge/core-message';
 import { IngesterAgent } from './ingester-agent';
-import { DEFAULT_USER } from '../pal/path-resolver';
+import { DEFAULT_USER, PathResolver } from '../pal/path-resolver';
 import { TaskStore } from '../knowledge-core/task-store';
 import { SpecialistAgent } from './specialist-agent';
 import { Synthesizer } from './synthesizer';
@@ -25,6 +25,7 @@ import { InsightReporter } from './insight-reporter';
 import { DayInsight } from '../knowledge-core/insight/insight-store';
 import { PersonaRegistry } from './persona-registry';
 import { MentionTracker, TrackedTask } from './mention-tracker';
+import { loadCodeRepos, resolveRepo, CodeReposConfig } from './coderepos';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -37,8 +38,14 @@ const DECOMPOSE_DEFAULT = [
 const TRIAGE_DEFAULT = [
   '사용자 메시지가 (1) 단순 질문/잡담인지 "chat", (2) 여러 전문가가 머리를 맞대야 하는 일인지 "collaborate"인지 판정하라.',
   'collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).',
+  '(3) 특정 레포(코드 저장소)에 코드를 쓰거나 고치거나 구현하라는 일이면 "code" — repo에 레포 참조(이름/별칭/경로), goal에 할 일을 넣어라.',
   '확실치 않으면 chat을 택하라.',
 ].join('\n');
+
+// 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
+type PendingCode =
+  | { kind: 'disambiguate'; candidates: string[]; goal: string }
+  | { kind: 'approve'; projectId: string; path: string };
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -47,6 +54,9 @@ export class Orchestrator {
   // 멘션 작업 상태(in-memory) + 백그라운드 inflight(테스트 drain용). ponytail: 재시작 소실은 6b-3.
   private readonly tracker = new MentionTracker();
   private readonly inflight: Promise<void>[] = [];
+  // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
+  private readonly pending = new Map<string, PendingCode>();
+  private codeReposCache?: CodeReposConfig;
 
   constructor(
     private readonly reader: ReaderAgent,
@@ -66,6 +76,7 @@ export class Orchestrator {
     @Optional() private readonly fence?: PermissionFence,
     @Optional() private readonly reporter?: InsightReporter,
     @Optional() private readonly registry?: PersonaRegistry,
+    @Optional() private readonly paths?: PathResolver,
   ) {}
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
@@ -106,6 +117,37 @@ export class Orchestrator {
       await post(this.formatStatus(this.tracker.status(threadKey)));
       return;
     }
+    // 코딩 위임 대기 처리(pending 있을 때만 — 없으면 통과해 일반 대화로).
+    const p = this.pending.get(threadKey);
+    if (p) {
+      if (p.kind === 'disambiguate' && /^\d+$/.test(trimmed)) {
+        const n = parseInt(trimmed, 10);
+        if (n < 1 || n > p.candidates.length) { await post(`1~${p.candidates.length} 중에서 골라주세요.`); return; }
+        this.pending.delete(threadKey);
+        await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post);
+        return;
+      }
+      if (p.kind === 'approve' && (trimmed === '승인' || trimmed === 'approve')) {
+        this.pending.delete(threadKey);
+        await this.approveProject(p.projectId);
+        this.launchCoding(p.projectId, p.path, threadKey, post);
+        return;
+      }
+      if (trimmed === '취소' || trimmed === '아니오' || trimmed === 'cancel') {
+        this.pending.delete(threadKey);
+        await post('취소했어요.');
+        return;
+      }
+    }
+    // escape hatch: code <repoRef> <goal>
+    if (trimmed.startsWith('code ')) {
+      const rest = trimmed.slice('code '.length);
+      const sp = rest.indexOf(' ');
+      const repoRef = sp < 0 ? rest : rest.slice(0, sp);
+      const goal = sp < 0 ? '' : rest.slice(sp + 1);
+      await this.startCoding(repoRef, goal, threadKey, post);
+      return;
+    }
     // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행.
     if (trimmed.startsWith('team ')) {
       const rest = trimmed.slice('team '.length);
@@ -123,6 +165,10 @@ export class Orchestrator {
     }
 
     const decision = await this.classify(trimmed);
+    if (decision.kind === 'code') {
+      await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post);
+      return;
+    }
     if (decision.kind === 'collaborate') {
       const team = decision.team.length ? decision.team : ['Manager'];
       await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
@@ -163,6 +209,75 @@ export class Orchestrator {
     this.inflight.push(work);
   }
 
+  private codeRepos(): CodeReposConfig {
+    if (!this.codeReposCache) {
+      this.codeReposCache = this.paths ? loadCodeRepos(this.paths.getConfigDir()) : { aliases: {}, searchRoots: [] };
+    }
+    return this.codeReposCache;
+  }
+
+  // 테스트에서 override 가능하도록 메서드로 감쌈(모듈 resolveRepo는 coderepos.spec이 커버).
+  private resolveRepoPaths(repoRef: string): string[] {
+    return resolveRepo(repoRef, this.codeRepos());
+  }
+
+  // 멘션 코딩 진입: repo 해소 → 0/1/N 분기.
+  private async startCoding(repoRef: string, goal: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+    const matches = this.resolveRepoPaths(repoRef);
+    if (matches.length === 0) {
+      await post(`'${repoRef}' 레포를 못 찾았어요. coderepos.json의 alias나 정확한 경로로 불러주세요.`);
+      return;
+    }
+    if (matches.length > 1) {
+      this.pending.set(threadKey, { kind: 'disambiguate', candidates: matches, goal });
+      await post(`여러 개 찾았어요:\n${matches.map((m, i) => `${i + 1}. ${m}`).join('\n')}\n@Engram <번호>로 골라주세요.`);
+      return;
+    }
+    await this.startProposal(matches[0], goal, threadKey, post);
+  }
+
+  // 완성조건 초안 → 대상·조건 게시 → 승인 대기.
+  private async startProposal(targetPath: string, goal: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+    if (!this.fence || !this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
+    try { this.fence.assertWritable(targetPath); }
+    catch { await post('그 경로엔 쓸 수 없어요(보호 경로).'); return; }
+    const cfg = await this.proposeProject(targetPath, goal);
+    this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
+    const crit = cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
+    await post(
+      `📁 대상: ${targetPath}\n📋 완성조건:\n${crit}\n` +
+      `게이트: test=${cfg.gate.test}|build=${cfg.gate.build}|typecheck=${cfg.gate.typecheck}\n` +
+      `맞으면 @Engram 승인 / 취소는 @Engram 취소`,
+    );
+  }
+
+  // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
+  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: (t: string) => Promise<void>): void {
+    const t = this.tracker.start(threadKey, { question: `코딩: ${targetPath}`, team: ['Coder'] });
+    const work: Promise<void> = (async (): Promise<void> => {
+      try {
+        await post('자율 코딩 시작할게요. 진행은 여기 올릴게요.');
+        const r = await this.codeRun(projectId, { onProgress: (m) => { void post(`· ${m}`); } });
+        this.tracker.finish(threadKey, t.id, r.status === 'SUCCESS' ? 'done' : 'failed');
+        await post(this.codingResultMessage(r, targetPath));
+      } catch (err) {
+        this.tracker.finish(threadKey, t.id, 'failed');
+        this.logger.warn(`백그라운드 코딩 실패: ${String(err)}`, 'Orchestrator');
+        try { await post('코딩 중 문제가 생겼어요 🙏'); } catch { /* post도 실패하면 포기 */ }
+      }
+    })().finally(() => {
+      const idx = this.inflight.indexOf(work);
+      if (idx !== -1) this.inflight.splice(idx, 1);
+    });
+    this.inflight.push(work);
+  }
+
+  private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {
+    if (r.status === 'SUCCESS') return `✅ 코딩 완료: ${targetPath} (격리 브랜치에 착지 — 사람 머지 대기)`;
+    const why: Record<string, string> = { STUCK: '막힘(진전 정체)', STOPPED: '정지됨', BUDGET: '예산 소진' };
+    return `⚠️ 코딩 종료: ${why[r.status] ?? r.status} (세션 ${r.sessionId})`;
+  }
+
   // @Engram 상태 출력. 질문은 40자 잘라 표시(상대시간은 비범위 — 단순화).
   private formatStatus(tasks: TrackedTask[]): string {
     if (tasks.length === 0) return '지금 진행 중이거나 최근 완료한 작업이 없어요.';
@@ -181,23 +296,27 @@ export class Orchestrator {
     await Promise.all(this.inflight);
   }
 
-  // 멘션 분류 + 로스터 선택(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
-  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate'; team: string[] }> {
+  // 멘션 분류 + 로스터/코딩대상 추출(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
+  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate' | 'code'; team: string[]; repoRef?: string; goal?: string }> {
     if (!this.codeBrain) return { kind: 'chat', team: [] };
     const roster = (this.registry?.all() ?? []).map((p) => `- ${p.name}: ${p.role}`).join('\n');
+    const aliases = Object.keys(this.codeRepos().aliases);
     const prompt = [
       loadPrompt('triage', TRIAGE_DEFAULT),
       `\n# 사용 가능한 전문가\n${roster || '(없음)'}`,
+      `\n# 코딩 가능한 레포(alias)\n${aliases.join(', ') || '(없음)'}`,
       `\n# 사용자 메시지\n${text}`,
-      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate","team":["이름",...]}',
+      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate"|"code","team":["이름",...],"repo":"레포참조","goal":"할 일"}',
     ].join('\n');
     try {
       const r = await this.codeBrain.complete(prompt);
       if (r.isError) return { kind: 'chat', team: [] };
-      const o = parseJsonBlock<{ kind?: unknown; team?: unknown }>(r.text);
-      const kind = o && o.kind === 'collaborate' ? 'collaborate' : 'chat';
+      const o = parseJsonBlock<{ kind?: unknown; team?: unknown; repo?: unknown; goal?: unknown }>(r.text);
+      const kind = o && (o.kind === 'collaborate' || o.kind === 'code') ? o.kind : 'chat';
       const team = o && Array.isArray(o.team) ? o.team.map(String) : [];
-      return { kind, team };
+      const repoRef = o && typeof o.repo === 'string' ? o.repo : undefined;
+      const goal = o && typeof o.goal === 'string' ? o.goal : undefined;
+      return { kind, team, repoRef, goal };
     } catch {
       return { kind: 'chat', team: [] };
     }
