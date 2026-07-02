@@ -1,5 +1,6 @@
 import { MessengerPort } from './messenger.port';
 import { CoreMessage } from '../core-message';
+import { ChannelPolicy, allows } from '../../agent-layer/channel-policy';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 import 회피·테스트 용이).
 export interface MentionHandler {
@@ -8,14 +9,17 @@ export interface MentionHandler {
     post: (text: string) => Promise<void>,
     threadKey?: string,
   ): Promise<void>;
+  // 관찰 끼어들기(6c-1) — 옵셔널(구식 스텁 호환).
+  observe?(msg: CoreMessage, post: (text: string) => Promise<void>): Promise<void>;
 }
 
 // 멘션을 handleMention으로 흘린다. handleMention이 post로 직접 게시(ack·진행·결과·상태).
-// 실패해도 상주를 죽이지 않는다.
+// 실패해도 상주를 죽이지 않는다. policy가 있으면 observe opt-in 채널의 일반 메시지도 observe로 흘린다.
 export function bindMessenger(
   port: MessengerPort,
   orchestrator: MentionHandler,
   logger: { warn(msg: string, ctx?: string): void },
+  policy?: ChannelPolicy,
 ): void {
   port.onMention(async (e) => {
     const post = (text: string): Promise<void> => port.reply(e.target, text);
@@ -28,4 +32,19 @@ export function bindMessenger(
       try { await post('지금 처리가 안 되네요 🙏'); } catch { /* post도 실패하면 포기 */ }
     }
   });
+
+  // 관찰(6c-1): 포트·정책·observe 셋 다 있을 때만 바인딩. opt-in 채널만 통과.
+  if (port.onMessage && orchestrator.observe && policy) {
+    port.onMessage(async (e) => {
+      if (!allows(policy, e.channelId, 'observe')) return;
+      try {
+        await orchestrator.observe!(
+          { text: e.text, userId: e.channelId },
+          (text) => port.postToChannel(e.channelId, text, e.threadId),
+        );
+      } catch (err) {
+        logger.warn(`관찰 처리 실패: ${String(err)}`, 'Messenger');
+      }
+    });
+  }
 }

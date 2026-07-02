@@ -40,3 +40,45 @@ it('handleMention이 던지면 사과 + 로그(상주 불사)', async () => {
   expect(m.replies[0].text).toContain('처리가 안 되네요');
   expect(warns.length).toBe(1);
 });
+
+const OBS_POLICY = { channels: { obs: { observe: true } } } as any; // obs 채널만 opt-in
+
+it('observe opt-in 채널의 일반 메시지 → orchestrator.observe(postToChannel 경유)', async () => {
+  const port = new FakeMessenger();
+  const seen: string[] = [];
+  const orchestrator = {
+    handleMention: async () => {},
+    observe: async (msg: any, post: any) => { seen.push(msg.userId + ':' + msg.text); await post('💡 힌트'); },
+  };
+  bindMessenger(port, orchestrator as any, { warn() {} } as any, OBS_POLICY);
+  await port.emitMessage({ text: '일반 대화', channelId: 'obs', authorId: 'u1', target: null });
+  expect(seen).toEqual(['obs:일반 대화']);
+  expect(port.channelPosts).toEqual([{ channelId: 'obs', threadId: undefined, text: '💡 힌트' }]);
+});
+
+it('opt-in 아닌 채널 → observe 미호출', async () => {
+  const port = new FakeMessenger();
+  let called = false;
+  const orchestrator = { handleMention: async () => {}, observe: async () => { called = true; } };
+  bindMessenger(port, orchestrator as any, { warn() {} } as any, OBS_POLICY);
+  await port.emitMessage({ text: '일반 대화', channelId: 'other', authorId: 'u1', target: null });
+  expect(called).toBe(false);
+});
+
+it('policy 미전달(기존 호출) → onMessage 미바인딩·무파손', async () => {
+  const port = new FakeMessenger();
+  let called = false;
+  const orchestrator = { handleMention: async () => {}, observe: async () => { called = true; } };
+  bindMessenger(port, orchestrator as any, { warn() {} } as any);
+  await port.emitMessage({ text: '일반 대화', channelId: 'obs', authorId: 'u1', target: null });
+  expect(called).toBe(false);
+});
+
+it('observe가 throw해도 상주 불사(warn 로그)', async () => {
+  const port = new FakeMessenger();
+  const warns: string[] = [];
+  const orchestrator = { handleMention: async () => {}, observe: async () => { throw new Error('boom'); } };
+  bindMessenger(port, orchestrator as any, { warn(m: string) { warns.push(m); } } as any, OBS_POLICY);
+  await port.emitMessage({ text: '일반 대화', channelId: 'obs', authorId: 'u1', target: null });
+  expect(warns.length).toBe(1);
+});
