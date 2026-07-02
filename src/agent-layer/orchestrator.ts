@@ -29,12 +29,20 @@ import { loadCodeRepos, resolveRepo, CodeReposConfig } from './coderepos';
 import { loadChannelPolicy, allows, ChannelPolicy } from './channel-policy';
 import { SchedulerPort, ScheduleEntry } from './schedule-store';
 import { computeResume } from './resume-policy';
+import { RagStore } from '../knowledge-core/rag/rag-store';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
   '아래 목표를 작업 조각으로 분할하라.',
   '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
   '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
+].join('\n');
+
+// prompts/ambient.md 없을 때의 내장 기본값. JSON 계약은 observe()가 코드에서 덧붙인다.
+const AMBIENT_DEFAULT = [
+  '대화 메시지와 위키 발췌가 주어진다. 위키 정보가 이 대화에 실질적으로 도움이 될 때만 끼어들어라.',
+  '확실하지 않으면 끼어들지 마라 — interject=false가 기본값이다.',
+  '끼어들 땐 한두 문장으로 요점만, 근거 위키 페이지(slug)를 함께 밝혀라.',
 ].join('\n');
 
 // prompts/triage.md 없을 때의 내장 기본값. JSON 계약은 classify()가 코드에서 덧붙인다.
@@ -84,16 +92,17 @@ export class Orchestrator {
     @Optional() private readonly reporter?: InsightReporter,
     @Optional() private readonly registry?: PersonaRegistry,
     @Optional() private readonly paths?: PathResolver,
+    @Optional() private readonly rag?: RagStore,
   ) {}
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
     return this.ingester.run(userId);
   }
 
-  // 일일 인사이트 생성(설계 §5.4). DigestScheduler→digest와 동렬: 스케줄러·CLI가 호출.
-  insight(userId: string = DEFAULT_USER): Promise<DayInsight | null> {
+  // 일일 인사이트 생성(설계 §5.4). date 생략=오늘(기존), 지정=그 날(ambient가 어제를 넘김).
+  insight(userId: string = DEFAULT_USER, date?: string): Promise<DayInsight | null> {
     if (!this.reporter) throw new Error('InsightReporter 미주입(Orchestrator)');
-    return this.reporter.run(userId);
+    return this.reporter.run(userId, date);
   }
 
   setScheduler(scheduler: SchedulerPort): void {
@@ -460,6 +469,41 @@ export class Orchestrator {
   private async drainForTest(): Promise<void> {
     await Promise.all(this.inflight);
   }
+
+  // 관찰 끼어들기(6c-1). 비용 사다리: 짧음→쿨다운→RAG(로컬·공짜)→두뇌 1콜. 모든 실패 무음(상주 불사).
+  // ponytail: 쿨다운은 in-memory(재시작 리셋) — 영속 필요해지면 state 파일로.
+  private readonly observeCooldown = new Map<string, number>();
+
+  async observe(msg: CoreMessage, post: (text: string) => Promise<void>): Promise<void> {
+    try {
+      if (!this.rag || !this.codeBrain) return;
+      const text = msg.text.trim();
+      if (text.length < 10) return;
+      const n = Number(process.env.ENGRAM_AMBIENT_COOLDOWN_MIN);
+      const coolMin = Number.isFinite(n) && n > 0 ? n : 30;
+      const last = this.observeCooldown.get(msg.userId) ?? -Infinity;
+      if (this.now() - last < coolMin * 60_000) return;
+      const hits = await this.rag.search(text, 3, msg.userId);
+      if (hits.length === 0) return;
+      const prompt = [
+        loadPrompt('ambient', AMBIENT_DEFAULT),
+        `\n# 대화 메시지\n${text}`,
+        `\n# 위키 발췌\n${hits.map((h) => `- [${h.slug}] ${h.text.slice(0, 200)}`).join('\n')}`,
+        '\n반드시 이 JSON만: {"interject":true|false,"text":"한두 문장"}',
+      ].join('\n');
+      const r = await this.codeBrain.complete(prompt);
+      if (r.isError) return;
+      const o = parseJsonBlock<{ interject?: unknown; text?: unknown }>(r.text);
+      if (!o || o.interject !== true || typeof o.text !== 'string' || !o.text.trim()) return;
+      this.observeCooldown.set(msg.userId, this.now());
+      await post(`💡 ${o.text.trim()}`);
+    } catch (err) {
+      this.logger.warn(`observe 실패(무시): ${String(err)}`, 'Orchestrator');
+    }
+  }
+
+  // 테스트 주입용 시계(쿨다운 결정적 테스트).
+  protected now(): number { return Date.now(); }
 
   // 멘션 분류 + 로스터/코딩대상/예약 추출(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
   private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate' | 'code' | 'schedule'; team: string[]; repoRef?: string; goal?: string; cron?: string; task?: string; once?: boolean }> {
