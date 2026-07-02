@@ -25,6 +25,15 @@ let quitting = false;
 let childStartedAt = 0;
 const backoff = new Backoff();
 
+// UI 언어: 영어 기본, 시스템 로케일이 한국어면 한국어(렌더러는 navigator.language로 동일 판정).
+const ko = (): boolean => app.getLocale().toLowerCase().startsWith('ko');
+const T = {
+  openSettings: () => (ko() ? '설정 열기' : 'Open Settings'),
+  restart: () => (ko() ? '재시작' : 'Restart'),
+  quit: () => (ko() ? '종료' : 'Quit'),
+  warnTip: () => (ko() ? 'Engram — 재시작 반복 실패 (로그 확인)' : 'Engram — restarts failing repeatedly (check logs)'),
+};
+
 // ---- 자식(상주) 감독 ----
 function startChild(): void {
   const entry = path.join(app.getAppPath(), 'dist', 'src', 'main.js');
@@ -63,17 +72,17 @@ function trayIcon(): Electron.NativeImage {
 function updateTray(): void {
   if (!tray) return;
   const warn = backoff.consecutiveFails >= WARN_AFTER;
-  tray.setToolTip(warn ? 'Engram — 상주 재시작 반복 실패(로그 확인)' : 'Engram');
+  tray.setToolTip(warn ? T.warnTip() : 'Engram');
 }
 
 function createTray(): void {
   tray = new Tray(trayIcon());
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '설정 열기', click: () => openSettings() },
-      { label: '상주 재시작', click: () => restartChild() },
+      { label: T.openSettings(), click: () => openSettings() },
+      { label: T.restart(), click: () => restartChild() },
       { type: 'separator' },
-      { label: '종료', click: () => app.quit() },
+      { label: T.quit(), click: () => app.quit() },
     ]),
   );
   tray.on('double-click', () => openSettings());
@@ -150,6 +159,8 @@ if (!gotLock) {
   // 창을 다 닫아도 트레이 상주 유지(기본 quit 동작 차단).
   app.on('window-all-closed', () => {});
   void app.whenReady().then(() => {
+    // 기본 메뉴바(File/Edit/View…) 제거 — 설정창엔 불필요하고 미완성처럼 보인다. macOS는 앱 메뉴 관례상 유지.
+    if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     // 로그인 자동시작(스펙 §3). Linux는 API 미지원이라 제외, 개발 모드(비패키지)도 제외.
     if (app.isPackaged && process.platform !== 'linux') {
       app.setLoginItemSettings({ openAtLogin: true });
