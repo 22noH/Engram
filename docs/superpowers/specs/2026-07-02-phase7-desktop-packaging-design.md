@@ -30,7 +30,7 @@
 ## 3. 아키텍처
 
 ```
-[Electron 메인 프로세스]  ← 신규: desktop/
+[Electron 메인 프로세스]  ← 신규: src/desktop/
  ├ 트레이 아이콘 (상태 표시 · 메뉴: 설정 열기/재시작/종료)
  ├ 설정창 (BrowserWindow, 필요할 때만)
  ├ 로그인 자동시작 (app.setLoginItemSettings)
@@ -55,7 +55,8 @@
   자동 인식하지 않음)에 넘기는 한 줄. 미설정 시 기존 기본 캐시 그대로(개발 모드 무변경).
 - **감시 역할 분담**: 데스크톱 모드 = Electron 메인이 재시작 담당(watchdog 불필요).
   서버 모드 = 기존 PAL 서비스+watchdog 유지. 삭제 없음.
-- **레포 구조**: 단일 패키지 유지. `desktop/`에 Electron 메인 코드(main·preload·설정 화면),
+- **레포 구조**: 단일 패키지 유지. `src/desktop/`에 Electron 메인 코드(main·preload·설정 화면) —
+  src 아래에 두면 기존 nest build(tsc)·jest(rootDir=src)가 그대로 집어가서 빌드·테스트 설정 변경 0.
   루트 package.json에 electron·electron-builder devDependencies 추가. 워크스페이스 분리 안 함.
 
 ## 4. 설정창
