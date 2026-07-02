@@ -93,3 +93,22 @@ it('발사 중에는 재예약(add) 거부 — 재진입 루프 차단', async (
   await new Promise((r) => setImmediate(r));
   expect(reAdd).toBeNull();
 });
+
+it('발사 중에도 internal add는 통과(자가 재개 예약)', async () => {
+  const store = tmpStore();
+  let svc: any;
+  let reAdd: any = 'notset';
+  const orchestrator = { handleMention: async () => {
+    reAdd = svc.add({ channelId: 'c1', cron: '0 9 * * *', task: 'resume p1 1', once: true }, { internal: true });
+  } };
+  svc = service(orchestrator, new FakeMessenger(), fakeRegistry(), store);
+  const e = store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'X' });
+  svc.fire(e);
+  await new Promise((r) => setImmediate(r));
+  expect(reAdd).not.toBeNull();
+});
+
+it('internal이라도 잘못된 cron은 null(검증은 동일)', () => {
+  const svc = service({}, new FakeMessenger(), fakeRegistry(), tmpStore());
+  expect(svc.add({ channelId: 'c1', cron: 'BAD', task: 'X' }, { internal: true })).toBeNull();
+});

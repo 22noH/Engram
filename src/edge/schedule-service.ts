@@ -35,8 +35,12 @@ export class ScheduleService implements SchedulerPort {
     }
   }
 
-  add(input: { channelId: string; threadId?: string; cron: string; task: string; once?: boolean }): ScheduleEntry | null {
-    if (this.firingDepth > 0) return null; // 발사 중 재예약 금지(재진입 루프 차단)
+  add(
+    input: { channelId: string; threadId?: string; cron: string; task: string; once?: boolean },
+    opts?: { internal?: boolean },
+  ): ScheduleEntry | null {
+    // 발사 중 재예약 금지(재진입 자기복제 루프 차단). 자가 재개(internal)는 attempt 상한으로 유계라 허용.
+    if (!opts?.internal && this.firingDepth > 0) return null;
     if (!this.validCron(input.cron)) return null;
     const e = this.store.add(input);
     try { this.register(e); }

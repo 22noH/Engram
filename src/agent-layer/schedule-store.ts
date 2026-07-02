@@ -13,8 +13,12 @@ export interface ScheduleEntry {
 }
 
 // Orchestrator가 보는 스케줄러 포트(구현=ScheduleService). add는 잘못된 cron이면 null.
+// opts.internal=true는 자가 재개 예약(6b-3-2) 전용 — 발사 중 재예약 가드를 우회한다.
 export interface SchedulerPort {
-  add(input: { channelId: string; threadId?: string; cron: string; task: string; once?: boolean }): ScheduleEntry | null;
+  add(
+    input: { channelId: string; threadId?: string; cron: string; task: string; once?: boolean },
+    opts?: { internal?: boolean },
+  ): ScheduleEntry | null;
   list(channelId: string): ScheduleEntry[];
   remove(id: string): boolean;
 }
