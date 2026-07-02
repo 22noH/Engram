@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray, utilityPro
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { autoUpdater } from 'electron-updater';
 import { readStatus } from './status';
 import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
@@ -101,7 +102,8 @@ function registerIpc(): void {
     ...readStatus(dataDir, Date.now()),
     dataDir,
     childRunning: child !== null,
-    consecutiveFails: backoff.consecutiveFails,
+    // 경고 판정은 메인이 WARN_AFTER로 단일 계산 — 렌더러에 임계값 중복 없음.
+    warn: backoff.consecutiveFails >= WARN_AFTER,
   }));
   ipcMain.handle('engram:detect-claude', async () => ({
     ...(await detectClaude(spawnRunner)),
@@ -151,6 +153,11 @@ if (!gotLock) {
     // 로그인 자동시작(스펙 §3). Linux는 API 미지원이라 제외, 개발 모드(비패키지)도 제외.
     if (app.isPackaged && process.platform !== 'linux') {
       app.setLoginItemSettings({ openAtLogin: true });
+    }
+    // 자동 업데이트(NSIS): GitHub Release에서 새 버전 확인→다운로드→종료 시 설치.
+    // Windows 한정 — 무서명 mac은 electron-updater가 서명을 요구해 불가. 실패는 조용히 무시(오프라인 등).
+    if (app.isPackaged && process.platform === 'win32') {
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
     }
     registerIpc();
     createTray();

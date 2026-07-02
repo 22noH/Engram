@@ -19,6 +19,7 @@ import * as path from 'path';
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
 async function bootstrap(): Promise<void> {
+  process.env.ENGRAM_RESIDENT = '1'; // 상주 표식 — HeartbeatEmitter가 기동 즉시 1회 발화(재시작 직후 상태 표시 정확화)
   const app = await NestFactory.createApplicationContext(AppModule);
   await app.init();
 

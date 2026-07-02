@@ -20,7 +20,14 @@
   "build": {
     "appId": "dev.engram.desktop",
     "productName": "Engram",
-    "directories": { "output": "release" },
+    "publish": {
+      "provider": "github",
+      "owner": "22noH",
+      "repo": "Engram"
+    },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**",
       "prompts/**",
@@ -61,6 +68,7 @@
     "chokidar": "^4.0.3",
     "cross-spawn": "^7.0.6",
     "discord.js": "^14.26.4",
+    "electron-updater": "^6.8.9",
     "gray-matter": "^4.0.3",
     "lru-cache": "^11.5.1",
     "node-windows": "^1.0.0-beta.8",
