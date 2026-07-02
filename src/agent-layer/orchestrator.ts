@@ -26,6 +26,7 @@ import { DayInsight } from '../knowledge-core/insight/insight-store';
 import { PersonaRegistry } from './persona-registry';
 import { MentionTracker, TrackedTask } from './mention-tracker';
 import { loadCodeRepos, resolveRepo, CodeReposConfig } from './coderepos';
+import { loadChannelPolicy, allows, ChannelPolicy } from './channel-policy';
 import { SchedulerPort, ScheduleEntry } from './schedule-store';
 import { computeResume } from './resume-policy';
 
@@ -60,6 +61,7 @@ export class Orchestrator {
   // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
   private readonly pending = new Map<string, PendingCode>();
   private codeReposCache?: CodeReposConfig;
+  private channelPolicyCache?: ChannelPolicy;
   // 예약(스케줄) 포트 — main.ts에서 setter 주입(메신저처럼 DI 밖). 6b-3.
   private scheduler?: SchedulerPort;
 
@@ -157,6 +159,7 @@ export class Orchestrator {
       const sp = rest.indexOf(' ');
       const repoRef = sp < 0 ? rest : rest.slice(0, sp);
       const goal = sp < 0 ? '' : rest.slice(sp + 1);
+      if (!(await this.channelGate('coding', msg.userId, post))) return;
       await this.startCoding(repoRef, goal, threadKey, post);
       return;
     }
@@ -178,6 +181,7 @@ export class Orchestrator {
       const parts = rest.split(' ').filter(Boolean);
       const cron = parts.slice(0, 5).join(' ');
       const task = parts.slice(5).join(' ');
+      if (!(await this.channelGate('schedule', msg.userId, post))) return;
       await this.doSchedule(cron, task, false, msg.userId, threadKey, post);
       return;
     }
@@ -185,6 +189,7 @@ export class Orchestrator {
     if (trimmed.startsWith('resume ')) {
       const parts = trimmed.slice('resume '.length).trim().split(/\s+/);
       const attempt = /^\d+$/.test(parts[1] ?? '') ? parseInt(parts[1], 10) : 0;
+      if (!(await this.channelGate('coding', msg.userId, post))) return;
       await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post);
       return;
     }
@@ -194,6 +199,7 @@ export class Orchestrator {
       if (m) {
         const attempt = parseInt(m[1], 10);
         const team = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+        if (!(await this.channelGate('collaborate', msg.userId, post))) return;
         await post(`팀 구성: ${team.join('·')} — 다시 해볼게요 (재시도 ${attempt}/2)`);
         this.launchCollaboration(m[3], team.length ? team : ['Manager'], msg.userId, threadKey, post, attempt);
         return;
@@ -206,6 +212,7 @@ export class Orchestrator {
       const names = (sp < 0 ? rest : rest.slice(0, sp)).split(',').map((s) => s.trim()).filter(Boolean);
       const q = sp < 0 ? '' : rest.slice(sp + 1);
       const team = names.length ? names : ['Manager'];
+      if (!(await this.channelGate('collaborate', msg.userId, post))) return;
       await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
       this.launchCollaboration(q, team, msg.userId, threadKey, post);
       return;
@@ -217,14 +224,17 @@ export class Orchestrator {
 
     const decision = await this.classify(trimmed);
     if (decision.kind === 'code') {
+      if (!(await this.channelGate('coding', msg.userId, post))) return;
       await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post);
       return;
     }
     if (decision.kind === 'schedule') {
+      if (!(await this.channelGate('schedule', msg.userId, post))) return;
       await this.doSchedule(decision.cron ?? '', decision.task ?? '', decision.once ?? false, msg.userId, threadKey, post);
       return;
     }
     if (decision.kind === 'collaborate') {
+      if (!(await this.channelGate('collaborate', msg.userId, post))) return;
       const team = decision.team.length ? decision.team : ['Manager'];
       await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
       this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
@@ -275,6 +285,27 @@ export class Orchestrator {
       this.codeReposCache = this.paths ? loadCodeRepos(this.paths.getConfigDir()) : { aliases: {}, searchRoots: [] };
     }
     return this.codeReposCache;
+  }
+
+  // 채널 정책 lazy 캐시(6c-2). 변경은 재시작 반영(coderepos와 동일 성질). 테스트는 override.
+  private policy(): ChannelPolicy {
+    if (!this.channelPolicyCache) {
+      this.channelPolicyCache = this.paths ? loadChannelPolicy(this.paths.getConfigDir()) : { channels: {} };
+    }
+    return this.channelPolicyCache;
+  }
+
+  // 채널 능력 게이트(6c-2). 허용이면 true, 차단이면 안내 게시 후 false(막다른 길 없음).
+  // 이름이 channelGate인 이유: 생성자 필드 gate(VerificationGate)와의 이름 충돌 회피.
+  private async channelGate(
+    cap: 'coding' | 'schedule' | 'collaborate',
+    channelId: string,
+    post: (text: string) => Promise<void>,
+  ): Promise<boolean> {
+    if (allows(this.policy(), channelId, cap)) return true;
+    const label: Record<string, string> = { coding: '코딩', schedule: '예약', collaborate: '협업' };
+    await post(`이 채널에선 ${label[cap]}을 쓸 수 없어요(채널 설정).`);
+    return false;
   }
 
   // 테스트에서 override 가능하도록 메서드로 감쌈(모듈 resolveRepo는 coderepos.spec이 커버).
