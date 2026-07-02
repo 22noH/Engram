@@ -30,3 +30,6 @@ Thumbs.db
 
 # SDD 진행 스크래치 (subagent-driven-development)
 .superpowers/
+
+# electron-builder 산출물
+release/
