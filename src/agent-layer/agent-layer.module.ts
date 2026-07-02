@@ -36,11 +36,11 @@ import { InsightReporter } from './insight-reporter';
   providers: [
     ReaderAgent,
     IngesterAgent,
-    // personas 디렉토리는 항상 레포 루트 기준 절대경로로 해소(테스트 cwd 무관).
+    // personas 디렉토리는 절대경로로 해소(테스트 cwd 무관): dataDir 오버라이드 우선, 없으면 레포/앱 루트(Phase 7).
     {
       provide: PersonaRegistry,
       useFactory: (logger: PinoLogger) => {
-        // 빌드 레이아웃 무관하게 레포 루트(package.json 보유)를 찾아 personas 해소.
+        // ENGRAM_DATA_DIR/personas가 있으면 사용자 편집본, 없으면 번들본(package.json 보유 루트).
         const personasDir = resolveResourceDir('personas');
         return new PersonaRegistry(personasDir, logger);
       },
