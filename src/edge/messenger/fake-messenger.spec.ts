@@ -22,3 +22,16 @@ it('postToChannel이 channelPosts에 캡처된다', async () => {
     { channelId: 'ch2', threadId: undefined, text: '두번째' },
   ]);
 });
+
+it('onMessage/emitMessage: 관찰 메시지 왕복(6c-1)', async () => {
+  const m = new FakeMessenger();
+  const seen: string[] = [];
+  m.onMessage(async (e) => { seen.push(`${e.channelId}:${e.text}`); });
+  await m.emitMessage({ text: '일반 대화', channelId: 'c1', authorId: 'u1', target: null });
+  expect(seen).toEqual(['c1:일반 대화']);
+});
+
+it('onMessage 핸들러 없이 emitMessage → 무해', async () => {
+  const m = new FakeMessenger();
+  await expect(m.emitMessage({ text: 'x', channelId: 'c1', authorId: 'u1', target: null })).resolves.toBeUndefined();
+});

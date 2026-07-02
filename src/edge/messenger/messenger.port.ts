@@ -14,6 +14,8 @@ export interface MentionEvent {
 
 export interface MessengerPort {
   onMention(handler: (e: MentionEvent) => Promise<void>): void;
+  // 관찰(6c-1): 멘션이 아닌 일반 메시지 수신 — 옵셔널(어댑터가 지원할 때만). 정책 필터는 bridge 몫.
+  onMessage?(handler: (e: MentionEvent) => Promise<void>): void;
   reply(target: ReplyTarget, text: string): Promise<void>;
   postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
   start(): Promise<void>;
