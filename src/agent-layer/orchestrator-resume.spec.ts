@@ -85,3 +85,55 @@ it('scheduler 미주입 STUCK → 기존 ⚠️ 메시지로 강등', async () =
   await approveWith(o as any, 'STUCK', posts);
   expect(posts.some((p) => p.includes('⚠️'))).toBe(true);
 });
+
+it('resume hatch: 승인된 프로젝트 → runState 복원 + launchCoding(attempt 전달)', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.projects = { get: async (id: string) => ({ id, targetPath: 'C:/repos/api', approved: true }) };
+  const seen: any = {};
+  o.launchCoding = (projectId: string, targetPath: string, _tk: string, _post: any, attempt: number) => {
+    seen.projectId = projectId; seen.targetPath = targetPath; seen.attempt = attempt;
+  };
+  o.setRunState('paused'); // STUCK이 남긴 상태 재현
+  const posts: string[] = [];
+  await o.handleMention({ text: 'resume p1 1', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  expect(o.getRunState()).toBe('running');
+  expect(seen).toEqual({ projectId: 'p1', targetPath: 'C:/repos/api', attempt: 1 });
+  expect(posts[0]).toContain('이어서');
+});
+
+it('resume hatch: 프로젝트 없음 → 안내', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.projects = { get: async () => null };
+  const posts: string[] = [];
+  await o.handleMention({ text: 'resume nope 1', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  expect(posts[0]).toContain('못 찾');
+});
+
+it('resume hatch: 미승인 프로젝트 → 안내', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.projects = { get: async () => ({ id: 'p1', targetPath: 'C:/x', approved: false }) };
+  const posts: string[] = [];
+  await o.handleMention({ text: 'resume p1', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  expect(posts[0]).toContain('승인되지 않');
+});
+
+it('resume hatch: attempt 비숫자/생략 → 0', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.projects = { get: async () => ({ id: 'p1', targetPath: 'C:/x', approved: true }) };
+  const seen: any = {};
+  o.launchCoding = (_p: string, _t: string, _tk: string, _post: any, attempt: number) => { seen.attempt = attempt; };
+  await o.handleMention({ text: 'resume p1', userId: 'c1' }, async () => {});
+  expect(seen.attempt).toBe(0);
+});
+
+it('재개 상한: resume attempt 2로 또 STUCK → 재예약 없음 + 사람 호출', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.projects = { get: async () => ({ id: 'p1', targetPath: 'C:/repos/api', approved: true }) };
+  o.codeRun = async () => ({ status: 'STUCK', sessionId: 's1' }); // launchCoding은 실물 사용
+  const sch = fakeScheduler(); o.setScheduler(sch as any);
+  const posts: string[] = [];
+  await o.handleMention({ text: 'resume p1 2', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  await o.drainForTest();
+  expect(sch.adds).toHaveLength(0);
+  expect(posts.some((p) => p.includes('사람이 봐야'))).toBe(true);
+});

@@ -181,6 +181,13 @@ export class Orchestrator {
       await this.doSchedule(cron, task, false, msg.userId, threadKey, post);
       return;
     }
+    // 자가 재개(6b-3-2): 예약 발사 재주입용 내부 명령(사용자 직접 입력도 동작 — 승인된 프로젝트 재실행뿐).
+    if (trimmed.startsWith('resume ')) {
+      const parts = trimmed.slice('resume '.length).trim().split(/\s+/);
+      const attempt = /^\d+$/.test(parts[1] ?? '') ? parseInt(parts[1], 10) : 0;
+      await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post);
+      return;
+    }
     // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행.
     if (trimmed.startsWith('team ')) {
       const rest = trimmed.slice('team '.length);
@@ -333,6 +340,17 @@ export class Orchestrator {
     const why = status === 'STUCK' ? '막힘(진전 정체)' : '예산 소진';
     await post(`⏸ ${why} — ${human} 자동 재개 예약했어요 (#${e.id}, 재개 ${attempt + 1}/2). 멈추려면 @Engram 예약취소 ${e.id}`);
     return true;
+  }
+
+  // 예약된 코딩 재개 실행: 존재·승인 확인 → runState 복원(STUCK이 남긴 paused) → 백그라운드 재실행.
+  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: (text: string) => Promise<void>): Promise<void> {
+    if (!this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
+    const project = await this.projects.get(projectId);
+    if (!project) { await post('그 프로젝트를 못 찾았어요.'); return; }
+    if (!project.approved) { await post('승인되지 않은 프로젝트예요.'); return; }
+    this.setRunState('running');
+    await post(`▶ 이어서 할게요: ${project.targetPath} (재개 ${attempt}/2)`);
+    this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
   }
 
   private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {
