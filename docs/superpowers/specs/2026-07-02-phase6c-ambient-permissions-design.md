@@ -51,7 +51,8 @@ function allows(policy: ChannelPolicy, channelId: string, cap: Capability): bool
 
 - Orchestrator에 lazy `policy()` 캐시(기존 `codeRepos()` 패턴, `paths.getConfigDir()` — **DI·생성자 18인자 무변경**). 테스트는 메서드 override.
 - handleMention 게이트(각 분기 진입 직후, channelId=`msg.userId`):
-  - coding: classify `code` 분기 · `code ` hatch · **`resume ` hatch**(자가 재개 발사도 잠긴 채널이면 안내만) · pending approve(승인 답장) — 차단 문구 `이 채널에선 코딩을 쓸 수 없어요(채널 설정).`
+  - coding: classify `code` 분기 · `code ` hatch · **`resume ` hatch**(자가 재개 발사도 잠긴 채널이면 안내만) — 차단 문구 `이 채널에선 코딩을 쓸 수 없어요(채널 설정).`
+    (pending 승인 답장·disambiguate 번호선택 경로는 **의도적으로 미게이트** — pending은 게이트를 통과한 startCoding/startProposal에서만 생성되고, 정책은 재시작 반영이라 재시작이 in-memory pending도 함께 비우므로 잠긴 채널에서 승인이 실행되는 창이 없다. 최종리뷰 확인.)
   - schedule: classify `schedule` 분기 · `schedule ` hatch — `이 채널에선 예약을 쓸 수 없어요(채널 설정).` (예약목록·예약취소는 읽기/정리라 항상 허용.)
   - collaborate: classify `collaborate` 분기 · `team ` hatch · **`retry ` hatch** — `이 채널에선 협업을 쓸 수 없어요(채널 설정).` (차단 시 chat으로 강등하지 않고 안내만 — 의도 왜곡 방지.)
 - chat(route)·`ask `·상태는 항상 허용. CLI Gateway는 채널 개념 없음 → 게이트 미적용(기존 그대로).
