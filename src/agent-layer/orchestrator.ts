@@ -340,6 +340,7 @@ export class Orchestrator {
 
   // 자가 재개 예약(6b-3-2). 성공 시 ⏸ 안내 게시까지 하고 true, 실패(미주입·add null)면 false → 기존 메시지 강등.
   // channelId=threadKey: Discord에서 스레드는 자체 channelId라 threadKey가 곧 게시 대상(6b-1 수렴).
+  // ponytail: 어댑터가 threadId를 채우게 되면 doSchedule처럼 channelId/threadId 분리로 — 아니면 스레드발 예약이 예약취소 스코프(부모채널) 밖.
   private async scheduleCodingResume(
     projectId: string,
     status: 'STUCK' | 'BUDGET',
@@ -365,6 +366,7 @@ export class Orchestrator {
     const project = await this.projects.get(projectId);
     if (!project) { await post('그 프로젝트를 못 찾았어요.'); return; }
     if (!project.approved) { await post('승인되지 않은 프로젝트예요.'); return; }
+    // ponytail: runState는 전역 스위치(N=1 가정) — 재개가 engram pause로 멈춘 다른 코딩까지 풀 수 있다. N>1이면 프로젝트별 run-state로.
     this.setRunState('running');
     await post(`▶ 이어서 할게요: ${project.targetPath} (재개 ${attempt}/2)`);
     this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
