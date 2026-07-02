@@ -188,6 +188,17 @@ export class Orchestrator {
       await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post);
       return;
     }
+    // 협업 재시도 재주입(6b-3-2). 형식: retry <attempt> <팀CSV> <질문> — 불일치면 일반 흐름으로.
+    if (trimmed.startsWith('retry ')) {
+      const m = trimmed.match(/^retry (\d+) (\S+) ([\s\S]+)$/);
+      if (m) {
+        const attempt = parseInt(m[1], 10);
+        const team = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+        await post(`팀 구성: ${team.join('·')} — 다시 해볼게요 (재시도 ${attempt}/2)`);
+        this.launchCollaboration(m[3], team.length ? team : ['Manager'], msg.userId, threadKey, post, attempt);
+        return;
+      }
+    }
     // escape hatch(접근 C): 명시 명령은 분류를 건너뛰고 직접 실행.
     if (trimmed.startsWith('team ')) {
       const rest = trimmed.slice('team '.length);
@@ -230,6 +241,7 @@ export class Orchestrator {
     userId: string,
     threadKey: string,
     post: (text: string) => Promise<void>,
+    attempt = 0,
   ): void {
     const t = this.tracker.start(threadKey, { question, team });
     const work: Promise<void> = (async (): Promise<void> => {
@@ -244,7 +256,12 @@ export class Orchestrator {
       } catch (err) {
         this.tracker.finish(threadKey, t.id, 'failed');
         this.logger.warn(`백그라운드 협업 실패: ${String(err)}`, 'Orchestrator');
-        try { await post('작업 중 문제가 생겼어요 🙏'); } catch { /* post도 실패하면 포기 */ }
+        try {
+          // 자가 재시도(6b-3-2): 예외 실패만, 상한 2회. 예약 실패(미주입·null)는 기존 메시지 강등.
+          if (attempt >= 2) { await post('작업 중 문제가 생겼어요 — 사람이 봐야 해요 🙏'); return; }
+          if (await this.scheduleCollabRetry(question, team, threadKey, attempt, post)) return;
+          await post('작업 중 문제가 생겼어요 🙏');
+        } catch { /* post도 실패하면 포기 */ }
       }
     })().finally(() => {
       const idx = this.inflight.indexOf(work);
@@ -351,6 +368,25 @@ export class Orchestrator {
     this.setRunState('running');
     await post(`▶ 이어서 할게요: ${project.targetPath} (재개 ${attempt}/2)`);
     this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
+  }
+
+  // 협업 재시도 예약(6b-3-2). 같은 질문·같은 팀 재주입(재분류 없음). channelId=threadKey(scheduleCodingResume와 동일 근거).
+  private async scheduleCollabRetry(
+    question: string,
+    team: string[],
+    threadKey: string,
+    attempt: number,
+    post: (text: string) => Promise<void>,
+  ): Promise<boolean> {
+    if (!this.scheduler) return false;
+    const { cron, human } = computeResume('COLLAB', new Date());
+    const e = this.scheduler.add(
+      { channelId: threadKey, cron, task: `retry ${attempt + 1} ${team.join(',')} ${question}`, once: true },
+      { internal: true },
+    );
+    if (!e) return false;
+    await post(`⏸ 작업 중 문제가 생겼어요 — ${human} 다시 해볼게요 (#${e.id}, 재시도 ${attempt + 1}/2). 멈추려면 @Engram 예약취소 ${e.id}`);
+    return true;
   }
 
   private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {

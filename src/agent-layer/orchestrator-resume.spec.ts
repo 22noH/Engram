@@ -137,3 +137,55 @@ it('재개 상한: resume attempt 2로 또 STUCK → 재예약 없음 + 사람 �
   expect(sch.adds).toHaveLength(0);
   expect(posts.some((p) => p.includes('사람이 봐야'))).toBe(true);
 });
+
+it('협업 실패 → once 재시도예약(retry 1 <팀> <질문>) + ⏸ 게시', async () => {
+  const o = orc('{"kind":"collaborate","team":["Manager"]}') as any;
+  o.collaborate = async () => { throw new Error('boom'); };
+  const sch = fakeScheduler(); o.setScheduler(sch as any);
+  const posts: string[] = [];
+  await o.handleMention({ text: '서버비 정리해줘', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  await o.drainForTest();
+  expect(sch.adds).toHaveLength(1);
+  expect(sch.adds[0].input).toMatchObject({ channelId: 'c1', task: 'retry 1 Manager 서버비 정리해줘', once: true });
+  expect(sch.adds[0].opts).toEqual({ internal: true });
+  const msg = posts.find((p) => p.includes('⏸'));
+  expect(msg).toContain('재시도 1/2');
+});
+
+it('retry hatch: 파싱 → launchCollaboration(팀·attempt 전달)', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  const seen: any = {};
+  o.launchCollaboration = (q: string, team: string[], _u: string, _tk: string, _post: any, attempt: number) => {
+    seen.q = q; seen.team = team; seen.attempt = attempt;
+  };
+  await o.handleMention({ text: 'retry 1 Manager,Dev 서버비 정리해줘', userId: 'c1' }, async () => {});
+  expect(seen).toEqual({ q: '서버비 정리해줘', team: ['Manager', 'Dev'], attempt: 1 });
+});
+
+it('retry 상한: attempt 2로 또 실패 → 재예약 없음 + 사람 호출', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.collaborate = async () => { throw new Error('boom'); };
+  const sch = fakeScheduler(); o.setScheduler(sch as any);
+  const posts: string[] = [];
+  await o.handleMention({ text: 'retry 2 Manager 서버비 정리해줘', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  await o.drainForTest();
+  expect(sch.adds).toHaveLength(0);
+  expect(posts.some((p) => p.includes('사람이 봐야'))).toBe(true);
+});
+
+it('retry 형식 불일치(attempt 비숫자) → hatch 미적용, 일반 흐름(chat)', async () => {
+  const o = orc('{"kind":"chat","team":[]}') as any;
+  o.route = async () => '네';
+  const posts: string[] = [];
+  await o.handleMention({ text: 'retry me later', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  expect(posts).toEqual(['네']);
+});
+
+it('scheduler 미주입 협업 실패 → 기존 실패 메시지(회귀)', async () => {
+  const o = orc('{"kind":"collaborate","team":["Manager"]}') as any;
+  o.collaborate = async () => { throw new Error('boom'); };
+  const posts: string[] = [];
+  await o.handleMention({ text: '서버비 정리해줘', userId: 'c1' }, async (t: string) => { posts.push(t); });
+  await o.drainForTest();
+  expect(posts.some((p) => p.includes('문제가 생겼어요'))).toBe(true);
+});
