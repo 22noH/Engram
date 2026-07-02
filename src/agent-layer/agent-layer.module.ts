@@ -21,6 +21,7 @@ import { WikiEngine } from '../knowledge-core/wiki/wiki-engine';
 import { PinoLogger } from '../pal/logger';
 import { PathResolver } from '../pal/path-resolver';
 import { findRepoRoot } from '../pal/repo-root';
+import { resolveResourceDir } from '../pal/resource-dir';
 import { ConversationStore } from '../knowledge-core/conversation-store';
 import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { Semaphore } from '../brain/semaphore';
@@ -40,7 +41,7 @@ import { InsightReporter } from './insight-reporter';
       provide: PersonaRegistry,
       useFactory: (logger: PinoLogger) => {
         // 빌드 레이아웃 무관하게 레포 루트(package.json 보유)를 찾아 personas 해소.
-        const personasDir = path.join(findRepoRoot(__dirname), 'personas');
+        const personasDir = resolveResourceDir('personas');
         return new PersonaRegistry(personasDir, logger);
       },
       inject: [PinoLogger],

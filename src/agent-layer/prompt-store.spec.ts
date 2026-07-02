@@ -20,3 +20,25 @@ describe('loadPrompt', () => {
     expect(loadPrompt('또-없는-이름-abc', '폴백')).toBe('폴백');
   });
 });
+
+describe('loadPrompt dataDir 오버라이드 (Phase 7)', () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-prompt-'));
+    process.env.ENGRAM_DATA_DIR = tmp;
+  });
+  afterEach(() => {
+    delete process.env.ENGRAM_DATA_DIR;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('dataDir/prompts에 같은 이름이 있으면 그것을 읽는다', () => {
+    fs.mkdirSync(path.join(tmp, 'prompts'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'prompts', 'phase7-test.md'), '사용자 편집본');
+    expect(loadPrompt('phase7-test', '기본값')).toBe('사용자 편집본');
+  });
+
+  it('dataDir에 없으면 기존 동작(레포 번들→fallback)', () => {
+    expect(loadPrompt('phase7-없는프롬프트', '기본값')).toBe('기본값');
+  });
+});
