@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Engram 설정</title>
+  <style>
+    body { font-family: 'Malgun Gothic', sans-serif; margin: 16px; background: #1e1f22; color: #dbdee1; }
+    h2 { font-size: 15px; border-bottom: 1px solid #3f4147; padding-bottom: 6px; margin-top: 24px; }
+    .ok { color: #23a559; } .bad { color: #f23f43; }
+    button { background: #4f8ef7; color: white; border: 0; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+    input, select { background: #2b2d31; color: #dbdee1; border: 1px solid #3f4147; border-radius: 4px; padding: 6px; }
+    pre { background: #111214; padding: 8px; border-radius: 4px; overflow: auto; max-height: 200px; font-size: 11px; }
+    code { background: #2b2d31; padding: 2px 6px; border-radius: 3px; }
+    .row { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <h2>상태</h2>
+  <div class="row" id="status">확인 중…</div>
+  <div class="row">
+    <button id="btn-restart">상주 재시작</button>
+    <button id="btn-refresh">새로고침</button>
+  </div>
+  <pre id="log"></pre>
+
+  <h2>두뇌 연결</h2>
+  <div class="row" id="claude">claude 확인 중…</div>
+  <div class="row" id="ollama">Ollama 확인 중…</div>
+  <div class="row" id="ollama-add" style="display:none">
+    <select id="ollama-model"></select>
+    <label><input type="checkbox" id="ollama-default" /> 기본 두뇌로 지정</label>
+    <button id="btn-ollama">로컬 두뇌로 추가</button>
+  </div>
+
+  <h2>메신저 (Discord)</h2>
+  <div class="row">
+    봇 토큰: <input id="token" type="password" size="40" />
+    <button id="btn-token">저장</button>
+    <span id="token-saved"></span>
+  </div>
+  <div class="row">봇 생성: <code>https://discord.com/developers/applications</code> → Bot → 토큰 발급 · 저장 후 "상주 재시작"으로 반영</div>
+
+  <h2>고급</h2>
+  <div class="row">
+    <button data-open="data">데이터 폴더</button>
+    <button data-open="logs">로그 폴더</button>
+    <button data-open="config">설정 폴더(JSON: brains·channels·coderepos·schedules)</button>
+  </div>
+  <div class="row">설정 파일을 직접 고친 뒤에는 "상주 재시작"으로 반영하세요.</div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function refresh() {
+      const s = await window.engram.status();
+      const beat = s.lastBeat ? new Date(s.lastBeat).toLocaleString() : '없음';
+      $('status').innerHTML =
+        (s.alive ? '<span class="ok">● 상주 동작 중</span>' : '<span class="bad">● 상주 응답 없음</span>') +
+        ' · 마지막 생존신호: ' + beat +
+        ' · 임베딩 모델: ' + (s.modelCacheReady ? '준비됨' : '미준비(첫 질문 때 자동 다운로드)') +
+        ' · 데이터: ' + s.dataDir +
+        (s.consecutiveFails >= 3 ? ' · <span class="bad">재시작 반복 실패 — 로그 확인</span>' : '');
+      $('log').textContent = await window.engram.logTail();
+    }
+
+    async function detect() {
+      const c = await window.engram.detectClaude();
+      $('claude').innerHTML = c.installed
+        ? '<span class="ok">claude CLI 설치됨</span> (' + (c.version || '버전 미상') + ') — 로그인은 터미널에서 <code>claude</code> 실행'
+        : '<span class="bad">claude CLI 미설치</span> — 터미널에서: <code>' + c.installCommand + '</code> ' +
+          '<button id="btn-copy-install">복사</button>';
+      if (!c.installed) {
+        $('btn-copy-install').onclick = () => navigator.clipboard.writeText(c.installCommand);
+      }
+      const o = await window.engram.detectOllama();
+      if (o.running) {
+        $('ollama').innerHTML = '<span class="ok">Ollama 실행 중</span> (모델 ' + o.models.length + '개)';
+        const sel = $('ollama-model');
+        sel.innerHTML = '';
+        for (const m of o.models) {
+          const opt = document.createElement('option');
+          opt.textContent = m;
+          sel.appendChild(opt);
+        }
+        $('ollama-add').style.display = o.models.length ? 'block' : 'none';
+      } else {
+        $('ollama').innerHTML = 'Ollama 미실행 — 로컬 LLM을 쓰려면 <code>https://ollama.com</code>에서 설치 (claude CLI는 여전히 필요)';
+      }
+    }
+
+    $('btn-restart').onclick = async () => { await window.engram.restart(); setTimeout(refresh, 1500); };
+    $('btn-refresh').onclick = refresh;
+    $('btn-ollama').onclick = async () => {
+      await window.engram.addOllama($('ollama-model').value, $('ollama-default').checked);
+      alert('brains.json에 추가했습니다. "상주 재시작"으로 반영하세요.');
+    };
+    $('btn-token').onclick = async () => {
+      await window.engram.saveToken($('token').value.trim());
+      $('token-saved').textContent = '저장됨 — 재시작으로 반영';
+    };
+    document.querySelectorAll('[data-open]').forEach((b) => {
+      b.onclick = () => window.engram.openPath(b.dataset.open);
+    });
+
+    refresh();
+    detect();
+  </script>
+</body>
+</html>
