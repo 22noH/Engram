@@ -1,4 +1,4 @@
-# Phase 6c-2 채널별 권한 Implementation Plan
+﻿# Phase 6c-2 채널별 권한 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -144,7 +144,7 @@ git commit -m "feat(phase6c2): channel-policy — channels.json 로드+판정, �
 ### Task 2: Orchestrator 게이트
 
 **Files:**
-- Modify: `src/agent-layer/orchestrator.ts` (import + lazy policy() + gate() + 분기 7곳 게이트 삽입)
+- Modify: `src/agent-layer/orchestrator.ts` (import + lazy policy() + gate() + 분기 8곳 게이트 삽입)
 - Test: `src/agent-layer/orchestrator-gate.spec.ts` (신규)
 
 **Interfaces:**
@@ -307,7 +307,7 @@ import { loadChannelPolicy, allows, ChannelPolicy } from './channel-policy';
   }
 ```
 
-(c) handleMention 분기 7곳에 게이트 삽입(각 분기 진입 직후, 실행 함수 호출 직전 — channelId=`msg.userId`):
+(c) handleMention 분기 8곳에 게이트 삽입(각 분기 진입 직후, 실행 함수 호출 직전 — channelId=`msg.userId`):
 
 ```ts
     // code hatch — startCoding 호출 앞:
@@ -370,3 +370,4 @@ Expected: 에러 0
 - [ ] **Step 3: 잔여 확인**
 
 `git status --short` — 미커밋 잔여물 없음 확인.
+
