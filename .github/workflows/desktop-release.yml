@@ -1,0 +1,31 @@
+# v* 태그 푸시 시 3-OS 인스톨러를 빌드해 GitHub Release에 올린다(스펙 §6).
+# macOS 인스톨러는 macOS에서만 빌드 가능해서 CI 매트릭스가 필수.
+name: desktop-release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # 테스트는 Windows에서만(로컬 검증 환경과 동일 — mac/linux 테스트 호환은 비범위).
+      - run: npm test
+        if: runner.os == 'Windows'
+      - run: npm run build
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 무서명 배포(스펙 §6): mac 서명 자동탐색 끔.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
