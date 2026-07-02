@@ -27,6 +27,7 @@ import { PersonaRegistry } from './persona-registry';
 import { MentionTracker, TrackedTask } from './mention-tracker';
 import { loadCodeRepos, resolveRepo, CodeReposConfig } from './coderepos';
 import { SchedulerPort, ScheduleEntry } from './schedule-store';
+import { computeResume } from './resume-policy';
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -288,13 +289,18 @@ export class Orchestrator {
   }
 
   // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
-  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: (t: string) => Promise<void>): void {
+  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: (text: string) => Promise<void>, attempt = 0): void {
     const t = this.tracker.start(threadKey, { question: `코딩: ${targetPath}`, team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         await post('자율 코딩 시작할게요. 진행은 여기 올릴게요.');
         const r = await this.codeRun(projectId, { onProgress: (m) => { void post(`· ${m}`); } });
         this.tracker.finish(threadKey, t.id, r.status === 'SUCCESS' ? 'done' : 'failed');
+        // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
+        if (r.status === 'STUCK' || r.status === 'BUDGET') {
+          if (attempt >= 2) { await post(`⚠️ 두 번 재개해도 못 끝냈어요 — 사람이 봐야 해요 🙏 (세션 ${r.sessionId})`); return; }
+          if (await this.scheduleCodingResume(projectId, r.status, threadKey, attempt, post)) return;
+        }
         await post(this.codingResultMessage(r, targetPath));
       } catch (err) {
         this.tracker.finish(threadKey, t.id, 'failed');
@@ -306,6 +312,27 @@ export class Orchestrator {
       if (idx !== -1) this.inflight.splice(idx, 1);
     });
     this.inflight.push(work);
+  }
+
+  // 자가 재개 예약(6b-3-2). 성공 시 ⏸ 안내 게시까지 하고 true, 실패(미주입·add null)면 false → 기존 메시지 강등.
+  // channelId=threadKey: Discord에서 스레드는 자체 channelId라 threadKey가 곧 게시 대상(6b-1 수렴).
+  private async scheduleCodingResume(
+    projectId: string,
+    status: 'STUCK' | 'BUDGET',
+    threadKey: string,
+    attempt: number,
+    post: (text: string) => Promise<void>,
+  ): Promise<boolean> {
+    if (!this.scheduler) return false;
+    const { cron, human } = computeResume(status, new Date());
+    const e = this.scheduler.add(
+      { channelId: threadKey, cron, task: `resume ${projectId} ${attempt + 1}`, once: true },
+      { internal: true },
+    );
+    if (!e) return false;
+    const why = status === 'STUCK' ? '막힘(진전 정체)' : '예산 소진';
+    await post(`⏸ ${why} — ${human} 자동 재개 예약했어요 (#${e.id}, 재개 ${attempt + 1}/2). 멈추려면 @Engram 예약취소 ${e.id}`);
+    return true;
   }
 
   private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {
