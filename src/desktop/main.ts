@@ -10,6 +10,7 @@ import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
+import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
 const configDir = path.join(dataDir, 'config');
@@ -110,26 +111,37 @@ function openSettings(): void {
 }
 
 // ---- 채팅 창(Phase 9): 자식(상주)이 서빙하는 페이지를 그대로 로드 — 폰 브라우저와 단일 코드 경로 ----
+// 자식이 리슨하기 전(첫 부팅 임베딩 로드 등)엔 빈 에러 페이지 대신 대기 화면을 띄우고,
+// 메인 프로세스가 포트를 폴링해 준비되는 순간 채팅으로 진입한다(ERR_CONNECTION_REFUSED 노이즈 제거).
 function openChat(): void {
   if (chatWin) {
     chatWin.focus();
     return;
   }
   const cfg = loadChatConfig(configDir, childEnv);
+  const url = `http://127.0.0.1:${cfg.port}/`;
   chatWin = new BrowserWindow({ width: 980, height: 720, title: 'Engram' });
-  const load = (): void => {
-    void chatWin?.loadURL(`http://127.0.0.1:${cfg.port}/`);
+  const waiting = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    '<body style="background:#0e1116;color:#8b95a3;font-family:system-ui;' +
+    'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
+    `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div></body>`,
+  );
+  const probe = (): void => {
+    if (!chatWin) return; // 창 닫힘 = 폴링 중단
+    nodeHttp.get(url, (res) => {
+      res.resume();
+      if (chatWin) void chatWin.loadURL(url); // 응답이 오면(리슨 중) 진입
+    }).on('error', () => { setTimeout(probe, 2000); });
   };
-  // 자식이 아직 리슨 전이면 로드 실패 → 2초 후 재시도(자식 감독 백오프와 별개, 창 닫히면 중단).
-  // 자식 기동 대기용 재시도는 첫 로드 성공까지만 — 성공 후에는 서브리소스(이미지 등) 실패로 전체 리로드하지 않음.
-  let loaded = false;
-  chatWin.webContents.on('did-finish-load', () => { loaded = true; });
+  // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.
   chatWin.webContents.on('did-fail-load', (_e, _code, _desc, _url, isMainFrame) => {
-    if (!isMainFrame || loaded) return; // 서브리소스 실패/이미 성공한 창은 리로드 금지
-    setTimeout(() => { if (chatWin) load(); }, 2000);
+    if (!isMainFrame || !chatWin) return;
+    void chatWin.loadURL(waiting);
+    setTimeout(probe, 2000);
   });
   chatWin.on('closed', () => (chatWin = null));
-  load();
+  void chatWin.loadURL(waiting);
+  probe();
 }
 
 // ---- IPC (로직은 테스트된 모듈 위임) ----
