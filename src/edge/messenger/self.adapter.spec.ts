@@ -57,12 +57,13 @@ describe('SelfMessenger 코어', () => {
     expect((events[0].target as SelfTarget).anchorId).toBe(frame.message.id);
   });
 
-  it('스레드 안 send → MentionEvent.threadId=anchor, target.anchorId=같은 anchor(새 스레드 안 팜)', async () => {
+  it('스레드 안 send → threadId는 항상 미설정(작업 키=채널), target.anchorId=같은 anchor(새 스레드 안 팜)', async () => {
     const events: MentionEvent[] = [];
     sm.onMention(async (e) => { events.push(e); });
     client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'q', threadId: 'anchor-1' }));
     await nextFrame(client);
-    expect(events[0].threadId).toBe('anchor-1');
+    // threadId를 anchor로 채우면 스레드 안 승인 답장이 pending(채널 키)을 못 찾는다 — 항상 undefined.
+    expect(events[0].threadId).toBeUndefined();
     expect((events[0].target as SelfTarget).anchorId).toBe('anchor-1');
   });
 

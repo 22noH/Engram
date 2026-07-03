@@ -81,6 +81,7 @@ let channels = [];
 let current = null;                 // 선택된 channelId
 const msgsByCh = new Map();         // channelId -> ChatMessage[]
 const openThreads = new Set();      // 렌더 후에도 펼침 유지할 anchor id
+const drafts = new Map();           // anchorId -> 스레드 답장 초안(진행 보고 재렌더에도 유지)
 
 // ---- ws 연결(재연결 백오프 1s→5s→30s) ----
 const delays = [1000, 5000, 30000];
@@ -210,10 +211,13 @@ function renderMsgs() {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.placeholder = T.replyPh;
+      inp.value = drafts.get(m.id) || ''; // 진행 보고가 재렌더해도 입력 중이던 초안 유지
+      inp.oninput = () => drafts.set(m.id, inp.value);
       inp.onkeydown = (e) => {
         if (e.key === 'Enter' && inp.value.trim()) {
           ws.send(JSON.stringify({ t: 'send', channelId: current, threadId: m.id, text: inp.value }));
           inp.value = '';
+          drafts.delete(m.id);
         }
       };
       bar.appendChild(inp);

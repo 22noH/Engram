@@ -139,10 +139,12 @@ export class SelfMessenger implements MessengerPort {
     const name = this.opts.engramName ?? 'Engram';
     const isMention = ch.respondMode !== 'mention' || hasEngramMention(text, name);
     const anchor = msg.threadId ?? msg.id;
+    // threadId는 항상 미설정 — self의 스레드는 표시 개념일 뿐, 작업 키(threadKey)는 채널이다.
+    // Discord도 스레드=자체 channelId라 threadId를 안 채운다(동일 의미론). 이걸 anchor로 채우면
+    // 스레드 안 승인 답장이 pending(채널 키)을 못 찾고, 재개 예약이 anchor를 채널로 오인한다.
     const e: MentionEvent = {
       text: stripEngramMention(text, name),
       channelId,
-      threadId: msg.threadId, // 본류면 undefined → bridge threadKey=channelId(Discord 의미론)
       authorId: msg.authorId,
       target: { channelId, anchorId: anchor } satisfies SelfTarget as ReplyTarget,
     };
