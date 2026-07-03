@@ -22,7 +22,8 @@ const DEFAULTS: BrainProfile = {
   cli: 'claude',
   model: '',
   concurrency: 2,
-  timeoutMs: 120000,
+  // 웹검색·다단 분석은 2분을 넘긴다(전문가 협업이 120s에 잘려 전멸하던 실사용 발견). 5분으로 넉넉히.
+  timeoutMs: 300000,
   extraArgs: [], // 웹검색 기본허용은 ClaudeCliBrain이 --allowedTools 미지정 시 자동 주입(프로필 무관 단일화)
   env: {},
 };

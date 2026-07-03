@@ -38,7 +38,7 @@ describe('loadActiveBrain', () => {
       ENGRAM_BRAIN_TIMEOUT_MS: '-5',
     });
     expect(p.concurrency).toBe(2); // 기본값 유지(NaN 무력화 방어)
-    expect(p.timeoutMs).toBe(120000);
+    expect(p.timeoutMs).toBe(300000);
   });
 
   it('default가 가리키는 프로필이 없으면 throw', () => {
