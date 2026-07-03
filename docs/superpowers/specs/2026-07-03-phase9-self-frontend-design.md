@@ -82,7 +82,10 @@ Electron 창은 그 서버의 첫 번째 클라이언트일 뿐이다 — 나중
   `threadId` ?? 수신 메시지 자신의 id**(스레드 안 답장에 대한 답이 새 스레드를
   파지 않고 같은 스레드에 남음). `reply()`는 `threadId=anchorId`로
   저장+브로드캐스트. → Engram의 모든 답이 트리거 메시지 밑에 매달림(D3).
-  `MentionEvent.threadId`에도 anchor를 실어 bridge threadKey(작업추적)와 정합.
+  `MentionEvent.threadId`는 **수신 메시지의 threadId 그대로**(스레드 안일 때만
+  채움) — 채널 본류 멘션은 bridge threadKey=channelId가 되어 기존 Discord
+  의미론(`상태` 조회가 채널 단위 집계)과 정합. anchor는 표시용(답 매달기)일 뿐
+  작업추적 키가 아니다.
 - `postToChannel(channelId, text, threadId?)` — 예약 발사·브리핑용, threadId
   없으면 채널 본류.
 - Engram 발신 authorId는 `'engram'` 고정.
