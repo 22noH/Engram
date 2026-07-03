@@ -34,4 +34,16 @@ describe('loadChatConfig', () => {
     fs.writeFileSync(path.join(dir, 'chat.json'), '{broken');
     expect(loadChatConfig(dir, {}).enabled).toBe(true);
   });
+
+  it('유효하지만 객체가 아닌 JSON(null 등)도 기본값(크래시 없음)', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), 'null');
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 47800, bind: '127.0.0.1' });
+    fs.writeFileSync(path.join(dir, 'chat.json'), '123');
+    expect(loadChatConfig(dir, {}).port).toBe(47800);
+  });
+
+  it('소수 port는 무시하고 기본값', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 3000.5 }));
+    expect(loadChatConfig(dir, {}).port).toBe(47800);
+  });
 });
