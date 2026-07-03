@@ -72,6 +72,15 @@
   .chart .clbl { fill:var(--dim); font-size:11px; }
   .chart .cval { fill:var(--text); font-size:10.5px; }
   .chart .cgrid { stroke:var(--line); stroke-width:1; }
+  .chart .chole { fill:var(--pre-bg); }
+  .body ul.check { list-style:none; margin-left:4px; padding:0; }
+  .body ul.check li { display:flex; align-items:flex-start; gap:7px; }
+  .body ul.check input { margin-top:3px; accent-color:var(--accent); }
+  .up { color:#2ea043; font-weight:600; }
+  .down { color:#e5534b; font-weight:600; }
+  .body table.cmp { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
+  .body table.cmp th, .body table.cmp td { border:1px solid var(--line); padding:5px 9px; text-align:left; }
+  .body table.cmp th { background:var(--pre-bg); color:var(--dim); font-weight:600; }
   .msg.me { margin-left:auto; }
   .msg.me .body { background:var(--accent-soft); border-color:var(--accent-line); }
   .msg.reply { margin-left:18px; padding-left:12px; border-left:2px solid var(--accent-line); }
@@ -275,7 +284,8 @@ function mdLink(url, label) {
 }
 function mdInline(text) {
   const frag = document.createDocumentFragment();
-  const re = /(`[^`\n]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()"']+)/g;
+  // 마지막 두 그룹: 등락 화살표 칩(▲/△ 상승=초록, ▼/▽ 하락=빨강). 명시적 화살표만 색칠(오탐 방지).
+  const re = /(`[^`\n]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()"']+)|([▲△🔺]\s?[+\-]?[\d.,]+%?)|([▼▽🔻]\s?[+\-]?[\d.,]+%?)/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
@@ -284,6 +294,8 @@ function mdInline(text) {
     else if (m[3]) { const i = document.createElement('em'); i.appendChild(mdInline(m[3].slice(1, -1))); frag.appendChild(i); }
     else if (m[4]) { frag.appendChild(mdLink(m[5], m[4])); }
     else if (m[6]) { frag.appendChild(mdLink(m[6], m[6])); }
+    else if (m[7]) { const s = document.createElement('span'); s.className = 'up'; s.textContent = m[7]; frag.appendChild(s); }
+    else if (m[8]) { const s = document.createElement('span'); s.className = 'down'; s.textContent = m[8]; frag.appendChild(s); }
     last = re.lastIndex;
   }
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
@@ -303,8 +315,37 @@ function renderChart(jsonText) {
   const labels = Array.isArray(spec.labels) ? spec.labels.map(String) : [];
   const values = Array.isArray(spec.values) ? spec.values.map(Number) : [];
   if (!values.length || values.some((v) => !isFinite(v)) || labels.length !== values.length) return null;
-  const type = spec.type === 'line' ? 'line' : 'bar';
+  const type = spec.type === 'line' ? 'line' : spec.type === 'pie' ? 'pie' : 'bar';
   const unit = typeof spec.unit === 'string' ? spec.unit : '';
+  const titleEl = () => {
+    if (typeof spec.title === 'string' && spec.title) {
+      const t = document.createElement('div'); t.className = 'ctitle'; t.textContent = spec.title; return t;
+    }
+    return null;
+  };
+  const PAL = ['#3aa5de', '#7ec8e3', '#5fb0d0', '#a7d8ee', '#2e86c1', '#9bc9e0', '#4aa0cf', '#cbe7f5'];
+  if (type === 'pie') {
+    const wrap = document.createElement('div'); wrap.className = 'chart';
+    const t = titleEl(); if (t) wrap.appendChild(t);
+    const total = values.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+    const cx = 92, cy = 95, r = 74, ir = 42;
+    const svg = svgEl('svg', { viewBox: '0 0 400 200', preserveAspectRatio: 'xMidYMid meet' });
+    let ang = -Math.PI / 2;
+    values.forEach((v, i) => {
+      const frac = Math.max(0, v) / total, a2 = ang + frac * 2 * Math.PI;
+      const x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang);
+      const x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
+      const large = frac > 0.5 ? 1 : 0;
+      svg.appendChild(svgEl('path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`, fill: PAL[i % PAL.length] }));
+      ang = a2;
+      const ly = 34 + i * 21;
+      svg.appendChild(svgEl('rect', { x: 200, y: ly - 10, width: 12, height: 12, rx: 2, fill: PAL[i % PAL.length] }));
+      svg.appendChild(svgEl('text', { class: 'clbl', x: 219, y: ly }, `${labels[i]}  ${Math.round(frac * 100)}%`));
+    });
+    svg.appendChild(svgEl('circle', { class: 'chole', cx, cy, r: ir }));
+    wrap.appendChild(svg);
+    return wrap;
+  }
   const W = 640, H = 260, padL = 44, padR = 16, padT = 16, padB = 34;
   const iw = W - padL - padR, ih = H - padT - padB;
   const lo = Math.min(0, ...values), hi = Math.max(0, ...values);
@@ -361,10 +402,38 @@ function renderMarkdown(text) {
       if (chunk) { root.appendChild(mdInline(chunk.replace(/\n+$/, '\n').replace(/^\n+/, ''))); chunk = ''; }
     };
     const flushList = () => { list = null; };
-    for (const line of seg.split('\n')) {
+    const lines = seg.split('\n');
+    const isTableSep = (s) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s) && s.includes('-');
+    const cells = (row) => row.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      // 표: 헤더행(| 포함) + 다음 줄이 구분선이면 비교 테이블로. 셀의 +/▲=초록, -/▼=빨강.
+      if (line.includes('|') && li + 1 < lines.length && isTableSep(lines[li + 1])) {
+        flushChunk(); flushList();
+        const table = document.createElement('table'); table.className = 'cmp';
+        const thead = document.createElement('tr');
+        cells(line).forEach((c) => { const th = document.createElement('th'); th.appendChild(mdInline(c)); thead.appendChild(th); });
+        table.appendChild(thead);
+        li += 2; // 헤더+구분선 소비
+        for (; li < lines.length && lines[li].includes('|'); li++) {
+          const tr = document.createElement('tr');
+          cells(lines[li]).forEach((c) => {
+            const td = document.createElement('td');
+            if (/^(▲|△|🔺|\+\s?[\d.])/.test(c)) td.className = 'up';
+            else if (/^(▼|▽|🔻|-\s?[\d.])/.test(c)) td.className = 'down';
+            td.appendChild(mdInline(c));
+            tr.appendChild(td);
+          });
+          table.appendChild(tr);
+        }
+        li--; // for 증가분 보정
+        root.appendChild(table);
+        continue;
+      }
       const h = line.match(/^(#{1,3})\s+(.*)/);
       const ul = line.match(/^\s*[-*]\s+(.*)/);
       const ol = line.match(/^\s*\d+[.)]\s+(.*)/);
+      const cb = ul ? ul[1].match(/^\[([ xX])\]\s+(.*)/) : null; // 체크리스트 항목
       if (h) {
         flushChunk(); flushList();
         const d = document.createElement('div');
@@ -373,11 +442,22 @@ function renderMarkdown(text) {
         root.appendChild(d);
       } else if (ul || ol) {
         flushChunk();
-        const tag = ul ? 'ul' : 'ol';
-        if (!list || list.tagName.toLowerCase() !== tag) { list = document.createElement(tag); root.appendChild(list); }
-        const li = document.createElement('li');
-        li.appendChild(mdInline((ul || ol)[1]));
-        list.appendChild(li);
+        const kind = cb ? 'check' : (ul ? 'ul' : 'ol');
+        if (!list || list.dataset.kind !== kind) {
+          list = document.createElement(ol ? 'ol' : 'ul');
+          if (cb) list.className = 'check';
+          list.dataset.kind = kind;
+          root.appendChild(list);
+        }
+        const item = document.createElement('li');
+        if (cb) {
+          const box = document.createElement('input'); box.type = 'checkbox'; box.disabled = true; box.checked = /[xX]/.test(cb[1]);
+          const span = document.createElement('span'); span.appendChild(mdInline(cb[2]));
+          item.appendChild(box); item.appendChild(span);
+        } else {
+          item.appendChild(mdInline((ul || ol)[1]));
+        }
+        list.appendChild(item);
       } else {
         flushList();
         chunk += line + '\n';
