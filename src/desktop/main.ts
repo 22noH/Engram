@@ -1,5 +1,5 @@
 // Electron 껍데기(스펙 §3): 트레이 상주 + 설정창 + 자식(상주 main.js) 감독. 로직은 테스트된 모듈에 위임.
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, utilityProcess } from 'electron';
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -120,7 +120,21 @@ function openChat(): void {
   }
   const cfg = loadChatConfig(configDir, childEnv);
   const url = `http://127.0.0.1:${cfg.port}/`;
-  chatWin = new BrowserWindow({ width: 980, height: 720, title: 'Engram' });
+  // 커스텀 타이틀바: 페이지 상단 바(#titlebar)가 드래그 영역, 창 버튼은 OS 오버레이.
+  // 색은 시스템 라이트/다크를 따라감(페이지 팔레트와 동일 값).
+  const overlay = (): Electron.TitleBarOverlay =>
+    nativeTheme.shouldUseDarkColors
+      ? { color: '#12161d', symbolColor: '#e6edf3', height: 36 }
+      : { color: '#ffffff', symbolColor: '#1c2733', height: 36 };
+  chatWin = new BrowserWindow({
+    width: 980, height: 720, title: 'Engram',
+    titleBarStyle: 'hidden', titleBarOverlay: overlay(),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0e13' : '#f2f7fb',
+  });
+  const onTheme = (): void => {
+    try { chatWin?.setTitleBarOverlay(overlay()); } catch { /* 미지원 플랫폼 무시 */ }
+  };
+  nativeTheme.on('updated', onTheme);
   // 메시지 속 링크(target=_blank)는 새 Electron 창 대신 기본 브라우저로.
   chatWin.webContents.setWindowOpenHandler(({ url: ext }) => {
     void shell.openExternal(ext);
@@ -134,9 +148,10 @@ function openChat(): void {
     }
   });
   const waiting = 'data:text/html;charset=utf-8,' + encodeURIComponent(
-    '<body style="background:#0e1116;color:#8b95a3;font-family:system-ui;' +
-    'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
-    `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div></body>`,
+    '<style>body{background:#f2f7fb;color:#5c6b7a;font-family:system-ui;display:flex;' +
+    'align-items:center;justify-content:center;height:100vh;margin:0}' +
+    '@media(prefers-color-scheme:dark){body{background:#0b0e13;color:#8b95a3}}</style>' +
+    `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div>`,
   );
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
@@ -151,7 +166,10 @@ function openChat(): void {
     void chatWin.loadURL(waiting);
     setTimeout(probe, 2000);
   });
-  chatWin.on('closed', () => (chatWin = null));
+  chatWin.on('closed', () => {
+    nativeTheme.removeListener('updated', onTheme);
+    chatWin = null;
+  });
   void chatWin.loadURL(waiting);
   probe();
 }
