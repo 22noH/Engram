@@ -39,13 +39,18 @@ export class ClaudeCliBrain implements BrainProvider {
 
   private spawnOnce(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return new Promise<BrainResult>((resolve) => {
+      // 헤드리스 claude -p는 미지정 도구를 거부한다. 프로필/호출이 --allowedTools를 안 주면
+      // 웹검색·웹fetch(읽기전용, 안전)를 기본 허용 — 어떤 프로필(judge 등)이 빠뜨려도 막히지 않게.
+      // 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
+      const extra = [...this.profile.extraArgs, ...(opts?.extraArgs ?? [])];
+      const hasAllowed = extra.includes('--allowedTools');
       const args = [
         '-p', prompt,
         '--output-format', 'stream-json',
         '--verbose',
         ...(this.profile.model ? ['--model', this.profile.model] : []),
-        ...this.profile.extraArgs,
-        ...(opts?.extraArgs ?? []),
+        ...(hasAllowed ? [] : ['--allowedTools', 'WebSearch,WebFetch']),
+        ...extra,
       ];
       const child = spawn(this.profile.cli, args, {
         stdio: ['ignore', 'pipe', 'pipe'],

@@ -33,3 +33,24 @@ it('TurnBudget 소진 시 남은 페르소나는 스킵', async () => {
   expect(seen.length).toBe(1); // 1턴만
   expect(out).toBe(seen[0]);
 });
+
+it('onProgress로 팀구성·각 기여·종합 진행을 게시한다(실패는 무시)', async () => {
+  const ts = store();
+  const specialist = { contribute: async (p: string) => `${p} 기여` } as any;
+  const synth = { synthesize: async () => '종합' } as any;
+  const orc = new Orchestrator(null as any, null as any, logger, null as any, ts, specialist, synth, new Semaphore(2));
+  const posts: string[] = [];
+  await orc.collaborate('전략?', ['Brand', 'Trend'], 'default', { onProgress: async (t) => { posts.push(t); } });
+  expect(posts.some((p) => p.includes('팀 구성') && p.includes('Brand') && p.includes('Trend'))).toBe(true);
+  expect(posts.filter((p) => p.includes('의견 도착')).length).toBe(2);
+  expect(posts.some((p) => p.includes('종합 중'))).toBe(true);
+});
+
+it('onProgress가 던져도 협업은 정상 완료된다', async () => {
+  const ts = store();
+  const specialist = { contribute: async (p: string) => `${p}` } as any;
+  const synth = { synthesize: async () => 'OK' } as any;
+  const orc = new Orchestrator(null as any, null as any, logger, null as any, ts, specialist, synth, new Semaphore(2));
+  const out = await orc.collaborate('q', ['A'], 'default', { onProgress: async () => { throw new Error('post 실패'); } });
+  expect(out).toBe('OK');
+});

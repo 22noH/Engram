@@ -265,7 +265,7 @@ export class Orchestrator {
     const t = this.tracker.start(threadKey, { question, team });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
-        const result = await this.collaborate(question, team, userId);
+        const result = await this.collaborate(question, team, userId, { onProgress: post });
         // 채널 기억: 결과를 대화로그에 적재(후속 맥락·B수집 소스). 부수효과 실패는 무시.
         await this.conversations
           .append(userId, { ts: new Date().toISOString(), question, answer: result, sources: [] })
@@ -539,14 +539,17 @@ export class Orchestrator {
     question: string,
     personas: string[],
     userId: string = DEFAULT_USER,
-    opts: { turnBudget?: number } = {},
+    opts: { turnBudget?: number; onProgress?: (text: string) => Promise<void> } = {},
   ): Promise<string> {
     if (!this.tasks || !this.specialist || !this.synthesizer || !this.sem) {
       throw new Error('협업 협력자가 주입되지 않음(Orchestrator)');
     }
+    // 진행 중계(선택). 깜깜이 방지용 부수효과라 실패는 무시 — 본 작업 흐름과 무관.
+    const prog = async (text: string): Promise<void> => { try { await opts.onProgress?.(text); } catch { /* 무시 */ } };
     const budget = new TurnBudget(opts.turnBudget ?? personas.length + 1);
     const session = await this.tasks.create({ kind: 'collaboration', question, assignees: personas });
     await this.tasks.transition(session.id, 'RUNNING');
+    await prog(`🧑‍🤝‍🧑 팀 구성: ${personas.join(', ')} — 각자 조사 시작합니다`);
     await Promise.all(
       personas.map((p) =>
         this.sem!.run(async () => {
@@ -554,12 +557,15 @@ export class Orchestrator {
           try {
             const text = await this.specialist!.contribute(p, question, userId);
             await this.tasks!.contribute(session.id, p, text);
+            await prog(`✔ ${p} 의견 도착`);
           } catch (err) {
             this.logger.warn(`페르소나 기여 실패(스킵) ${p}: ${String(err)}`, 'Orchestrator');
+            await prog(`⚠ ${p} 스킵(오류)`);
           }
         }),
       ),
     );
+    await prog('📝 의견 종합 중…');
     const fresh = await this.tasks.get(session.id);
     const result = await this.synthesizer.synthesize(question, fresh?.blackboard ?? {});
     await this.tasks.setResult(session.id, result);

@@ -92,6 +92,32 @@ describe('ClaudeCliBrain', () => {
     expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Bash']));
   });
 
+  it('--allowedTools 미지정 프로필이면 WebSearch,WebFetch를 기본 주입한다', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE); // extraArgs: []
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    const i = args.indexOf('--allowedTools');
+    expect(i).toBeGreaterThan(-1);
+    expect(args[i + 1]).toBe('WebSearch,WebFetch');
+  });
+
+  it('프로필이 --allowedTools를 직접 주면 기본 주입을 안 한다(중복 방지)', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain({ ...PROFILE, extraArgs: ['--allowedTools', 'Bash'] });
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    expect(args.filter((a) => a === '--allowedTools')).toHaveLength(1);
+    expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Bash']));
+    expect(args).not.toContain('WebSearch,WebFetch');
+  });
+
   it('opts.timeoutMs가 profile.timeoutMs를 덮어쓴다', async () => {
     jest.useFakeTimers();
     const child = fakeChild();
