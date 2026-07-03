@@ -43,6 +43,8 @@
   .body pre code { background:none; border:0; padding:0; font-size:12.5px; }
   .body ul, .body ol { margin:4px 0 4px 20px; padding:0; white-space:normal; }
   .body li { margin:2px 0; }
+  .body ol li.pick { cursor:pointer; }
+  .body ol li.pick:hover { color:var(--amber); }
   .body a { color:var(--amber); }
   .body .mdh { font-weight:700; margin:8px 0 4px; }
   .msg.me { margin-left:auto; }
@@ -293,6 +295,20 @@ function makeMsgEl(m) {
   const body = document.createElement('div');
   body.className = 'body';
   body.appendChild(renderMarkdown(m.text));
+  // Engram의 번호 목록(후보 선택 등)은 클릭하면 그 번호가 입력창에 채워짐 — 전송은 Enter로 확정(오클릭 방지).
+  if (m.authorId === 'engram') {
+    body.querySelectorAll('ol').forEach((ol) => {
+      ol.querySelectorAll(':scope > li').forEach((li, i) => {
+        li.classList.add('pick');
+        li.title = ko ? '클릭하면 번호가 입력됩니다' : 'Click to fill this number';
+        li.onclick = () => {
+          const inp = document.getElementById('input');
+          inp.value = String(i + 1);
+          inp.focus();
+        };
+      });
+    });
+  }
   div.appendChild(who);
   div.appendChild(body);
   return div;
