@@ -90,12 +90,17 @@ function connect() {
   ws.onopen = () => {
     attempt = 0;
     document.getElementById('dot').classList.add('on');
+    msgsByCh.clear(); // 재연결 시 파일 진실원과 재동기화(끊긴 동안의 메시지 놓침 방지)
     ws.send(JSON.stringify({ t: 'channels' }));
+    if (current) ws.send(JSON.stringify({ t: 'history', channelId: current }));
   };
   ws.onclose = () => {
     document.getElementById('dot').classList.remove('on');
     const d = delays[Math.min(attempt++, delays.length - 1)];
     setTimeout(connect, d);
+  };
+  ws.onerror = () => {
+    console.warn('WebSocket error');
   };
   ws.onmessage = (ev) => {
     let f; try { f = JSON.parse(ev.data); } catch { return; }
@@ -111,6 +116,9 @@ function connect() {
       arr.push(f.message);
       msgsByCh.set(f.channelId, arr);
       if (f.channelId === current) renderMsgs();
+    } else if (f.t === 'error') {
+      console.warn('server error:', f.text);
+      document.getElementById('dot').title = f.text;
     }
   };
 }
