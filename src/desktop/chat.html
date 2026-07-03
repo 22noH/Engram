@@ -63,6 +63,15 @@
   .body ol li.pick:hover { color:var(--accent); }
   .body a { color:var(--accent); }
   .body .mdh { font-weight:700; margin:8px 0 4px; }
+  .chart { margin:8px 0; background:var(--pre-bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .chart .ctitle { font-size:12.5px; font-weight:600; color:var(--text); margin-bottom:4px; }
+  .chart svg { width:100%; height:auto; display:block; }
+  .chart .cbar { fill:var(--accent); }
+  .chart .cline { fill:none; stroke:var(--accent); stroke-width:2; }
+  .chart .cdot { fill:var(--accent); }
+  .chart .clbl { fill:var(--dim); font-size:11px; }
+  .chart .cval { fill:var(--text); font-size:10.5px; }
+  .chart .cgrid { stroke:var(--line); stroke-width:1; }
   .msg.me { margin-left:auto; }
   .msg.me .body { background:var(--accent-soft); border-color:var(--accent-line); }
   .msg.reply { margin-left:18px; padding-left:12px; border-left:2px solid var(--accent-line); }
@@ -129,7 +138,7 @@ let ws = null;
 let channels = [];
 let current = null;                 // 선택된 channelId
 const msgsByCh = new Map();         // channelId -> ChatMessage[]
-const openThreads = new Set();      // 렌더 후에도 펼침 유지할 anchor id
+const collapsedThreads = new Set(); // 사용자가 직접 접은 스레드만 기억(기본은 펼침 — 답이 내 글 밑에 바로 보이게)
 const drafts = new Map();           // anchorId -> 스레드 답장 초안(진행 보고 재렌더에도 유지)
 const awaiting = new Map();         // channelId -> 타임아웃 id — 답 기다리는 중("생각 중" 표시)
 
@@ -280,14 +289,68 @@ function mdInline(text) {
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
   return frag;
 }
+// ---- 인라인 SVG 차트(외부 라이브러리 0). ```chart JSON 블록을 막대/선 그래프로. ----
+// spec: {"type":"bar"|"line","title":"...","labels":[...],"values":[num,...],"unit":"%"}
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(name, attrs, text) {
+  const e = document.createElementNS(SVG_NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text; // 외부 문자열은 textContent로만
+  return e;
+}
+function renderChart(jsonText) {
+  let spec; try { spec = JSON.parse(jsonText); } catch { return null; }
+  const labels = Array.isArray(spec.labels) ? spec.labels.map(String) : [];
+  const values = Array.isArray(spec.values) ? spec.values.map(Number) : [];
+  if (!values.length || values.some((v) => !isFinite(v)) || labels.length !== values.length) return null;
+  const type = spec.type === 'line' ? 'line' : 'bar';
+  const unit = typeof spec.unit === 'string' ? spec.unit : '';
+  const W = 640, H = 260, padL = 44, padR = 16, padT = 16, padB = 34;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const lo = Math.min(0, ...values), hi = Math.max(0, ...values);
+  const span = hi - lo || 1;
+  const y = (v) => padT + ih - ((v - lo) / span) * ih;
+  const wrap = document.createElement('div');
+  wrap.className = 'chart';
+  if (typeof spec.title === 'string' && spec.title) {
+    const t = document.createElement('div'); t.className = 'ctitle'; t.textContent = spec.title; wrap.appendChild(t);
+  }
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'xMidYMid meet' });
+  // 0선/바닥 눈금
+  svg.appendChild(svgEl('line', { class: 'cgrid', x1: padL, y1: y(0), x2: W - padR, y2: y(0) }));
+  const n = values.length, slot = iw / n;
+  values.forEach((v, i) => {
+    const cx = padL + slot * (i + 0.5);
+    if (type === 'bar') {
+      const bw = Math.min(slot * 0.6, 48);
+      const top = Math.min(y(v), y(0)), h = Math.abs(y(v) - y(0));
+      svg.appendChild(svgEl('rect', { class: 'cbar', x: cx - bw / 2, y: top, width: bw, height: Math.max(1, h), rx: 3 }));
+    }
+    svg.appendChild(svgEl('text', { class: 'cval', x: cx, y: y(v) - 5, 'text-anchor': 'middle' }, String(v) + unit));
+    svg.appendChild(svgEl('text', { class: 'clbl', x: cx, y: H - 12, 'text-anchor': 'middle' }, labels[i]));
+  });
+  if (type === 'line') {
+    const pts = values.map((v, i) => `${padL + slot * (i + 0.5)},${y(v)}`).join(' ');
+    svg.appendChild(svgEl('polyline', { class: 'cline', points: pts }));
+    values.forEach((v, i) => svg.appendChild(svgEl('circle', { class: 'cdot', cx: padL + slot * (i + 0.5), cy: y(v), r: 3 })));
+  }
+  wrap.appendChild(svg);
+  return wrap;
+}
 function renderMarkdown(text) {
   const root = document.createDocumentFragment();
   const segs = String(text).split('```'); // 짝수=본문, 홀수=코드블록
   segs.forEach((seg, idx) => {
     if (idx % 2 === 1) {
+      const lang = (seg.match(/^([\w-]*)\n/) || [, ''])[1];
+      const bodyText = seg.replace(/^[\w-]*\n/, '').replace(/\n$/, '');
+      if (lang === 'chart') {
+        const el = renderChart(bodyText);
+        if (el) { root.appendChild(el); return; } // 파싱 실패면 아래 코드블록으로 폴백
+      }
       const pre = document.createElement('pre');
       const code = document.createElement('code');
-      code.textContent = seg.replace(/^[\w-]*\n/, '').replace(/\n$/, '');
+      code.textContent = bodyText;
       pre.appendChild(code);
       root.appendChild(pre);
       return;
@@ -375,8 +438,8 @@ function renderMsgs() {
     } else if (rs.length >= 2) {
       const det = document.createElement('details');
       det.className = 'thread';
-      if (openThreads.has(m.id)) det.open = true;
-      det.ontoggle = () => { det.open ? openThreads.add(m.id) : openThreads.delete(m.id); };
+      det.open = !collapsedThreads.has(m.id); // 기본 펼침, 사용자가 접은 것만 접힌 채 유지
+      det.ontoggle = () => { det.open ? collapsedThreads.delete(m.id) : collapsedThreads.add(m.id); };
       const sum = document.createElement('summary');
       sum.textContent = '🧵 ' + T.replies(rs.length);
       det.appendChild(sum);
