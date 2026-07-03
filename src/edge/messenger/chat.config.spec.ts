@@ -46,4 +46,9 @@ describe('loadChatConfig', () => {
     fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 3000.5 }));
     expect(loadChatConfig(dir, {}).port).toBe(47800);
   });
+
+  it('65535 초과 port는 무시하고 기본값', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 99999 }));
+    expect(loadChatConfig(dir, {}).port).toBe(47800);
+  });
 });

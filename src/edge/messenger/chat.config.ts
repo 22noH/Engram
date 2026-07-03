@@ -12,7 +12,7 @@ export interface ChatConfig {
 
 function validPort(v: unknown): number | null {
   const n = Number(v);
-  return Number.isInteger(n) && n > 0 ? n : null; // NaN·0·음수·소수 → 무시(기존 env 가드 관례)
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : null; // NaN·0·음수·소수·65535 초과 → 무시(기존 env 가드 관례)
 }
 
 export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = process.env): ChatConfig {

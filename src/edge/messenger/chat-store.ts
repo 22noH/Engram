@@ -46,7 +46,10 @@ export class ChatStore {
     try {
       const raw = JSON.parse(fs.readFileSync(this.channelsPath(), 'utf8')) as ChatChannel[];
       if (Array.isArray(raw)) {
-        list = raw.filter((c) => c && safeId(c.id) && typeof c.name === 'string');
+        // respondMode는 손수정 channels.json 등으로 오염될 수 있어 값을 정규화(드롭 대신 안전값으로 교정).
+        list = raw
+          .filter((c) => c && safeId(c.id) && typeof c.name === 'string')
+          .map((c) => ({ ...c, respondMode: c.respondMode === 'mention' ? 'mention' : 'all' }));
       }
     } catch { /* 파일없음/손상 시 기본 생성 */ }
     if (list.length === 0) {

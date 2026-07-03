@@ -74,4 +74,15 @@ describe('ChatStore', () => {
     expect(store.history('general', { limit: 2 }).map((m) => m.text)).toEqual(['m3', 'm4']);
     expect(store.history('general', { limit: 2, before: ids[3] }).map((m) => m.text)).toEqual(['m1', 'm2']);
   });
+
+  it('손수정된 channels.json의 유효하지않은 respondMode는 all로 정규화된다', () => {
+    fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([{ id: 'x', name: 'x', respondMode: 'xyz' }]));
+    const chs = store.listChannels();
+    expect(chs).toEqual([{ id: 'x', name: 'x', respondMode: 'all' }]);
+  });
+
+  it('유효하지 않은 respondMode로 setRespondMode 호출 시 false', () => {
+    store.listChannels(); // general 생성
+    expect(store.setRespondMode('general', 'weird' as any)).toBe(false);
+  });
 });

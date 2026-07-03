@@ -90,6 +90,7 @@ function connect() {
   ws.onopen = () => {
     attempt = 0;
     document.getElementById('dot').classList.add('on');
+    document.getElementById('dot').title = ''; // 재연결 성공 시 이전 에러 툴팁 제거
     msgsByCh.clear(); // 재연결 시 파일 진실원과 재동기화(끊긴 동안의 메시지 놓침 방지)
     ws.send(JSON.stringify({ t: 'channels' }));
     if (current) ws.send(JSON.stringify({ t: 'history', channelId: current }));

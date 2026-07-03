@@ -121,7 +121,11 @@ function openChat(): void {
     void chatWin?.loadURL(`http://127.0.0.1:${cfg.port}/`);
   };
   // 자식이 아직 리슨 전이면 로드 실패 → 2초 후 재시도(자식 감독 백오프와 별개, 창 닫히면 중단).
-  chatWin.webContents.on('did-fail-load', () => {
+  // 자식 기동 대기용 재시도는 첫 로드 성공까지만 — 성공 후에는 서브리소스(이미지 등) 실패로 전체 리로드하지 않음.
+  let loaded = false;
+  chatWin.webContents.on('did-finish-load', () => { loaded = true; });
+  chatWin.webContents.on('did-fail-load', (_e, _code, _desc, _url, isMainFrame) => {
+    if (!isMainFrame || loaded) return; // 서브리소스 실패/이미 성공한 창은 리로드 금지
     setTimeout(() => { if (chatWin) load(); }, 2000);
   });
   chatWin.on('closed', () => (chatWin = null));
