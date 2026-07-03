@@ -4,17 +4,33 @@
   <meta charset="utf-8" />
   <title>Engram</title>
   <style>
+    /* 라이트=화이트+하늘색, 다크=블랙+하늘색 — 채팅 창과 동일 팔레트(시스템 설정 자동 추종) */
     :root {
-      --bg: #0e1116;
-      --panel: #151b23;
-      --panel-2: #1a222c;
-      --line: #232c38;
-      --text: #e8ecf2;
-      --muted: #8b95a3;
-      --amber: #f0a63c;        /* memory afterglow — the single accent */
+      --bg: #f2f7fb;
+      --panel: #ffffff;
+      --panel-2: #eaf1f8;
+      --line: #dce6f0;
+      --text: #1c2733;
+      --muted: #5c6b7a;
+      --accent: #3aa5de;       /* the single accent — sky */
+      --accent-text: #ffffff;
+      --log-bg: #eef5fa;
       --alive: #56d364;
       --dead: #f26d6d;
       --radius: 12px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0e13;
+        --panel: #12161d;
+        --panel-2: #1a222c;
+        --line: #222a35;
+        --text: #e6edf3;
+        --muted: #8b95a3;
+        --accent: #7ec8e3;
+        --accent-text: #0e1116;
+        --log-bg: #0a0d11;
+      }
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
@@ -80,9 +96,9 @@
       background: var(--panel-2); color: var(--text);
       transition: border-color 0.15s, background 0.15s;
     }
-    button:hover { border-color: var(--amber); }
-    button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
-    button.primary { background: var(--amber); border-color: var(--amber); color: #14100a; font-weight: 600; }
+    button:hover { border-color: var(--accent); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
     button.primary:hover { filter: brightness(1.08); }
 
     input, select {
@@ -91,7 +107,7 @@
       border: 1px solid var(--line); border-radius: 8px;
       padding: 7px 10px;
     }
-    input:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+    input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     input#token { width: 340px; font-family: "Cascadia Mono", Consolas, monospace; }
 
     .ok { color: var(--alive); }
@@ -104,9 +120,9 @@
 
     details { margin-top: 12px; }
     details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; user-select: none; }
-    details summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     pre {
-      background: #0a0d11; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--log-bg); border: 1px solid var(--line); border-radius: 8px;
       padding: 10px 12px; margin: 8px 0 0;
       max-height: 180px; overflow: auto;
       font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.5;
