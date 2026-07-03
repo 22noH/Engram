@@ -104,6 +104,7 @@ function openSettings(): void {
     width: 760,
     height: 680,
     title: 'Engram 설정',
+    icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
   void settingsWin.loadFile(path.join(app.getAppPath(), 'src', 'desktop', 'settings.html'));
@@ -128,6 +129,7 @@ function openChat(): void {
       : { color: '#ffffff', symbolColor: '#1c2733', height: 36 };
   chatWin = new BrowserWindow({
     width: 980, height: 720, title: 'Engram',
+    icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0e13' : '#f2f7fb',
   });
