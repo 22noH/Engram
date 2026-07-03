@@ -9,6 +9,7 @@ import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveDiscordToken } from './messenger-writer';
+import { loadChatConfig } from '../edge/messenger/chat.config';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
 const configDir = path.join(dataDir, 'config');
@@ -20,6 +21,7 @@ const childEnv = {
 
 let tray: Tray | null = null;
 let settingsWin: BrowserWindow | null = null;
+let chatWin: BrowserWindow | null = null;
 let child: UtilityProcess | null = null;
 let quitting = false;
 let childStartedAt = 0;
@@ -28,6 +30,7 @@ const backoff = new Backoff();
 // UI 언어: 영어 기본, 시스템 로케일이 한국어면 한국어(렌더러는 navigator.language로 동일 판정).
 const ko = (): boolean => app.getLocale().toLowerCase().startsWith('ko');
 const T = {
+  openChat: () => (ko() ? '채팅 열기' : 'Open Chat'),
   openSettings: () => (ko() ? '설정 열기' : 'Open Settings'),
   restart: () => (ko() ? '재시작' : 'Restart'),
   quit: () => (ko() ? '종료' : 'Quit'),
@@ -79,13 +82,14 @@ function createTray(): void {
   tray = new Tray(trayIcon());
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      { label: T.openChat(), click: () => openChat() },
       { label: T.openSettings(), click: () => openSettings() },
       { label: T.restart(), click: () => restartChild() },
       { type: 'separator' },
       { label: T.quit(), click: () => app.quit() },
     ]),
   );
-  tray.on('double-click', () => openSettings());
+  tray.on('double-click', () => openChat());
   updateTray();
 }
 
@@ -103,6 +107,25 @@ function openSettings(): void {
   });
   void settingsWin.loadFile(path.join(app.getAppPath(), 'src', 'desktop', 'settings.html'));
   settingsWin.on('closed', () => (settingsWin = null));
+}
+
+// ---- 채팅 창(Phase 9): 자식(상주)이 서빙하는 페이지를 그대로 로드 — 폰 브라우저와 단일 코드 경로 ----
+function openChat(): void {
+  if (chatWin) {
+    chatWin.focus();
+    return;
+  }
+  const cfg = loadChatConfig(configDir, childEnv);
+  chatWin = new BrowserWindow({ width: 980, height: 720, title: 'Engram' });
+  const load = (): void => {
+    void chatWin?.loadURL(`http://127.0.0.1:${cfg.port}/`);
+  };
+  // 자식이 아직 리슨 전이면 로드 실패 → 2초 후 재시도(자식 감독 백오프와 별개, 창 닫히면 중단).
+  chatWin.webContents.on('did-fail-load', () => {
+    setTimeout(() => { if (chatWin) load(); }, 2000);
+  });
+  chatWin.on('closed', () => (chatWin = null));
+  load();
 }
 
 // ---- IPC (로직은 테스트된 모듈 위임) ----
