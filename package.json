@@ -34,6 +34,7 @@
       "personas/**",
       "src/desktop/assets/**",
       "src/desktop/settings.html",
+      "src/desktop/chat.html",
       "!node_modules/@huggingface/transformers/.cache/**"
     ],
     "win": {

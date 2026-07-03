@@ -1,0 +1,237 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engram</title>
+<style>
+  /* 팔레트: settings.html의 :root 변수를 그대로 복사해 동일 계열 유지 */
+  :root { --bg:#0e1116; --panel:#151b23; --line:#232c38; --text:#e8ecf2; --dim:#8b95a3; --amber:#f0a63c; }
+  * { box-sizing: border-box; margin: 0; }
+  body { display:flex; height:100vh; background:var(--bg); color:var(--text);
+         font-family:system-ui,-apple-system,'Segoe UI',sans-serif; font-size:14px; }
+  #side { width:220px; background:var(--panel); border-right:1px solid var(--line);
+          display:flex; flex-direction:column; }
+  #side h1 { font-size:14px; padding:14px 16px; color:var(--amber); display:flex; align-items:center; gap:8px; }
+  #dot { width:8px; height:8px; border-radius:50%; background:#f26d6d; }
+  #dot.on { background:#56d364; }
+  #channels { flex:1; overflow-y:auto; }
+  .ch { padding:8px 16px; cursor:pointer; color:var(--dim); display:flex; justify-content:space-between; }
+  .ch:hover { background:rgba(255,255,255,.04); }
+  .ch.sel { color:var(--text); background:rgba(240,166,60,.12); border-right:2px solid var(--amber); }
+  .ch .menu { visibility:hidden; }
+  .ch:hover .menu { visibility:visible; }
+  #newch { padding:10px 16px; color:var(--dim); cursor:pointer; border-top:1px solid var(--line); }
+  #main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #msgs { flex:1; overflow-y:auto; padding:16px; }
+  .msg { margin-bottom:10px; max-width:80%; }
+  .msg .who { font-size:11px; color:var(--dim); margin-bottom:2px; }
+  .msg .body { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+               padding:8px 12px; white-space:pre-wrap; word-break:break-word; }
+  .msg.me { margin-left:auto; }
+  .msg.me .body { background:rgba(240,166,60,.14); border-color:rgba(240,166,60,.3); }
+  details.thread { margin:-4px 0 10px 16px; }
+  details.thread summary { color:var(--amber); font-size:12px; cursor:pointer; }
+  details.thread .msg { max-width:100%; }
+  .treply { display:flex; gap:6px; margin-top:6px; }
+  #inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px;
+                     padding:10px 12px; color:var(--text); outline:none; }
+  input[type=text]:focus { border-color:var(--amber); }
+  button { background:var(--amber); border:0; border-radius:8px; padding:0 16px; cursor:pointer;
+           color:#14151c; font-weight:600; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1><span id="dot"></span>Engram</h1>
+  <div id="channels"></div>
+  <div id="newch"></div>
+</div>
+<div id="main">
+  <div id="msgs"></div>
+  <div id="inputbar">
+    <input id="input" type="text">
+    <button id="send"></button>
+  </div>
+</div>
+<script>
+'use strict';
+// ---- i18n (영어 기본, ko 로케일 한국어 — 설정창 관례) ----
+const ko = navigator.language.toLowerCase().startsWith('ko');
+const T = {
+  placeholder: ko ? '메시지 입력…' : 'Message…',
+  send: ko ? '보내기' : 'Send',
+  newChannel: ko ? '+ 새 채널' : '+ New channel',
+  newChannelPrompt: ko ? '채널 이름:' : 'Channel name:',
+  replies: (n) => (ko ? `답글 ${n}개` : `${n} replies`),
+  replyPh: ko ? '스레드에 답장…' : 'Reply in thread…',
+  delConfirm: (name) => (ko ? `'${name}' 채널을 삭제할까요? (기록 파일은 남습니다)` : `Delete channel '${name}'? (history file is kept)`),
+  modeAll: ko ? '모든 메시지에 반응' : 'Respond to all',
+  modeMention: ko ? '@Engram 멘션에만 반응' : 'Respond to @Engram only',
+  engram: 'Engram', me: ko ? '나' : 'me',
+};
+document.getElementById('input').placeholder = T.placeholder;
+document.getElementById('send').textContent = T.send;
+document.getElementById('newch').textContent = T.newChannel;
+
+// ---- 상태 ----
+let ws = null;
+let channels = [];
+let current = null;                 // 선택된 channelId
+const msgsByCh = new Map();         // channelId -> ChatMessage[]
+const openThreads = new Set();      // 렌더 후에도 펼침 유지할 anchor id
+
+// ---- ws 연결(재연결 백오프 1s→5s→30s) ----
+const delays = [1000, 5000, 30000];
+let attempt = 0;
+function connect() {
+  ws = new WebSocket(`ws://${location.host}`);
+  ws.onopen = () => {
+    attempt = 0;
+    document.getElementById('dot').classList.add('on');
+    ws.send(JSON.stringify({ t: 'channels' }));
+  };
+  ws.onclose = () => {
+    document.getElementById('dot').classList.remove('on');
+    const d = delays[Math.min(attempt++, delays.length - 1)];
+    setTimeout(connect, d);
+  };
+  ws.onmessage = (ev) => {
+    let f; try { f = JSON.parse(ev.data); } catch { return; }
+    if (f.t === 'channels') {
+      channels = f.list;
+      if (!current || !channels.some((c) => c.id === current)) selectChannel(channels[0] && channels[0].id);
+      renderChannels();
+    } else if (f.t === 'history') {
+      msgsByCh.set(f.channelId, f.messages);
+      if (f.channelId === current) renderMsgs();
+    } else if (f.t === 'msg') {
+      const arr = msgsByCh.get(f.channelId) || [];
+      arr.push(f.message);
+      msgsByCh.set(f.channelId, arr);
+      if (f.channelId === current) renderMsgs();
+    }
+  };
+}
+
+function selectChannel(id) {
+  if (!id) return;
+  current = id;
+  if (!msgsByCh.has(id) && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ t: 'history', channelId: id }));
+  }
+  renderChannels();
+  renderMsgs();
+}
+
+// ---- 렌더(외부 문자열은 전부 textContent) ----
+function renderChannels() {
+  const box = document.getElementById('channels');
+  box.replaceChildren();
+  for (const c of channels) {
+    const div = document.createElement('div');
+    div.className = 'ch' + (c.id === current ? ' sel' : '');
+    const name = document.createElement('span');
+    name.textContent = '# ' + c.name;
+    div.appendChild(name);
+    const menu = document.createElement('span');
+    menu.className = 'menu';
+    menu.textContent = '⋯';
+    menu.onclick = (e) => { e.stopPropagation(); channelMenu(c); };
+    div.appendChild(menu);
+    div.onclick = () => selectChannel(c.id);
+    box.appendChild(div);
+  }
+}
+
+function channelMenu(c) {
+  const toggle = c.respondMode === 'all' ? 'mention' : 'all';
+  const label = toggle === 'all' ? T.modeAll : T.modeMention;
+  // 미니멀 메뉴: confirm 2단(모드 토글 → 삭제). ponytail: 커스텀 팝오버는 필요해지면.
+  if (window.confirm(label + ' — OK?')) {
+    ws.send(JSON.stringify({ t: 'setRespondMode', id: c.id, mode: toggle }));
+  } else if (window.confirm(T.delConfirm(c.name))) {
+    ws.send(JSON.stringify({ t: 'deleteChannel', id: c.id }));
+  }
+}
+
+function makeMsgEl(m) {
+  const div = document.createElement('div');
+  div.className = 'msg' + (m.authorId !== 'engram' ? ' me' : '');
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = (m.authorId === 'engram' ? T.engram : T.me) + ' · ' + new Date(m.ts).toLocaleTimeString();
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.textContent = m.text;
+  div.appendChild(who);
+  div.appendChild(body);
+  return div;
+}
+
+function renderMsgs() {
+  const box = document.getElementById('msgs');
+  box.replaceChildren();
+  const msgs = msgsByCh.get(current) || [];
+  const replies = new Map(); // anchorId -> msgs
+  for (const m of msgs) {
+    if (m.threadId) {
+      if (!replies.has(m.threadId)) replies.set(m.threadId, []);
+      replies.get(m.threadId).push(m);
+    }
+  }
+  for (const m of msgs) {
+    if (m.threadId) continue; // 본류만 직접 렌더
+    box.appendChild(makeMsgEl(m));
+    const rs = replies.get(m.id) || [];
+    if (rs.length === 1) {
+      box.appendChild(makeMsgEl(rs[0])); // 답 1개 = 인라인(일반 채팅처럼)
+    } else if (rs.length >= 2) {
+      const det = document.createElement('details');
+      det.className = 'thread';
+      if (openThreads.has(m.id)) det.open = true;
+      det.ontoggle = () => { det.open ? openThreads.add(m.id) : openThreads.delete(m.id); };
+      const sum = document.createElement('summary');
+      sum.textContent = '🧵 ' + T.replies(rs.length);
+      det.appendChild(sum);
+      for (const r of rs) det.appendChild(makeMsgEl(r));
+      const bar = document.createElement('div');
+      bar.className = 'treply';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = T.replyPh;
+      inp.onkeydown = (e) => {
+        if (e.key === 'Enter' && inp.value.trim()) {
+          ws.send(JSON.stringify({ t: 'send', channelId: current, threadId: m.id, text: inp.value }));
+          inp.value = '';
+        }
+      };
+      bar.appendChild(inp);
+      det.appendChild(bar);
+      box.appendChild(det);
+    }
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---- 입력 ----
+function sendMain() {
+  const inp = document.getElementById('input');
+  if (!inp.value.trim() || !current || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ t: 'send', channelId: current, text: inp.value }));
+  inp.value = '';
+}
+document.getElementById('send').onclick = sendMain;
+document.getElementById('input').onkeydown = (e) => { if (e.key === 'Enter') sendMain(); };
+document.getElementById('newch').onclick = () => {
+  const name = window.prompt(T.newChannelPrompt);
+  if (name && name.trim() && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ t: 'createChannel', name }));
+  }
+};
+
+connect();
+</script>
+</body>
+</html>
