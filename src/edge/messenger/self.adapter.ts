@@ -92,7 +92,30 @@ export class SelfMessenger implements MessengerPort {
     try {
       switch (f?.t) {
         case 'send': return await this.onSend(ws, f);
-        default: return; // 미지 타입 무시(스펙 §6) — 나머지 프레임은 T4
+        case 'history': {
+          const channelId = typeof f.channelId === 'string' ? f.channelId : '';
+          const before = typeof f.before === 'string' ? f.before : undefined;
+          this.sendTo(ws, { t: 'history', channelId, messages: this.store.history(channelId, { before }) });
+          return;
+        }
+        case 'channels':
+          this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
+          return;
+        case 'createChannel':
+          if (typeof f.name === 'string') this.store.createChannel(f.name);
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        case 'deleteChannel':
+          if (typeof f.id === 'string') this.store.deleteChannel(f.id);
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        case 'setRespondMode':
+          if (typeof f.id === 'string' && (f.mode === 'all' || f.mode === 'mention')) {
+            this.store.setRespondMode(f.id, f.mode);
+          }
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        default: return; // 미지 타입 무시(스펙 §6)
       }
     } catch (err) {
       this.opts.logger.warn(`프레임 처리 실패: ${String(err)}`, 'SelfChat');
