@@ -36,6 +36,18 @@ describe('ConversationStore', () => {
     expect(await store.readCursor('default')).toBe('2026-06-26T05:00:00.000Z');
   });
 
+  it('recent는 어제+오늘에서 마지막 n건만 시간순으로 준다', async () => {
+    const now = new Date();
+    const yest = new Date(now.getTime() - 86400000);
+    await store.append('ch', { ts: yest.toISOString(), question: 'q-어제', answer: 'a' });
+    for (let i = 0; i < 3; i++) {
+      await store.append('ch', { ts: new Date(now.getTime() - (3 - i) * 1000).toISOString(), question: `q${i}`, answer: 'a' });
+    }
+    expect((await store.recent('ch', 3)).map((r) => r.question)).toEqual(['q0', 'q1', 'q2']);
+    expect((await store.recent('ch', 10)).map((r) => r.question)).toEqual(['q-어제', 'q0', 'q1', 'q2']);
+    expect(await store.recent('없는채널', 5)).toEqual([]);
+  });
+
   it('손상된 줄을 건너뛰고 나머지는 읽는다', async () => {
     // 정상 레코드 1개 append → 날짜 .jsonl 파일·디렉토리 생성됨
     await store.append('default', { ts: '2026-06-26T01:00:00.000Z', question: 'q1', answer: 'a1' });

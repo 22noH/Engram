@@ -42,6 +42,18 @@ export class ConversationStore {
     return out.sort((a, b) => a.ts.localeCompare(b.ts));
   }
 
+  // 최근 대화 n건 — 단기 연속성 주입용(ReaderAgent). 오늘+어제 파일만 읽어 전체 스캔 회피.
+  // ponytail: 이틀 창이면 "방금 한 말" 연속성엔 충분. 더 긴 기억은 위키(다이제스트)가 담당.
+  async recent(userId: string = DEFAULT_USER, n = 6): Promise<ConversationRecord[]> {
+    const day = (d: Date): string => d.toISOString().slice(0, 10);
+    const now = new Date();
+    const recs = [
+      ...(await this.readDay(userId, day(new Date(now.getTime() - 86400000)))),
+      ...(await this.readDay(userId, day(now))),
+    ];
+    return recs.slice(-n);
+  }
+
   // 특정 날짜(YYYY-MM-DD) 한 파일만 읽는다(인사이트 일일 집계용 — 전체 스캔 회피).
   async readDay(userId: string = DEFAULT_USER, day: string): Promise<ConversationRecord[]> {
     const file = path.join(this.convDir(userId), `${day}.jsonl`);

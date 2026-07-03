@@ -101,3 +101,46 @@ describe('ReaderAgent 인사이트 주입', () => {
     expect(prompt).not.toContain('참고용 사용자 맥락');
   });
 });
+
+describe('ReaderAgent 직전 대화 주입(연속성)', () => {
+  const logger2 = new PinoLogger(new PathResolver(require('os').tmpdir()));
+
+  it('ConversationStore 주입 시 직전 대화 섹션이 프롬프트에 들어간다', async () => {
+    let prompt = '';
+    const convs = {
+      recent: async () => [
+        { ts: '2026-07-03T11:00:00Z', question: '코스피 요약해줘', answer: '웹 검색 권한이 없어 실시간 시세를 못 가져옵니다. 허용할까요?' },
+      ],
+    } as any;
+    const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, logger2, undefined, convs);
+    await reader.handle({ text: '1 웹검색허용', userId: 'ch-1' });
+    expect(prompt).toContain('# 직전 대화');
+    expect(prompt).toContain('코스피 요약해줘');
+    expect(prompt).toContain('허용할까요?');
+  });
+
+  it('ConversationStore 없으면 직전 대화 섹션이 없다(기존 동작 유지)', async () => {
+    let prompt = '';
+    const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, logger2);
+    await reader.handle({ text: 'q', userId: 'default' });
+    expect(prompt).not.toContain('# 직전 대화');
+  });
+
+  it('recent()가 던져도 답변은 진행된다(연속성만 포기)', async () => {
+    const convs = { recent: async () => { throw new Error('boom'); } } as any;
+    const reader = new ReaderAgent(ragWith([]), brainEcho() as any, logger2, undefined, convs);
+    const out = await reader.handle({ text: 'q', userId: 'default' });
+    expect(out).not.toContain('답변 생성 실패');
+  });
+
+  it('긴 답변은 잘라서 주입한다(400자 클립)', async () => {
+    let prompt = '';
+    const convs = {
+      recent: async () => [{ ts: '2026-07-03T11:00:00Z', question: 'q', answer: 'A'.repeat(1000) }],
+    } as any;
+    const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, logger2, undefined, convs);
+    await reader.handle({ text: 'q2', userId: 'default' });
+    expect(prompt).toContain('A'.repeat(400) + '…');
+    expect(prompt).not.toContain('A'.repeat(401));
+  });
+});
