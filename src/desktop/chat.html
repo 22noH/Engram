@@ -49,6 +49,9 @@
   .body .mdh { font-weight:700; margin:8px 0 4px; }
   .msg.me { margin-left:auto; }
   .msg.me .body { background:rgba(240,166,60,.14); border-color:rgba(240,166,60,.3); }
+  .typing { color:var(--dim); font-size:12.5px; margin:2px 0 10px 4px; }
+  .typing .dots::after { content:'…'; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
   details.thread { margin:-4px 0 10px 16px; }
   details.thread summary { color:var(--amber); font-size:12px; cursor:pointer; }
   details.thread .msg { max-width:100%; }
@@ -96,6 +99,7 @@ const T = {
   modeAll: ko ? '모든 메시지에 반응' : 'Respond to all',
   modeMention: ko ? '@Engram 멘션에만 반응' : 'Respond to @Engram only',
   engram: 'Engram', me: ko ? '나' : 'me',
+  thinking: ko ? 'Engram이 생각하는 중' : 'Engram is thinking',
 };
 document.getElementById('input').placeholder = T.placeholder;
 document.getElementById('send').textContent = T.send;
@@ -108,6 +112,21 @@ let current = null;                 // 선택된 channelId
 const msgsByCh = new Map();         // channelId -> ChatMessage[]
 const openThreads = new Set();      // 렌더 후에도 펼침 유지할 anchor id
 const drafts = new Map();           // anchorId -> 스레드 답장 초안(진행 보고 재렌더에도 유지)
+const awaiting = new Map();         // channelId -> 타임아웃 id — 답 기다리는 중("생각 중" 표시)
+
+// 답이 올 것으로 기대되는 전송 뒤 "생각 중" 표시. 멘션-전용 채널에서 비멘션이면 안 띄움.
+function expectReply(channelId, text) {
+  const ch = channels.find((c) => c.id === channelId);
+  if (ch && ch.respondMode === 'mention' && !/@engram/i.test(text)) return;
+  clearTimeout(awaiting.get(channelId));
+  awaiting.set(channelId, setTimeout(() => { awaiting.delete(channelId); if (channelId === current) renderMsgs(); }, 180000));
+  if (channelId === current) renderMsgs();
+}
+function replyArrived(channelId) {
+  if (!awaiting.has(channelId)) return;
+  clearTimeout(awaiting.get(channelId));
+  awaiting.delete(channelId);
+}
 
 // ---- ws 연결(재연결 백오프 1s→5s→30s) ----
 const delays = [1000, 5000, 30000];
@@ -143,6 +162,7 @@ function connect() {
       const arr = msgsByCh.get(f.channelId) || [];
       arr.push(f.message);
       msgsByCh.set(f.channelId, arr);
+      if (f.message.authorId === 'engram') replyArrived(f.channelId); // 답 도착 → 생각 중 해제
       if (f.channelId === current) renderMsgs();
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
@@ -350,6 +370,7 @@ function renderMsgs() {
       inp.onkeydown = (e) => {
         if (e.key === 'Enter' && inp.value.trim()) {
           ws.send(JSON.stringify({ t: 'send', channelId: current, threadId: m.id, text: inp.value }));
+          expectReply(current, inp.value);
           inp.value = '';
           drafts.delete(m.id);
         }
@@ -358,6 +379,17 @@ function renderMsgs() {
       det.appendChild(bar);
       box.appendChild(det);
     }
+  }
+  if (awaiting.has(current)) { // 답 대기 중 표시(도착하면 replyArrived가 지움)
+    const t = document.createElement('div');
+    t.className = 'typing';
+    const label = document.createElement('span');
+    label.textContent = T.thinking;
+    const dots = document.createElement('span');
+    dots.className = 'dots';
+    t.appendChild(label);
+    t.appendChild(dots);
+    box.appendChild(t);
   }
   box.scrollTop = box.scrollHeight;
 }
@@ -410,6 +442,7 @@ function sendMain() {
   const inp = document.getElementById('input');
   if (!inp.value.trim() || !current || !ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ t: 'send', channelId: current, text: inp.value }));
+  expectReply(current, inp.value);
   inp.value = '';
   hidePalette();
 }
