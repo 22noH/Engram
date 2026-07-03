@@ -121,6 +121,18 @@ function openChat(): void {
   const cfg = loadChatConfig(configDir, childEnv);
   const url = `http://127.0.0.1:${cfg.port}/`;
   chatWin = new BrowserWindow({ width: 980, height: 720, title: 'Engram' });
+  // 메시지 속 링크(target=_blank)는 새 Electron 창 대신 기본 브라우저로.
+  chatWin.webContents.setWindowOpenHandler(({ url: ext }) => {
+    void shell.openExternal(ext);
+    return { action: 'deny' };
+  });
+  // 창 내 네비게이션도 채팅 페이지 밖이면 브라우저로 넘기고 차단(창 탈취 방지).
+  chatWin.webContents.on('will-navigate', (e, navUrl) => {
+    if (!navUrl.startsWith(url)) {
+      e.preventDefault();
+      void shell.openExternal(navUrl);
+    }
+  });
   const waiting = 'data:text/html;charset=utf-8,' + encodeURIComponent(
     '<body style="background:#0e1116;color:#8b95a3;font-family:system-ui;' +
     'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
