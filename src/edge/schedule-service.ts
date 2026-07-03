@@ -1,6 +1,6 @@
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob, CronTime } from 'cron';
-import { MessengerPort } from './messenger/messenger.port';
+import { ChannelPoster } from './messenger/messenger.port';
 import { ScheduleStore, ScheduleEntry, SchedulerPort } from '../agent-layer/schedule-store';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 회피).
@@ -20,7 +20,7 @@ export class ScheduleService implements SchedulerPort {
 
   constructor(
     private readonly orchestrator: MentionRunner,
-    private readonly port: MessengerPort,
+    private readonly port: ChannelPoster,
     private readonly registry: SchedulerRegistry,
     private readonly store: ScheduleStore,
     private readonly logger: { warn(msg: string, ctx?: string): void },

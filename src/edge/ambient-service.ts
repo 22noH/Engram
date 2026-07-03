@@ -1,7 +1,7 @@
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import * as fs from 'fs';
-import { MessengerPort } from './messenger/messenger.port';
+import { ChannelPoster } from './messenger/messenger.port';
 import { ChannelPolicy, allows } from '../agent-layer/channel-policy';
 import { ProposalStore } from '../knowledge-core/proposal-store';
 import { resolveCron } from './digest.scheduler';
@@ -18,7 +18,7 @@ interface InsightRunner {
 export class AmbientService {
   constructor(
     private readonly orchestrator: InsightRunner,
-    private readonly port: MessengerPort,
+    private readonly port: ChannelPoster,
     private readonly registry: SchedulerRegistry,
     private readonly proposals: ProposalStore,
     private readonly policy: ChannelPolicy,

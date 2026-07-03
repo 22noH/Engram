@@ -27,3 +27,6 @@ export interface MessengerConfig {
   token?: string;      // 봇 토큰(env 우선).
   engramName?: string; // 표시 이름(기본 'Engram').
 }
+
+// 게시만 필요한 소비자(예약·ambient)용 좁은 포트 — Hub가 이것만 구현.
+export type ChannelPoster = Pick<MessengerPort, 'postToChannel'>;
