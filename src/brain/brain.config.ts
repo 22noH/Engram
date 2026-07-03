@@ -23,7 +23,10 @@ const DEFAULTS: BrainProfile = {
   model: '',
   concurrency: 2,
   timeoutMs: 120000,
-  extraArgs: [],
+  // 기본값에 웹검색 허용을 박는다: claude -p는 헤드리스라 미지정 도구를 거부하므로,
+  // 처음 생성되는 brains.json이 이걸 빠뜨리면 "웹검색 권한 미승인"으로 막힌다(질문 답변 기능의 기본 기대).
+  // WebSearch/WebFetch는 읽기 전용이라 안전. 사용자가 brains.json extraArgs를 직접 채우면 그게 우선.
+  extraArgs: ['--allowedTools', 'WebSearch,WebFetch'],
   env: {},
 };
 
