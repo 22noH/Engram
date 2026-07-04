@@ -15,7 +15,7 @@ describe('ChatStore', () => {
   it('첫 조회 시 general 채널이 자동 생성된다', () => {
     const chs = store.listChannels();
     expect(chs).toHaveLength(1);
-    expect(chs[0]).toMatchObject({ id: 'general', name: 'general', respondMode: 'all' });
+    expect(chs[0]).toMatchObject({ id: 'general', name: 'general', respondMode: 'all', mode: 'chat' });
   });
 
   it('채널 생성/삭제/respondMode 변경이 지속된다', () => {
@@ -78,11 +78,34 @@ describe('ChatStore', () => {
   it('손수정된 channels.json의 유효하지않은 respondMode는 all로 정규화된다', () => {
     fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([{ id: 'x', name: 'x', respondMode: 'xyz' }]));
     const chs = store.listChannels();
-    expect(chs).toEqual([{ id: 'x', name: 'x', respondMode: 'all' }]);
+    expect(chs).toEqual([{ id: 'x', name: 'x', respondMode: 'all', mode: 'chat' }]);
   });
 
   it('유효하지 않은 respondMode로 setRespondMode 호출 시 false', () => {
     store.listChannels(); // general 생성
     expect(store.setRespondMode('general', 'weird' as any)).toBe(false);
+  });
+
+  it('createChannel이 mode를 저장하고 listChannels가 정규화한다', () => {
+    const code = store.createChannel('build-app', 'code');
+    const chat = store.createChannel('talk'); // 기본 chat
+    expect(code?.mode).toBe('code');
+    const list = store.listChannels();
+    expect(list.find((c) => c.id === code!.id)?.mode).toBe('code');
+    expect(list.find((c) => c.id === chat!.id)?.mode).toBe('chat');
+  });
+
+  it('setRepoPath가 채널에 경로를 바인딩한다', () => {
+    const ch = store.createChannel('c', 'code')!;
+    expect(store.setRepoPath(ch.id, 'C:/repo/x')).toBe(true);
+    expect(store.listChannels().find((c) => c.id === ch.id)?.repoPath).toBe('C:/repo/x');
+    expect(store.setRepoPath('nope', 'C:/y')).toBe(false);
+  });
+
+  it('mode 필드가 오염돼도 chat으로 강등한다', () => {
+    fs.writeFileSync(path.join(dir, 'channels.json'),
+      JSON.stringify([{ id: 'a', name: 'a', respondMode: 'all', mode: 'bogus' }]));
+    const fresh = new ChatStore(dir);
+    expect(fresh.listChannels().find((c) => c.id === 'a')?.mode).toBe('chat');
   });
 });

@@ -18,6 +18,8 @@ export interface ChatChannel {
   id: string;
   name: string;
   respondMode: 'all' | 'mention';
+  mode?: 'chat' | 'code';              // Phase 10: 상위 모드. 누락/오염=chat.
+  repoPath?: string;                   // Phase 10: Code 채널이 바인딩한 레포 절대경로.
   ownerId?: string;                    // 9b: 계정 도입 시 소유자
   visibility?: 'public' | 'private';   // 9b: 비공개 잠금
 }
@@ -49,21 +51,25 @@ export class ChatStore {
         // respondMode는 손수정 channels.json 등으로 오염될 수 있어 값을 정규화(드롭 대신 안전값으로 교정).
         list = raw
           .filter((c) => c && safeId(c.id) && typeof c.name === 'string')
-          .map((c) => ({ ...c, respondMode: c.respondMode === 'mention' ? 'mention' : 'all' }));
+          .map((c) => ({
+            ...c,
+            respondMode: c.respondMode === 'mention' ? 'mention' : 'all',
+            mode: c.mode === 'code' ? 'code' : 'chat',
+          }));
       }
     } catch { /* 파일없음/손상 시 기본 생성 */ }
     if (list.length === 0) {
-      list = [{ id: 'general', name: 'general', respondMode: 'all' }];
+      list = [{ id: 'general', name: 'general', respondMode: 'all', mode: 'chat' }];
       this.save(list);
     }
     return list;
   }
 
-  createChannel(name: string): ChatChannel | null {
+  createChannel(name: string, mode: 'chat' | 'code' = 'chat'): ChatChannel | null {
     const trimmed = (name ?? '').trim();
     if (!trimmed) return null;
     const list = this.listChannels();
-    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: 'all' };
+    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: 'all', mode: mode === 'code' ? 'code' : 'chat' };
     list.push(ch);
     this.save(list);
     return ch;
@@ -83,6 +89,16 @@ export class ChatStore {
     const ch = list.find((c) => c.id === id);
     if (!ch) return false;
     ch.respondMode = mode;
+    this.save(list);
+    return true;
+  }
+
+  setRepoPath(id: string, repoPath: string): boolean {
+    if (typeof repoPath !== 'string' || !repoPath.trim()) return false;
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    ch.repoPath = repoPath.trim();
     this.save(list);
     return true;
   }
