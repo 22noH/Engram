@@ -10,6 +10,8 @@ export interface MentionEvent {
   threadId?: string;   // 스레드(있으면)
   authorId: string;    // 보낸 사람
   target: ReplyTarget; // reply가 되돌려줄 핸들
+  mode?: 'chat' | 'code'; // Phase 10: 어댑터가 채널 모드를 실어줌(Discord는 미설정=chat).
+  repoPath?: string;      // Phase 10: Code 채널 바인딩 경로.
 }
 
 export interface MessengerPort {

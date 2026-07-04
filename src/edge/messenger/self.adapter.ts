@@ -107,7 +107,11 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
           return;
         case 'createChannel':
-          if (typeof f.name === 'string') this.store.createChannel(f.name);
+          if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : 'chat');
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        case 'setRepoPath':
+          if (typeof f.id === 'string' && typeof f.repoPath === 'string') this.store.setRepoPath(f.id, f.repoPath);
           this.broadcast({ t: 'channels', list: this.store.listChannels() });
           return;
         case 'deleteChannel':
@@ -152,6 +156,7 @@ export class SelfMessenger implements MessengerPort {
       channelId,
       authorId: msg.authorId,
       target: { channelId, anchorId: anchor } satisfies SelfTarget as ReplyTarget,
+      ...(ch.mode === 'code' ? { mode: 'code' as const, repoPath: ch.repoPath } : {}),
     };
     if (isMention) {
       if (this.handler) await this.handler(e);

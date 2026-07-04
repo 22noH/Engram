@@ -191,4 +191,43 @@ describe('SelfMessenger 프로토콜 확장', () => {
     expect(mentions).toEqual(['회의 잡아줘']);
     expect(observed).toEqual(['그냥 잡담']);
   });
+
+  it('Code 채널 send는 mention 이벤트에 mode/repoPath를 싣는다', async () => {
+    const ch = store.createChannel('build', 'code')!;
+    store.setRepoPath(ch.id, 'C:/repo/app');
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '@Engram 로그인 붙여줘' }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect(events[0].mode).toBe('code');
+    expect(events[0].repoPath).toBe('C:/repo/app');
+  });
+
+  it('일반(chat) 채널 send는 mention 이벤트에 mode/repoPath를 싣지 않는다', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect(events[0].mode).toBeUndefined();
+    expect(events[0].repoPath).toBeUndefined();
+    expect('mode' in events[0]).toBe(false);
+    expect('repoPath' in events[0]).toBe(false);
+  });
+
+  it('setRepoPath 프레임이 채널에 경로를 바인딩하고 channels를 브로드캐스트한다', async () => {
+    const ch = store.createChannel('build', 'code')!;
+    client.send(JSON.stringify({ t: 'setRepoPath', id: ch.id, repoPath: 'C:/repo/app' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { id: string }) => c.id === ch.id).repoPath).toBe('C:/repo/app');
+  });
+
+  it('createChannel 프레임의 mode가 전달된다', async () => {
+    client.send(JSON.stringify({ t: 'createChannel', name: 'coder', mode: 'code' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { name: string }) => c.name === 'coder').mode).toBe('code');
+  });
 });
