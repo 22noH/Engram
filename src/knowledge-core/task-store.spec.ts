@@ -85,4 +85,22 @@ describe('TaskStore 코딩 확장', () => {
     await store.remove(r.id);
     expect(await store.get(r.id)).toBeNull();
   });
+
+  it('createCoding이 channelId를 저장하고 list가 반환한다', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taskstore-'));
+    const store = new TaskStore(dir, new KeyedLock());
+    const rec = await store.createCoding({ question: 'q', projectRef: 'p1', criteriaTotal: 2, channelId: 'chan-1' });
+    expect(rec.channelId).toBe('chan-1');
+    const all = await store.list();
+    expect(all.some((r) => r.id === rec.id && r.channelId === 'chan-1')).toBe(true);
+  });
+
+  it('list는 손상 파일을 건너뛴다', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taskstore-'));
+    const store = new TaskStore(dir, new KeyedLock());
+    await store.createCoding({ question: 'q', projectRef: 'p1', criteriaTotal: 1 });
+    fs.writeFileSync(path.join(dir, 'junk.json'), '{ not json');
+    const all = await store.list();
+    expect(all.length).toBe(1);
+  });
 });

@@ -41,6 +41,7 @@ export interface TaskRecord {
   projectRef?: string;
   tickets?: CodingTicket[];
   progress?: TaskProgress;
+  channelId?: string; // Phase 10b: 재시작 재개 시 진행을 게시할 채널(코딩 작업).
 }
 
 // 협업/회의의 공유 블랙보드(설계 §5.1). runtime/state/*.json, 레코드별 KeyedLock 단일라이터.
@@ -115,7 +116,7 @@ export class TaskStore {
     await fs.promises.writeFile(this.file(rec.id), JSON.stringify(rec, null, 2));
   }
 
-  async createCoding(input: { question: string; projectRef: string; criteriaTotal: number }): Promise<TaskRecord> {
+  async createCoding(input: { question: string; projectRef: string; criteriaTotal: number; channelId?: string }): Promise<TaskRecord> {
     const now = new Date().toISOString();
     const id = `task_${now.replace(/[:.]/g, '-')}_${(this.seq++).toString(36)}_code`;
     const rec: TaskRecord = {
@@ -123,6 +124,7 @@ export class TaskStore {
       assignees: [], blackboard: {}, result: null, createdAt: now, updatedAt: now,
       projectRef: input.projectRef, tickets: [],
       progress: { landed: 0, criteriaMet: 0, criteriaTotal: input.criteriaTotal },
+      ...(input.channelId ? { channelId: input.channelId } : {}),
     };
     await this.lock.run(rec.id, () => this.write(rec));
     return rec;
@@ -151,6 +153,26 @@ export class TaskStore {
 
   async remove(id: string): Promise<void> {
     await fs.promises.rm(this.file(id), { force: true });
+  }
+
+  // 전체 레코드 스캔(재시작 재개용). 손상/비레코드 파일은 skip.
+  async list(): Promise<TaskRecord[]> {
+    let names: string[];
+    try {
+      names = await fs.promises.readdir(this.stateDir);
+    } catch {
+      return []; // 디렉토리 없음 = 작업 없음
+    }
+    const out: TaskRecord[] = [];
+    for (const n of names) {
+      if (!n.endsWith('.json')) continue;
+      try {
+        const raw = await fs.promises.readFile(path.join(this.stateDir, n), 'utf8');
+        const rec = JSON.parse(raw) as TaskRecord;
+        if (rec && typeof rec.id === 'string' && typeof rec.status === 'string') out.push(rec);
+      } catch { /* 손상 skip */ }
+    }
+    return out;
   }
 
   // 진전 관측키(설계 §5.1 seam #4). 라운드 간 이 값이 안 바뀌면 stuck.
