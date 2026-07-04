@@ -108,6 +108,22 @@ describe('SelfMessenger 코어', () => {
   });
 });
 
+it('포트가 이미 점유돼도 상주를 죽이지 않는다(두 번째 start는 reject만)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'self-'));
+  const store = new ChatStore(dir);
+  const logs: string[] = [];
+  const log = { warn: (m: string) => logs.push(m) };
+  const a = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: log });
+  await a.start();
+  const port = a.addressPort();
+  const b = new SelfMessenger({ enabled: true, port, bind: '127.0.0.1' }, store, { logger: log });
+  // 두 번째는 EADDRINUSE로 reject 되어야 하고, uncaught로 프로세스를 죽이면 안 된다.
+  await expect(b.start()).rejects.toBeDefined();
+  await a.stop();
+  await b.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 describe('SelfMessenger 프로토콜 확장', () => {
   let dir: string;
   let store: ChatStore;

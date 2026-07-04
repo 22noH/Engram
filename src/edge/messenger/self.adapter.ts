@@ -58,6 +58,11 @@ export class SelfMessenger implements MessengerPort {
       res.end('not found');
     });
     this.wss = new WebSocketServer({ server: this.server });
+    // ws는 http 서버의 error를 wss 'error'로 재방출한다. 리스너가 없으면 Node가 throw해 상주가 죽는다
+    // (특히 EADDRINUSE). 여기서 흡수 → start()의 promise reject만 남고 상주는 생존(채팅만 비활성).
+    this.wss.on('error', (err) => {
+      this.opts.logger.warn(`웹소켓 서버 오류(채팅 비활성 가능): ${String(err)}`, 'SelfChat');
+    });
     this.wss.on('connection', (ws) => {
       ws.on('message', (raw) => { void this.handleFrame(ws, String(raw)); });
       ws.on('error', () => { /* 접속 단위 격리 */ });
