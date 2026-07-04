@@ -555,6 +555,13 @@ function renderMsgs() {
   const hdr = document.getElementById('chhdr');
   const bar = document.getElementById('inputbar');
   const ch = channels.find((c) => c.id === current);
+  // 탭 전환 후 current가 다른 모드 채널을 가리키면(그 모드에 볼 채널이 없어 이동 못 함) 빈 화면으로.
+  if (ch && (ch.mode || 'chat') !== mode) {
+    hdr.style.display = 'none';
+    bar.style.display = 'none';
+    box.replaceChildren();
+    return;
+  }
   // Code 채널인데 폴더 미바인딩 → empty state(입력창 숨김).
   if (ch && (ch.mode || 'chat') === 'code' && !ch.repoPath) {
     hdr.style.display = 'none';
