@@ -1,5 +1,5 @@
 // Electron 껍데기(스펙 §3): 트레이 상주 + 설정창 + 자식(상주 main.js) 감독. 로직은 테스트된 모듈에 위임.
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, utilityProcess } from 'electron';
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -132,6 +132,7 @@ function openChat(): void {
     icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0e13' : '#f2f7fb',
+    webPreferences: { preload: path.join(__dirname, 'chat-preload.js') },
   });
   const onTheme = (): void => {
     try { chatWin?.setTitleBarOverlay(overlay()); } catch { /* 미지원 플랫폼 무시 */ }
@@ -214,6 +215,13 @@ function registerIpc(): void {
     } catch {
       return '(로그 없음)';
     }
+  });
+  ipcMain.handle('engram:pick-folder', async () => {
+    const win = chatWin ?? undefined;
+    const r = win
+      ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
   });
 }
 
