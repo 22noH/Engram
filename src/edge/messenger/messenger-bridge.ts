@@ -26,7 +26,7 @@ export function bindMessenger(
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
     try {
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).
-      await orchestrator.handleMention({ text: e.text, userId: e.channelId }, post, threadKey);
+      await orchestrator.handleMention({ text: e.text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}) }, post, threadKey);
     } catch (err) {
       logger.warn(`멘션 처리 실패: ${String(err)}`, 'Messenger');
       try { await post('지금 처리가 안 되네요 🙏'); } catch { /* post도 실패하면 포기 */ }

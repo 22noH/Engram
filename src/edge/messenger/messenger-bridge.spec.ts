@@ -82,3 +82,23 @@ it('observe가 throw해도 상주 불사(warn 로그)', async () => {
   await port.emitMessage({ text: '일반 대화', channelId: 'obs', authorId: 'u1', target: null });
   expect(warns.length).toBe(1);
 });
+
+it('mention 이벤트의 mode/repoPath를 handleMention에 넘긴다', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {}, mode: 'code', repoPath: 'C:/r' });
+  expect(calls[0].mode).toBe('code');
+  expect(calls[0].repoPath).toBe('C:/r');
+});
+
+it('mode가 없는 mention은 mode 필드를 포함하지 않는다(후방호환)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {} });
+  expect('mode' in calls[0]).toBe(false);
+  expect('repoPath' in calls[0]).toBe(false);
+});
