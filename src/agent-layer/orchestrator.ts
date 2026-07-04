@@ -231,6 +231,18 @@ export class Orchestrator {
       return;
     }
 
+    // Code 채널(Phase 10): classify 건너뛰고 바인딩된 repoPath로 바로 코딩(오분류 차단).
+    // 벽은 아님 — 위의 escape hatch(team/ask/code/schedule)가 이미 처리됐다면 여기 안 옴.
+    if (msg.mode === 'code') {
+      if (!msg.repoPath) {
+        await post('이 채널엔 아직 작업 폴더가 없어요. 채널에 들어가 폴더를 먼저 선택해 주세요 📁');
+        return;
+      }
+      if (!(await this.channelGate('coding', msg.userId, post))) return;
+      await this.startProposal(msg.repoPath, trimmed, threadKey, post);
+      return;
+    }
+
     const decision = await this.classify(trimmed);
     if (decision.kind === 'code') {
       if (!(await this.channelGate('coding', msg.userId, post))) return;
