@@ -358,7 +358,7 @@ export class Orchestrator {
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         await post('자율 코딩 시작할게요. 진행은 여기 올릴게요.');
-        const r = await this.codeRun(projectId, { onProgress: (m) => { void post(`· ${m}`); } });
+        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); } });
         this.tracker.finish(threadKey, t.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
@@ -410,6 +410,34 @@ export class Orchestrator {
     this.setRunState('running');
     await post(`▶ 이어서 할게요: ${project.targetPath} (재개 ${attempt}/2)`);
     this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
+  }
+
+  // 재시작 생존(Phase 10b): 부팅 시 호출. RUNNING 코딩 레코드를 각자 채널로 재개(승인된 프로젝트만 —
+  // resume hatch가 approved 확인). 스테일 레코드는 제거(재개가 새 세션을 만든다).
+  // ponytail: 코딩만 — 협업은 분 단위라 재개 불필요. 재개 시 attempt=0(fresh).
+  async resumeInterrupted(post: (channelId: string, text: string) => Promise<void>): Promise<number> {
+    if (!this.tasks) return 0;
+    let resumed = 0;
+    let records: Awaited<ReturnType<TaskStore['list']>>;
+    try { records = await this.tasks.list(); } catch { return 0; }
+    for (const rec of records) {
+      if (rec.kind !== 'coding' || rec.status !== 'RUNNING') continue;
+      const channelId = rec.channelId;
+      const projectRef = rec.projectRef;
+      if (!channelId || !projectRef) continue; // 게시 대상/프로젝트 불명 → 스킵(고아로 남김)
+      try {
+        await this.tasks.remove(rec.id); // 스테일 세션 제거 — 재개가 새 세션 생성
+        await this.handleMention(
+          { text: `resume ${projectRef}`, userId: channelId },
+          (t) => post(channelId, t),
+          channelId,
+        );
+        resumed++;
+      } catch (err) {
+        this.logger.warn(`재시작 재개 실패(${rec.id}): ${String(err)}`, 'Orchestrator');
+      }
+    }
+    return resumed;
   }
 
   // 협업 재시도 예약(6b-3-2). 같은 질문·같은 팀 재주입(재분류 없음). channelId=threadKey(scheduleCodingResume와 동일 근거).
@@ -639,7 +667,7 @@ export class Orchestrator {
   // 코딩 루프(설계 §4). 유일 배정구(seam #1). run-state로 stop·stuck·budget 통합(§6).
   async codeRun(
     projectId: string,
-    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void } = {},
+    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string } = {},
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
     if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
@@ -657,6 +685,7 @@ export class Orchestrator {
     const session = await this.tasks!.createCoding({
       question: project.acceptanceCriteria.join(' / '), projectRef: projectId,
       criteriaTotal: project.acceptanceCriteria.length,
+      ...(opts.channelId ? { channelId: opts.channelId } : {}),
     });
     await this.tasks!.transition(session.id, 'RUNNING');
     report(`작업 분해 중… (두뇌 호출)`);
