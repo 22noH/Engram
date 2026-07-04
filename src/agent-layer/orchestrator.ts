@@ -438,6 +438,9 @@ export class Orchestrator {
       const projectRef = rec.projectRef;
       if (!channelId || !projectRef) continue; // 게시 대상/프로젝트 불명 → 스킵(고아로 남김)
       try {
+        // remove→re-inject 순서: handleMention이 remove와 launch 사이에서 동기 throw하면 이 레코드는 유실된다.
+        // 실제로 resumeCoding은 실패 시 post 후 return(throw 아님)이고 launchCoding은 자기격리라 창은 사실상 0.
+        // 뒤집으면(재주입 후 remove) 옛 RUNNING 레코드와 새 세션이 겹쳐 다음 부팅에 이중 재개 위험 → 현 순서 유지.
         await this.tasks.remove(rec.id); // 스테일 세션 제거 — 재개가 새 세션 생성
         await this.handleMention(
           { text: `resume ${projectRef}`, userId: channelId },
