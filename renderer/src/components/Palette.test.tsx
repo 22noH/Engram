@@ -4,7 +4,7 @@ import { Palette, filterCommands } from './Palette';
 it('필터에 맞는 명령을 보여주고 클릭 시 insert를 onPick 한다', () => {
   const picks: string[] = [];
   render(<Palette filter="team" selected={0} onPick={(v) => picks.push(v)} />);
-  fireEvent.click(screen.getByText(/team/));
+  fireEvent.click(screen.getByText('team <p1,p2> <question>'));
   expect(picks[0]).toBe('team ');
 });
 it('selected 인덱스 항목에 .sel 강조를 준다', () => {

@@ -5,7 +5,7 @@ export interface Command { insert: string; label: string; desc: string }
 const COMMANDS: Command[] = [
   { insert: '상태', label: '상태', desc: ko ? '이 채널의 진행 중/최근 작업 상태' : 'Running/recent tasks in this channel' },
   { insert: 'code ', label: 'code <repo> <goal>', desc: ko ? '레포에 코딩 위임 — 자연어("○○레포에 △△ 해줘")도 됨' : 'Delegate coding to a repo — natural language works too' },
-  { insert: 'team ', label: 'team <p1,p2> <question>', desc: ko ? '지정한 페르소나 팀으로 협업' : 'Collaborate with the named personas' },
+  { insert: 'team ', label: 'team <p1,p2> <question>', desc: ko ? '지정한 페르소나 팀으로 협업' : 'Collaborate with the named persona team' },
   { insert: 'ask ', label: 'ask <question>', desc: ko ? '분류 없이 바로 위키 근거 답변' : 'Direct wiki-grounded answer (skips triage)' },
   { insert: 'schedule ', label: 'schedule <cron> <task>', desc: ko ? '예약 — 자연어("매일 9시에…")도 됨' : 'Schedule — natural language works too' },
   { insert: '예약목록', label: ko ? '예약목록' : '예약목록 (list schedules)', desc: ko ? '이 채널의 예약 보기' : 'List schedules in this channel' },
