@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ServerFrame } from '../../../shared/protocol';
+import type { ServerFrame, Action } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
 import { ChatConfig } from './chat.config';
@@ -104,7 +104,7 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
           return;
         case 'createChannel':
-          if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : 'chat');
+          if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat');
           this.broadcast({ t: 'channels', list: this.store.listChannels() });
           return;
         case 'setRepoPath':
@@ -162,9 +162,9 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
-  async reply(target: ReplyTarget, text: string): Promise<void> {
+  async reply(target: ReplyTarget, text: string, actions?: Action[]): Promise<void> {
     const t = target as SelfTarget;
-    const msg = this.store.appendMessage(t.channelId, { authorId: 'engram', text, threadId: t.anchorId });
+    const msg = this.store.appendMessage(t.channelId, { authorId: 'engram', text, threadId: t.anchorId, ...(actions ? { actions } : {}) });
     if (msg) this.broadcast({ t: 'msg', channelId: t.channelId, message: msg });
   }
 

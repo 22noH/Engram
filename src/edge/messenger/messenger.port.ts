@@ -1,6 +1,8 @@
 // 앞단 중립 메신저 포트(설계 §9 / Phase 6a). 어댑터(Discord 등)가 구현하고,
 // 코어는 채널 ID·답신 핸들 등 메신저 특유의 것을 모른다(CoreMessage 중립성 연장).
 
+import type { Action } from '../../../shared/protocol';
+
 // 답신 경로 — 어댑터별 불투명 핸들. 코어를 통과하지 않고 어댑터↔bridge만 주고받는다.
 export type ReplyTarget = unknown;
 
@@ -18,7 +20,7 @@ export interface MessengerPort {
   onMention(handler: (e: MentionEvent) => Promise<void>): void;
   // 관찰(6c-1): 멘션이 아닌 일반 메시지 수신 — 옵셔널(어댑터가 지원할 때만). 정책 필터는 bridge 몫.
   onMessage?(handler: (e: MentionEvent) => Promise<void>): void;
-  reply(target: ReplyTarget, text: string): Promise<void>;
+  reply(target: ReplyTarget, text: string, actions?: Action[]): Promise<void>;
   postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;

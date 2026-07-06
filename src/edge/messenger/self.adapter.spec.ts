@@ -74,6 +74,15 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general')[0].threadId).toBe('a1');
   });
 
+  it('reply(actions)가 메시지에 actions를 실어 broadcast한다', async () => {
+    const acts = [{ label: '✅ 승인', send: '승인', confirm: '시작?' }, { label: '취소', send: '취소' }];
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '완성조건…', acts);
+    const frame = await nextFrame(client);
+    expect(frame.t).toBe('msg');
+    expect(frame.message.actions).toEqual(acts);
+    expect(store.history('general').at(-1)?.actions).toEqual(acts);
+  });
+
   it('postToChannel → 본류(threadId 없음) 게시, 클라이언트 0명이어도 영속', async () => {
     client.terminate();
     await sm.postToChannel('general', '예약 발사');
@@ -225,5 +234,12 @@ describe('SelfMessenger 프로토콜 확장', () => {
     const f = await nextFrame(client);
     expect(f.t).toBe('channels');
     expect(f.list.find((c: { name: string }) => c.name === 'coder').mode).toBe('code');
+  });
+
+  it("createChannel 프레임의 mode='team'이 전달된다", async () => {
+    client.send(JSON.stringify({ t: 'createChannel', name: 'people', mode: 'team' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { name: string }) => c.name === 'people').mode).toBe('team');
   });
 });

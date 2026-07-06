@@ -30,7 +30,7 @@ export type ClientFrame =
   | { t: 'channels' }
   | { t: 'history'; channelId: string; before?: string }
   | { t: 'send'; channelId: string; text: string; threadId?: string; authorId?: string }
-  | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' }
+  | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team' }
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' };

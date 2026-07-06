@@ -102,3 +102,14 @@ it('mode가 없는 mention은 mode 필드를 포함하지 않는다(후방호환
   expect('mode' in calls[0]).toBe(false);
   expect('repoPath' in calls[0]).toBe(false);
 });
+
+it('post(text, actions)가 port.reply에 actions를 넘긴다', async () => {
+  const replied: any[] = [];
+  const port = new FakeMessenger();
+  const origReply = port.reply.bind(port);
+  port.reply = (t: any, text: string, actions?: any) => { replied.push({ text, actions }); return origReply(t, text); };
+  const orch = { handleMention: async (_m: any, post: any) => { await post('완성조건', [{ label: 'x', send: '승인' }]); } };
+  bindMessenger(port as any, orch as any, { warn() {} });
+  await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+  expect(replied[0].actions).toEqual([{ label: 'x', send: '승인' }]);
+});
