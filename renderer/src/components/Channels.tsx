@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Channel } from '../../../shared/protocol';
 import { T } from '../i18n';
+import { TEAM_CHAT } from '../config';
+import { areaTabs } from '../areas';
 
 // chat.html의 #modetabs + #channels + #newch + 채널 ⋯메뉴(모드전환/삭제)를 컴포넌트로 이전.
 export function Channels(props: {
   channels: Channel[];
   current: string | null;
-  mode: 'chat' | 'code';
+  mode: 'chat' | 'code' | 'team';
   onSelect: (id: string) => void;
-  onSetMode: (m: 'chat' | 'code') => void;
-  onCreate: (name: string, mode: 'chat' | 'code') => void;
+  onSetMode: (m: 'chat' | 'code' | 'team') => void;
+  onCreate: (name: string, mode: 'chat' | 'code' | 'team') => void;
   onDelete: (id: string) => void;
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
 }) {
@@ -20,6 +22,8 @@ export function Channels(props: {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
   const popRef = useRef<HTMLDivElement>(null);
   const visible = channels.filter((c) => (c.mode || 'chat') === mode);
+  const label: Record<'chat' | 'code' | 'team', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode };
+  const tabs = areaTabs(TEAM_CHAT);
 
   // 바깥 클릭·Esc로 닫힘(chat.html document click/keydown 리스너 이전).
   useEffect(() => {
@@ -51,9 +55,9 @@ export function Channels(props: {
   return (
     <div id="side">
       <div id="modetabs">
-        {(['chat', 'code'] as const).map((m) => (
-          <div key={m} className={'mtab' + (m === mode ? ' sel' : '')} onClick={() => props.onSetMode(m)}>
-            {m === 'chat' ? T.tabAsk : T.tabCode}
+        {tabs.map((t) => (
+          <div key={t} className={'mtab' + (t === mode ? ' sel' : '')} onClick={() => props.onSetMode(t)}>
+            {label[t]}
           </div>
         ))}
       </div>

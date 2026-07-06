@@ -10,7 +10,7 @@ import { T } from './i18n';
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
-  const [mode, setMode] = useState<'chat' | 'code'>('chat');
+  const [mode, setMode] = useState<'chat' | 'code' | 'team'>('chat');
   const [msgsByCh, setMsgsByCh] = useState<Map<string, Msg[]>>(new Map());
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
@@ -63,7 +63,7 @@ export default function App() {
     setCurrent(id);
     if (!msgsByCh.has(id)) send({ t: 'history', channelId: id });
   };
-  const onSetMode = (m: 'chat' | 'code') => {
+  const onSetMode = (m: 'chat' | 'code' | 'team') => {
     setMode(m);
     const visible = channels.filter((c) => (c.mode || 'chat') === m);
     if (!visible.some((c) => c.id === current)) setCurrent(visible[0]?.id ?? null);
