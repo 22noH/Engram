@@ -14,8 +14,10 @@
     "test": "jest",
     "demo": "ts-node scripts/demo.ts",
     "smoke:code": "node dist/src/cli.js code",
-    "desktop:dev": "nest build && electron .",
-    "desktop:build": "nest build && electron-builder"
+    "renderer:install": "npm --prefix renderer install",
+    "renderer:build": "npm --prefix renderer run build",
+    "desktop:dev": "npm run renderer:build && nest build && electron .",
+    "desktop:build": "npm run renderer:build && nest build && electron-builder"
   },
   "build": {
     "appId": "dev.engram.desktop",
@@ -34,7 +36,7 @@
       "personas/**",
       "src/desktop/assets/**",
       "src/desktop/settings.html",
-      "src/desktop/chat.html",
+      "renderer/dist/**",
       "!node_modules/@huggingface/transformers/.cache/**"
     ],
     "win": {

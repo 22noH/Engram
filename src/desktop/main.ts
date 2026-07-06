@@ -120,7 +120,8 @@ function openChat(): void {
     return;
   }
   const cfg = loadChatConfig(configDir, childEnv);
-  const url = `http://127.0.0.1:${cfg.port}/`;
+  const healthUrl = `http://127.0.0.1:${cfg.port}/`; // 준비 감지용(두뇌 http 헬스)
+  const rendererIndex = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html'); // 클라가 소유하는 페이지
   // 커스텀 타이틀바: 페이지 상단 바(#titlebar)가 드래그 영역, 창 버튼은 OS 오버레이.
   // 색은 시스템 라이트/다크를 따라감(페이지 팔레트와 동일 값).
   const overlay = (): Electron.TitleBarOverlay =>
@@ -143,9 +144,9 @@ function openChat(): void {
     void shell.openExternal(ext);
     return { action: 'deny' };
   });
-  // 창 내 네비게이션도 채팅 페이지 밖이면 브라우저로 넘기고 차단(창 탈취 방지).
+  // 렌더러(file://) 밖으로 나가는 네비게이션은 외부 브라우저로(창 탈취 방지).
   chatWin.webContents.on('will-navigate', (e, navUrl) => {
-    if (!navUrl.startsWith(url)) {
+    if (!navUrl.startsWith('file://')) {
       e.preventDefault();
       void shell.openExternal(navUrl);
     }
@@ -158,9 +159,9 @@ function openChat(): void {
   );
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
-    nodeHttp.get(url, (res) => {
+    nodeHttp.get(healthUrl, (res) => {
       res.resume();
-      if (chatWin) void chatWin.loadURL(url); // 응답이 오면(리슨 중) 진입
+      if (chatWin) void chatWin.loadFile(rendererIndex); // 헬스 200 → 클라 로드
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.
