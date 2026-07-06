@@ -2,11 +2,17 @@
 // 인터페이스만(런타임 값 0) → 양쪽에서 `import type`로 참조, 컴파일 시 erase.
 // 현행 프레임을 명문화만 한다(신규 프레임 없음). Phase 11b에서 Message.actions 추가 예정.
 
+export interface Action {
+  label: string;
+  send: string;
+  confirm?: string;
+}
+
 export interface Channel {
   id: string;
   name: string;
   respondMode: 'all' | 'mention';
-  mode?: 'chat' | 'code'; // 누락/오염=chat
+  mode?: 'chat' | 'code' | 'team'; // 누락/오염=chat
   repoPath?: string;      // Code 채널이 바인딩한 레포 절대경로
 }
 
@@ -16,6 +22,7 @@ export interface Message {
   text: string;
   ts: string;
   threadId?: string;
+  actions?: Action[];
 }
 
 // 클라 → 서버

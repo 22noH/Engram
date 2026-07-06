@@ -108,4 +108,18 @@ describe('ChatStore', () => {
     const fresh = new ChatStore(dir);
     expect(fresh.listChannels().find((c) => c.id === 'a')?.mode).toBe('chat');
   });
+
+  it('appendMessage가 actions를 저장하고 history에 실어준다', () => {
+    store.listChannels(); // general 채널 생성
+    const acts = [{ label: '✅ 승인', send: '승인', confirm: '시작할까요?' }, { label: '취소', send: '취소' }];
+    const m = store.appendMessage('general', { authorId: 'engram', text: '완성조건…', actions: acts });
+    expect(m?.actions).toEqual(acts);
+    expect(store.history('general').at(-1)?.actions).toEqual(acts);
+  });
+
+  it('createChannel이 team 모드를 저장하고 정규화가 team을 인정한다', () => {
+    const t = store.createChannel('people', 'team');
+    expect(t?.mode).toBe('team');
+    expect(store.listChannels().find((c) => c.id === t!.id)?.mode).toBe('team');
+  });
 });

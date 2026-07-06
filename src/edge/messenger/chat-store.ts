@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import type { Action } from '../../../shared/protocol';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
 // 채널 목록=state/chat/channels.json. 손상 줄 skip(ConversationStore 관례).
@@ -11,6 +12,7 @@ export interface ChatMessage {
   authorId: string;
   text: string;
   threadId?: string;
+  actions?: Action[];
   ts: string; // ISO
 }
 
@@ -18,7 +20,7 @@ export interface ChatChannel {
   id: string;
   name: string;
   respondMode: 'all' | 'mention';
-  mode?: 'chat' | 'code';              // Phase 10: 상위 모드. 누락/오염=chat.
+  mode?: 'chat' | 'code' | 'team';     // Phase 11b: team 추가. 누락/오염=chat.
   repoPath?: string;                   // Phase 10: Code 채널이 바인딩한 레포 절대경로.
   ownerId?: string;                    // 9b: 계정 도입 시 소유자
   visibility?: 'public' | 'private';   // 9b: 비공개 잠금
@@ -54,7 +56,7 @@ export class ChatStore {
           .map((c) => ({
             ...c,
             respondMode: c.respondMode === 'mention' ? 'mention' : 'all',
-            mode: c.mode === 'code' ? 'code' : 'chat',
+            mode: c.mode === 'code' ? 'code' : c.mode === 'team' ? 'team' : 'chat',
           }));
       }
     } catch { /* 파일없음/손상 시 기본 생성 */ }
@@ -65,11 +67,13 @@ export class ChatStore {
     return list;
   }
 
-  createChannel(name: string, mode: 'chat' | 'code' = 'chat'): ChatChannel | null {
+  createChannel(name: string, mode: 'chat' | 'code' | 'team' = 'chat'): ChatChannel | null {
     const trimmed = (name ?? '').trim();
     if (!trimmed) return null;
     const list = this.listChannels();
-    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: 'all', mode: mode === 'code' ? 'code' : 'chat' };
+    const m = mode === 'code' ? 'code' : mode === 'team' ? 'team' : 'chat';
+    // Team 채널은 사람 대화 영역 → 기본 멘션-전용(Ask=all과 구분). Phase 14에서 실동작.
+    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: m === 'team' ? 'mention' : 'all', mode: m };
     list.push(ch);
     this.save(list);
     return ch;
@@ -109,7 +113,7 @@ export class ChatStore {
 
   appendMessage(
     channelId: string,
-    input: { authorId: string; text: string; threadId?: string },
+    input: { authorId: string; text: string; threadId?: string; actions?: Action[] },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
     const msg: ChatMessage = {
@@ -117,6 +121,7 @@ export class ChatStore {
       authorId: input.authorId,
       text: input.text,
       ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.actions ? { actions: input.actions } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });
