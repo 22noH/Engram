@@ -94,17 +94,13 @@ describe('SelfMessenger 코어', () => {
     expect(frame.message.text).toBe('ok');
   });
 
-  it('GET / 는 htmlPath 파일을 서빙, 없으면 404', async () => {
+  it('GET / 는 chat.html을 서빙하지 않고 200 헬스만 응답한다', async () => {
     const res = await fetch(`http://127.0.0.1:${sm.addressPort()}/`);
-    expect(res.status).toBe(404); // htmlPath 미지정
-    const htmlFile = path.join(dir, 'chat.html');
-    fs.writeFileSync(htmlFile, '<p>hi</p>');
-    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { htmlPath: htmlFile, logger: noLog });
-    await sm2.start();
-    const res2 = await fetch(`http://127.0.0.1:${sm2.addressPort()}/`);
-    expect(res2.status).toBe(200);
-    expect(await res2.text()).toContain('hi');
-    await sm2.stop();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // 임의 경로는 404(기존 성질 유지)
+    const res2 = await fetch(`http://127.0.0.1:${sm.addressPort()}/nope`);
+    expect(res2.status).toBe(404);
   });
 });
 

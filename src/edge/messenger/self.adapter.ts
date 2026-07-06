@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ServerFrame } from '../../../shared/protocol';
@@ -32,7 +31,6 @@ export class SelfMessenger implements MessengerPort {
     private readonly cfg: ChatConfig,
     private readonly store: ChatStore,
     private readonly opts: {
-      htmlPath?: string;
       engramName?: string;
       logger: { warn(msg: string, ctx?: string): void };
     },
@@ -47,13 +45,11 @@ export class SelfMessenger implements MessengerPort {
 
   async start(): Promise<void> {
     this.server = http.createServer((req, res) => {
+      // Phase 11: 클라(renderer/)가 페이지를 소유 — 두뇌 http는 헬스 프로브 + ws 업그레이드만.
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-        try {
-          const html = fs.readFileSync(this.opts.htmlPath ?? '', 'utf8');
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(html);
-          return;
-        } catch { /* 아래 404 */ }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
       }
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('not found');

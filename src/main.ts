@@ -20,7 +20,6 @@ import { ChatStore } from './edge/messenger/chat-store';
 import { SelfMessenger } from './edge/messenger/self.adapter';
 import { MessengerHub } from './edge/messenger/messenger-hub';
 import { ChannelPoster } from './edge/messenger/messenger.port';
-import { resolveResourceFile } from './pal/resource-dir';
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -40,10 +39,7 @@ async function bootstrap(): Promise<void> {
   const chatCfg = loadChatConfig(paths.getConfigDir());
   if (chatCfg.enabled) {
     chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'));
-    self = new SelfMessenger(chatCfg, chatStore, {
-      htmlPath: resolveResourceFile(path.join('src', 'desktop', 'chat.html')),
-      logger,
-    });
+    self = new SelfMessenger(chatCfg, chatStore, { logger });
   }
 
   // Discord(Phase 6a): messenger.json에 있으면 병행.
