@@ -146,6 +146,7 @@ git commit -m "feat(phase11b): Message.actions·Channel mode team + ChatStore ap
 ### Task 2: `post`/`reply`에 actions 스레딩 (플러밍, 동작 첨부는 Task 3)
 
 **Files:**
+- Modify: `shared/protocol.ts` (ClientFrame createChannel.mode에 'team')
 - Modify: `src/edge/messenger/messenger.port.ts`
 - Modify: `src/edge/messenger/self.adapter.ts`
 - Modify: `src/edge/messenger/discord.adapter.ts`
@@ -214,6 +215,17 @@ Expected: FAIL(reply 3번째 인자 미지원).
   }
 ```
 상단 import에 `import type { Action } from '../../../shared/protocol';` 추가(ServerFrame import 옆).
+
+**createChannel 프레임의 'team' 통과**(리뷰어 지적 갭 — 없으면 렌더러 team 생성이 chat으로 강등되고 ClientFrame 타입도 거부):
+- `shared/protocol.ts`의 `ClientFrame` 유니온에서 `createChannel` 변형의 `mode?: 'chat' | 'code'` → `mode?: 'chat' | 'code' | 'team'`.
+- `self.adapter.ts`의 `handleFrame` `case 'createChannel'`(현재 `this.store.createChannel(f.name, f.mode === 'code' ? 'code' : 'chat')`)을 team 통과로:
+```ts
+        case 'createChannel':
+          if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat');
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+```
+- Step 1 테스트에 추가(self.adapter.spec.ts): `client.send({t:'createChannel', name:'people', mode:'team'})` → 다음 channels 브로드캐스트에서 그 채널 `mode==='team'`. (기존 createChannel 테스트 관례를 따르라.)
 
 `discord.adapter.ts` — `reply` 시그니처에 `actions?: Action[]` 추가하고 **본문은 그대로 텍스트만 전송**(actions 사용 안 함). 예:
 ```ts
