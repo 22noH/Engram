@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import type { ServerFrame } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
 import { ChatConfig } from './chat.config';
@@ -79,10 +80,10 @@ export class SelfMessenger implements MessengerPort {
     return typeof a === 'object' && a ? a.port : this.cfg.port;
   }
 
-  private sendTo(ws: WebSocket, frame: unknown): void {
+  private sendTo(ws: WebSocket, frame: ServerFrame): void {
     try { ws.send(JSON.stringify(frame)); } catch { /* 격리 */ }
   }
-  private broadcast(frame: unknown): void {
+  private broadcast(frame: ServerFrame): void {
     const data = JSON.stringify(frame);
     for (const c of this.wss?.clients ?? []) {
       if (c.readyState === WebSocket.OPEN) {
