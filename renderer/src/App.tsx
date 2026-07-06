@@ -131,7 +131,7 @@ export default function App() {
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
-                      onPick={fill} />
+                      onPick={fill} onSend={(text) => sendText(text)} />
                   ));
                 })()}
                 {current && awaiting.has(current) && (

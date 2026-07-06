@@ -87,6 +87,9 @@ details.thread { margin:-4px 0 10px 16px; }
 details.thread summary { color:var(--accent); font-size:12px; cursor:pointer; }
 details.thread .msg { max-width:100%; }
 .treply { display:flex; gap:6px; margin-top:6px; }
+.actions { display:flex; gap:8px; margin:8px 0 2px; flex-wrap:wrap; }
+.actions button { padding:6px 14px; font-size:13px; }
+.actions button:disabled { opacity:.5; cursor:default; }
 #popmenu { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:8px;
            min-width:200px; padding:4px; z-index:10; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 #popmenu div { padding:8px 12px; border-radius:6px; cursor:pointer; color:var(--text); font-size:13px; }
