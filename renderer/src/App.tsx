@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { Channel, Message as Msg, ServerFrame } from '../../shared/protocol';
 import { useWs } from './ws/client';
 import { Channels } from './components/Channels';
-import { Message } from './components/Message';
+import { Thread } from './components/Thread';
 import { T } from './i18n';
 
 export default function App() {
@@ -10,6 +10,9 @@ export default function App() {
   const [current, setCurrent] = useState<string | null>(null);
   const [mode, setMode] = useState<'chat' | 'code'>('chat');
   const [msgsByCh, setMsgsByCh] = useState<Map<string, Msg[]>>(new Map());
+  const [awaiting, setAwaiting] = useState<Set<string>>(new Set());
+  const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
+  const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const currentRef = useRef<string | null>(null); currentRef.current = current;
 
   const onFrame = useCallback((f: ServerFrame) => {
@@ -24,6 +27,11 @@ export default function App() {
         next.set(f.channelId, [...(next.get(f.channelId) ?? []), f.message]);
         return next;
       });
+      if (f.message.authorId === 'engram') { // 답 도착 → 생각 중 해제(chat.html replyArrived 이전)
+        const tm = awaitTimers.current.get(f.channelId);
+        if (tm) { clearTimeout(tm); awaitTimers.current.delete(f.channelId); }
+        setAwaiting((prev) => { const n = new Set(prev); n.delete(f.channelId); return n; });
+      }
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
     }
@@ -49,9 +57,23 @@ export default function App() {
 
   const ch = channels.find((c) => c.id === current);
   const fill = (text: string) => { const i = document.getElementById('input') as HTMLInputElement | null; if (i) { i.value = text; i.focus(); } };
+
+  // 답을 기대하며 "생각 중" 표시(멘션-전용 채널에서 비멘션이면 안 띄움 — chat.html expectReply 이전).
+  const expectReply = (channelId: string, text: string) => {
+    const c = channels.find((x) => x.id === channelId);
+    if (c && c.respondMode === 'mention' && !/@engram/i.test(text)) return;
+    const prev = awaitTimers.current.get(channelId); if (prev) clearTimeout(prev);
+    awaitTimers.current.set(channelId, setTimeout(() => {
+      awaitTimers.current.delete(channelId);
+      setAwaiting((p) => { const n = new Set(p); n.delete(channelId); return n; });
+    }, 180000));
+    setAwaiting((p) => new Set(p).add(channelId));
+  };
+
   const sendText = (text: string, threadId?: string) => {
     if (!text.trim() || !current) return;
     send({ t: 'send', channelId: current, text, threadId });
+    expectReply(current, text);
   };
 
   return (
@@ -67,9 +89,26 @@ export default function App() {
         />
         <div id="main">
           <div id="msgs">
-            {(msgsByCh.get(current ?? '') ?? []).filter((m) => !m.threadId).map((m) => (
-              <Message key={m.id} m={m} onPick={fill} />
-            ))}
+            {(() => {
+              const msgs = msgsByCh.get(current ?? '') ?? [];
+              const byAnchor = new Map<string, Msg[]>();
+              for (const m of msgs) {
+                if (m.threadId) {
+                  const list = byAnchor.get(m.threadId);
+                  if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
+                }
+              }
+              return msgs.filter((m) => !m.threadId).map((m) => (
+                <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
+                  draft={drafts.get(m.id) ?? ''}
+                  onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
+                  onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
+                  onPick={fill} />
+              ));
+            })()}
+            {current && awaiting.has(current) && (
+              <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
+            )}
           </div>
           <div id="inputbar" style={ch ? undefined : { display: 'none' }}>
             <input id="input" type="text" placeholder={T.placeholder}
