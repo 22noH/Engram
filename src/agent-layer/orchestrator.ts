@@ -30,6 +30,10 @@ import { loadChannelPolicy, allows, ChannelPolicy } from './channel-policy';
 import { SchedulerPort, ScheduleEntry } from './schedule-store';
 import { computeResume } from './resume-policy';
 import { RagStore } from '../knowledge-core/rag/rag-store';
+import type { Action } from '../../shared/protocol';
+
+// post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
+type PostFn = (text: string, actions?: Action[]) => Promise<void>;
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 const DECOMPOSE_DEFAULT = [
@@ -127,7 +131,7 @@ export class Orchestrator {
   // post 콜백 모델: ack·진행·결과·상태를 여러 번 게시. collaborate는 백그라운드로 detach.
   async handleMention(
     msg: CoreMessage,
-    post: (text: string) => Promise<void>,
+    post: PostFn,
     threadKey: string = msg.userId,
   ): Promise<void> {
     const trimmed = msg.text.trim();
@@ -271,7 +275,7 @@ export class Orchestrator {
     team: string[],
     userId: string,
     threadKey: string,
-    post: (text: string) => Promise<void>,
+    post: PostFn,
     attempt = 0,
   ): void {
     const t = this.tracker.start(threadKey, { question, team });
@@ -321,7 +325,7 @@ export class Orchestrator {
   private async channelGate(
     cap: 'coding' | 'schedule' | 'collaborate',
     channelId: string,
-    post: (text: string) => Promise<void>,
+    post: PostFn,
   ): Promise<boolean> {
     if (allows(this.policy(), channelId, cap)) return true;
     const label: Record<string, string> = { coding: '코딩', schedule: '예약', collaborate: '협업' };
@@ -335,7 +339,7 @@ export class Orchestrator {
   }
 
   // 멘션 코딩 진입: repo 해소 → 0/1/N 분기.
-  private async startCoding(repoRef: string, goal: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
     const matches = this.resolveRepoPaths(repoRef);
     if (matches.length === 0) {
       await post(`'${repoRef}' 레포를 못 찾았어요. coderepos.json의 alias나 정확한 경로로 불러주세요.`);
@@ -343,14 +347,18 @@ export class Orchestrator {
     }
     if (matches.length > 1) {
       this.pending.set(threadKey, { kind: 'disambiguate', candidates: matches, goal });
-      await post(`여러 개 찾았어요:\n${matches.map((m, i) => `${i + 1}. ${m}`).join('\n')}\n@Engram <번호>로 골라주세요.`);
+      const actions: Action[] = [
+        ...matches.map((m, i) => ({ label: `${i + 1}. ${m}`, send: String(i + 1) })),
+        { label: '취소', send: '취소' },
+      ];
+      await post(`여러 개 찾았어요:\n${matches.map((m, i) => `${i + 1}. ${m}`).join('\n')}\n@Engram <번호>로 골라주세요.`, actions);
       return;
     }
     await this.startProposal(matches[0], goal, threadKey, post);
   }
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기.
-  private async startProposal(targetPath: string, goal: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
     if (!this.fence || !this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
     try { this.fence.assertWritable(targetPath); }
     catch { await post('그 경로엔 쓸 수 없어요(보호 경로).'); return; }
@@ -361,11 +369,15 @@ export class Orchestrator {
       `📁 대상: ${targetPath}\n📋 완성조건:\n${crit}\n` +
       `게이트: test=${cfg.gate.test}|build=${cfg.gate.build}|typecheck=${cfg.gate.typecheck}\n` +
       `맞으면 @Engram 승인 / 취소는 @Engram 취소`,
+      [
+        { label: '✅ 승인', send: '승인', confirm: '자율 코딩을 시작할까요?' },
+        { label: '취소', send: '취소' },
+      ],
     );
   }
 
   // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
-  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: (text: string) => Promise<void>, attempt = 0): void {
+  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0): void {
     const t = this.tracker.start(threadKey, { question: `코딩: ${targetPath}`, team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
@@ -398,7 +410,7 @@ export class Orchestrator {
     status: 'STUCK' | 'BUDGET',
     threadKey: string,
     attempt: number,
-    post: (text: string) => Promise<void>,
+    post: PostFn,
   ): Promise<boolean> {
     if (!this.scheduler) return false;
     const { cron, human } = computeResume(status, new Date());
@@ -413,7 +425,7 @@ export class Orchestrator {
   }
 
   // 예약된 코딩 재개 실행: 존재·승인 확인 → runState 복원(STUCK이 남긴 paused) → 백그라운드 재실행.
-  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: (text: string) => Promise<void>): Promise<void> {
+  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn): Promise<void> {
     if (!this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
     const project = await this.projects.get(projectId);
     if (!project) { await post('그 프로젝트를 못 찾았어요.'); return; }
@@ -461,7 +473,7 @@ export class Orchestrator {
     team: string[],
     threadKey: string,
     attempt: number,
-    post: (text: string) => Promise<void>,
+    post: PostFn,
   ): Promise<boolean> {
     if (!this.scheduler) return false;
     const { cron, human } = computeResume('COLLAB', new Date());
@@ -480,7 +492,7 @@ export class Orchestrator {
     return `⚠️ 코딩 종료: ${why[r.status] ?? r.status} (세션 ${r.sessionId})`;
   }
 
-  private async doSchedule(cron: string, task: string, once: boolean, channelId: string, threadKey: string, post: (t: string) => Promise<void>): Promise<void> {
+  private async doSchedule(cron: string, task: string, once: boolean, channelId: string, threadKey: string, post: PostFn): Promise<void> {
     if (!this.scheduler) { await post('예약 기능이 준비되지 않았어요.'); return; }
     const threadId = threadKey !== channelId ? threadKey : undefined;
     const e = this.scheduler.add({ channelId, threadId, cron, task, once });
