@@ -53,7 +53,7 @@ export function Channels(props: {
       <div id="modetabs">
         {(['chat', 'code'] as const).map((m) => (
           <div key={m} className={'mtab' + (m === mode ? ' sel' : '')} onClick={() => props.onSetMode(m)}>
-            {m === 'chat' ? T.tabChat : T.tabCode}
+            {m === 'chat' ? T.tabAsk : T.tabCode}
           </div>
         ))}
       </div>
