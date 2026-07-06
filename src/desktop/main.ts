@@ -161,7 +161,7 @@ function openChat(): void {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     nodeHttp.get(healthUrl, (res) => {
       res.resume();
-      if (chatWin) void chatWin.loadFile(rendererIndex); // 헬스 200 → 클라 로드
+      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}` }); // 헬스 200 → 클라 로드(설정 포트 주입)
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.

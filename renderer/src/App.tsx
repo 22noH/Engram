@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Channel, Message as Msg, ServerFrame } from '../../shared/protocol';
 import { useWs } from './ws/client';
 import { Channels } from './components/Channels';
@@ -16,8 +16,16 @@ export default function App() {
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
+  const [errText, setErrText] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const currentRef = useRef<string | null>(null); currentRef.current = current;
+  const msgsRef = useRef<HTMLDivElement>(null);
+  // 새 메시지/채널 전환/생각중 변화 시 맨 아래로(chat.html box.scrollTop=scrollHeight 이전).
+  useEffect(() => {
+    const box = msgsRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [current, msgsByCh, awaiting]);
 
   const onFrame = useCallback((f: ServerFrame) => {
     if (f.t === 'channels') {
@@ -38,11 +46,13 @@ export default function App() {
       }
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
+      setErrText(f.text);
     }
   }, []);
 
   const onOpen = useCallback(() => {
     setMsgsByCh(new Map()); // 재연결 시 파일 진실원과 재동기화
+    setErrText(''); // 재연결 시 이전 에러 툴팁 제거
     send({ t: 'channels' });
     if (currentRef.current) send({ t: 'history', channelId: currentRef.current });
   }, []);
@@ -85,7 +95,7 @@ export default function App() {
 
   return (
     <>
-      <div id="titlebar"><span id="dot" className={connected ? 'on' : ''} /><span id="tbtitle">Engram</span></div>
+      <div id="titlebar"><span id="dot" className={connected ? 'on' : ''} title={errText} /><span id="tbtitle">Engram</span></div>
       <div id="app">
         <Channels
           channels={channels} current={current} mode={mode}
@@ -104,7 +114,7 @@ export default function App() {
             <FolderEmpty onSetRepo={(p) => send({ t: 'setRepoPath', id: ch.id, repoPath: p })} />
           ) : (
             <>
-              <div id="msgs">
+              <div id="msgs" ref={msgsRef}>
                 {(() => {
                   const msgs = msgsByCh.get(current ?? '') ?? [];
                   const byAnchor = new Map<string, Msg[]>();
@@ -117,6 +127,8 @@ export default function App() {
                   return msgs.filter((m) => !m.threadId).map((m) => (
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
+                      collapsed={collapsed.has(m.id)}
+                      onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
                       onPick={fill} />

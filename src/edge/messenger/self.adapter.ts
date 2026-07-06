@@ -5,7 +5,7 @@ import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
 import { ChatConfig } from './chat.config';
 
-// 자체 메신저 어댑터(Phase 9, 스펙 §4.1). http(chat.html 서빙)+ws 서버 내장.
+// 자체 메신저 어댑터(Phase 9, 스펙 §4.1). http(헬스 프로브)+ws 서버 내장.
 // 생성자는 비연결 — 리슨은 start()에서(Discord 어댑터 관례).
 // 기본 바인딩 127.0.0.1 — 인증 없음. 개방(0.0.0.0)은 9b(토큰 인증)까지 금지(README 명시).
 
