@@ -540,19 +540,32 @@ git commit -m "feat(phase11b): TEAM_CHAT flag(기본 off) + i18n tabAsk/tabTeam"
 ### Task 6: Channels 3탭 네비(Ask·Code + flag Team) + App 영역 로직
 
 **Files:**
+- Create: `renderer/src/areas.ts` (순수 탭 목록 — 두 flag 상태 다 테스트 가능하게 분리)
 - Modify: `renderer/src/components/Channels.tsx`
 - Modify: `renderer/src/App.tsx`
-- Test: `renderer/src/components/Channels.test.tsx` (신규)
+- Test: `renderer/src/areas.test.ts` (신규), `renderer/src/components/Channels.test.tsx` (신규)
 
 **Interfaces:**
 - Consumes: `TEAM_CHAT`(config), `T.tabAsk`/`tabTeam`/`tabCode`, `Channel.mode:'chat'|'code'|'team'`.
 - Produces:
+  - `areaTabs(teamChat: boolean): ('chat' | 'code' | 'team')[]` — 순수. `false`→`['chat','code']`, `true`→`['chat','team','code']`. (Team은 Ask와 Code 사이.)
   - 네비 탭 = Ask(mode 'chat')·Code(mode 'code') 항상 + Team(mode 'team') `TEAM_CHAT`일 때만.
   - App의 `mode` 상태 타입 `'chat'|'code'|'team'`. 새 채널은 현재 탭 모드로 생성(team이면 `createChannel{mode:'team'}`).
   - 채널 목록은 현재 탭 모드로 필터(기존 per-mode 필터 유지).
 
-- [ ] **Step 1: 실패 테스트** — `renderer/src/components/Channels.test.tsx`
+- [ ] **Step 1: 실패 테스트** — `areaTabs`(순수, 두 flag 상태) + Channels 렌더(off)
 
+`renderer/src/areas.test.ts`:
+```ts
+import { areaTabs } from './areas';
+
+it('flag off면 Ask·Code만, on이면 Team이 Ask와 Code 사이에', () => {
+  expect(areaTabs(false)).toEqual(['chat', 'code']);
+  expect(areaTabs(true)).toEqual(['chat', 'team', 'code']);
+});
+```
+
+`renderer/src/components/Channels.test.tsx`:
 ```tsx
 import { render, screen } from '@testing-library/react';
 import { Channels } from './Channels';
@@ -562,7 +575,7 @@ const base = {
   current: 'a', onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {},
 } as any;
 
-it('Ask·Code 탭은 항상 보이고 Team은 flag off면 안 보인다', () => {
+it('Ask·Code 탭 렌더, Team은 flag off면 안 보인다', () => {
   render(<Channels {...base} mode="chat" />);
   expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
@@ -570,29 +583,34 @@ it('Ask·Code 탭은 항상 보이고 Team은 flag off면 안 보인다', () => 
 });
 ```
 
-> Team 표시 테스트(flag on)는 `TEAM_CHAT`이 컴파일 상수라 vitest에서 토글이 번거로움 — flag off(기본)만 검증하고, on 경로는 코드 리뷰로 커버(리뷰어가 `TEAM_CHAT &&` 게이팅 확인). 무리해서 모듈 목킹하지 말 것.
+> flag on/off **분기 자체는 `areaTabs`로 순수 단위테스트**(둘 다 검증). Channels 렌더 테스트는 실제 상수(off) 경로만 — 상수를 목킹하지 않아도 분기 로직은 areaTabs가 커버하므로 게이팅이 리뷰-only로 새지 않는다.
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `npm --prefix renderer test -- Channels`
-Expected: FAIL(Channels가 아직 2탭 chat/code, Ask 라벨 없음).
+Run: `npm --prefix renderer test -- areas Channels`
+Expected: FAIL(`areaTabs` 없음 / Channels 2탭·Ask 라벨 없음).
 
-- [ ] **Step 3: 구현** — `Channels.tsx`
+- [ ] **Step 3: 구현** — `areas.ts` + `Channels.tsx`
 
-상단 import에 `import { TEAM_CHAT } from '../config';`. 탭 정의를 배열로(모드+라벨), Team은 flag 게이트:
+`renderer/src/areas.ts`:
+```ts
+// 3영역 네비 탭 순서/게이팅(순수 — flag on/off 둘 다 단위테스트 가능). Team은 flag on일 때만.
+export function areaTabs(teamChat: boolean): ('chat' | 'code' | 'team')[] {
+  return teamChat ? ['chat', 'team', 'code'] : ['chat', 'code'];
+}
+```
+
+`Channels.tsx` 상단 import에 `import { TEAM_CHAT } from '../config';`·`import { areaTabs } from '../areas';`. 탭을 areaTabs로 만들고 mode→라벨 매핑:
 ```tsx
-  const tabs: { mode: 'chat' | 'code' | 'team'; label: string }[] = [
-    { mode: 'chat', label: T.tabAsk },
-    ...(TEAM_CHAT ? [{ mode: 'team' as const, label: T.tabTeam }] : []),
-    { mode: 'code', label: T.tabCode },
-  ];
+  const label: Record<'chat' | 'code' | 'team', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode };
+  const tabs = areaTabs(TEAM_CHAT);
 ```
 `#modetabs` 렌더를 이 배열로 교체(기존 `['chat','code']` 하드코딩 대신):
 ```tsx
       <div id="modetabs">
         {tabs.map((t) => (
-          <div key={t.mode} className={'mtab' + (t.mode === mode ? ' sel' : '')} onClick={() => props.onSetMode(t.mode)}>
-            {t.label}
+          <div key={t} className={'mtab' + (t === mode ? ' sel' : '')} onClick={() => props.onSetMode(t)}>
+            {label[t]}
           </div>
         ))}
       </div>
