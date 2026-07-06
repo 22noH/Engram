@@ -87,7 +87,7 @@ export interface Message {
   id: string;
   authorId: string; // 'engram' | 'owner' | ...
   text: string;
-  ts: number;
+  ts: string; // ISO 8601 (ChatStore가 new Date().toISOString()로 생성)
   threadId?: string;
 }
 
@@ -688,7 +688,7 @@ import { Message } from './Message';
 it('engram 번호목록 클릭 시 onPick(번호)를 호출한다', () => {
   const picks: string[] = [];
   const { container } = render(
-    <Message m={{ id: '1', authorId: 'engram', ts: 0, text: '1. 하나\n2. 둘' }} onPick={(t) => picks.push(t)} />,
+    <Message m={{ id: '1', authorId: 'engram', ts: '2026-07-06T00:00:00.000Z', text: '1. 하나\n2. 둘' }} onPick={(t) => picks.push(t)} />,
   );
   const items = container.querySelectorAll('ol > li.pick');
   expect(items).toHaveLength(2);
@@ -1012,14 +1012,14 @@ git commit -m "feat(phase11a): App 셸 — 테마·i18n·채널 사이드바·�
 import { render, screen } from '@testing-library/react';
 import { Thread } from './Thread';
 
-const anchor = { id: 'a', authorId: 'owner', ts: 0, text: '질문' };
+const anchor = { id: 'a', authorId: 'owner', ts: '2026-07-06T00:00:00.000Z', text: '질문' };
 it('답 1개는 인라인(reply)로, 2개 이상은 접힘 요약으로 렌더한다', () => {
-  const one = render(<Thread anchor={anchor} replies={[{ id: 'r1', authorId: 'engram', ts: 1, text: '답1' }]}
+  const one = render(<Thread anchor={anchor} replies={[{ id: 'r1', authorId: 'engram', ts: '2026-07-06T00:00:01.000Z', text: '답1' }]}
     draft="" onDraft={() => {}} onReply={() => {}} onPick={() => {}} />);
   expect(one.container.querySelector('.msg.reply')).toBeTruthy();
   one.unmount();
   render(<Thread anchor={anchor}
-    replies={[{ id: 'r1', authorId: 'engram', ts: 1, text: '답1' }, { id: 'r2', authorId: 'engram', ts: 2, text: '답2' }]}
+    replies={[{ id: 'r1', authorId: 'engram', ts: '2026-07-06T00:00:01.000Z', text: '답1' }, { id: 'r2', authorId: 'engram', ts: '2026-07-06T00:00:02.000Z', text: '답2' }]}
     draft="" onDraft={() => {}} onReply={() => {}} onPick={() => {}} />);
   expect(screen.getByText(/답글 2개|2 replies/)).toBeInTheDocument();
 });
