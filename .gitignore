@@ -33,3 +33,6 @@ Thumbs.db
 
 # electron-builder 산출물
 release/
+
+renderer/node_modules
+renderer/dist
