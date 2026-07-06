@@ -3,6 +3,8 @@ import type { Channel, Message as Msg, ServerFrame } from '../../shared/protocol
 import { useWs } from './ws/client';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
+import { Palette, filterCommands } from './components/Palette';
+import { FolderEmpty } from './components/FolderEmpty';
 import { T } from './i18n';
 
 export default function App() {
@@ -12,6 +14,8 @@ export default function App() {
   const [msgsByCh, setMsgsByCh] = useState<Map<string, Msg[]>>(new Map());
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
+  const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
+  const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const currentRef = useRef<string | null>(null); currentRef.current = current;
 
@@ -76,6 +80,9 @@ export default function App() {
     expectReply(current, text);
   };
 
+  // '/'명령 팔레트에서 클릭·Enter로 명령을 입력창에 채운다(chat.html pickCmd 이전).
+  const pickCmd = (insert: string) => { const i = document.getElementById('input') as HTMLInputElement; i.value = insert; i.focus(); setPalFilter(null); };
+
   return (
     <>
       <div id="titlebar"><span id="dot" className={connected ? 'on' : ''} /><span id="tbtitle">Engram</span></div>
@@ -88,33 +95,60 @@ export default function App() {
           onSetRespondMode={(id, m) => send({ t: 'setRespondMode', id, mode: m })}
         />
         <div id="main">
-          <div id="msgs">
-            {(() => {
-              const msgs = msgsByCh.get(current ?? '') ?? [];
-              const byAnchor = new Map<string, Msg[]>();
-              for (const m of msgs) {
-                if (m.threadId) {
-                  const list = byAnchor.get(m.threadId);
-                  if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
-                }
-              }
-              return msgs.filter((m) => !m.threadId).map((m) => (
-                <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
-                  draft={drafts.get(m.id) ?? ''}
-                  onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
-                  onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
-                  onPick={fill} />
-              ));
-            })()}
-            {current && awaiting.has(current) && (
-              <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
-            )}
-          </div>
-          <div id="inputbar" style={ch ? undefined : { display: 'none' }}>
-            <input id="input" type="text" placeholder={T.placeholder}
-              onKeyDown={(e) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; sendText(v); (e.target as HTMLInputElement).value = ''; } }} />
-            <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; }}>{T.send}</button>
-          </div>
+          {ch && (ch.mode || 'chat') === 'code' && ch.repoPath && (
+            <div id="chhdr" style={{ display: 'block' }} title={ch.repoPath}>
+              {'📁 ' + ch.repoPath.split(/[\\/]/).filter(Boolean).pop()}
+            </div>
+          )}
+          {ch && (ch.mode || 'chat') === 'code' && !ch.repoPath ? (
+            <FolderEmpty onSetRepo={(p) => send({ t: 'setRepoPath', id: ch.id, repoPath: p })} />
+          ) : (
+            <>
+              <div id="msgs">
+                {(() => {
+                  const msgs = msgsByCh.get(current ?? '') ?? [];
+                  const byAnchor = new Map<string, Msg[]>();
+                  for (const m of msgs) {
+                    if (m.threadId) {
+                      const list = byAnchor.get(m.threadId);
+                      if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
+                    }
+                  }
+                  return msgs.filter((m) => !m.threadId).map((m) => (
+                    <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
+                      draft={drafts.get(m.id) ?? ''}
+                      onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
+                      onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
+                      onPick={fill} />
+                  ));
+                })()}
+                {current && awaiting.has(current) && (
+                  <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
+                )}
+              </div>
+              {palFilter !== null && (
+                <Palette filter={palFilter} selected={palIdx} onPick={pickCmd} />
+              )}
+              <div id="inputbar" style={ch ? undefined : { display: 'none' }}>
+                <input id="input" type="text" placeholder={T.placeholder}
+                  onChange={(e) => { const v = e.target.value; const open = v.startsWith('/'); setPalFilter(open ? v.slice(1).toLowerCase() : null); setPalIdx(0); }}
+                  onKeyDown={(e) => {
+                    if (palFilter !== null) { // 팔레트 열림: 방향키/Enter/Esc는 팔레트 조작(전송 아님)
+                      const items = filterCommands(palFilter);
+                      if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); setPalIdx((p) => (p + 1) % items.length); return; }
+                      if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setPalIdx((p) => (p - 1 + items.length) % items.length); return; }
+                      if (e.key === 'Enter' && items.length) { e.preventDefault(); pickCmd(items[Math.min(palIdx, items.length - 1)].insert); return; }
+                      if (e.key === 'Escape') { setPalFilter(null); return; }
+                    }
+                    if (e.key === 'Enter') {
+                      const i = e.target as HTMLInputElement;
+                      sendText(i.value); i.value = '';
+                    }
+                  }} />
+                <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; }}>{T.send}</button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </>
