@@ -21,29 +21,27 @@ function makeOrchestrator() {
   return o;
 }
 
-it('Code 모드 메시지는 classify를 건너뛰고 바인딩된 경로로 startProposal 한다', async () => {
+it('Code 모드 메시지는 classify를 건너뛰고 대화 답변으로 간다(answerInCode)', async () => {
   const orch = makeOrchestrator();
-  const spyProposal = jest.spyOn(orch as any, 'startProposal').mockResolvedValue(undefined);
+  const spyAnswer = jest.spyOn(orch as any, 'answerInCode').mockResolvedValue({ reply: '답' });
   const spyClassify = jest.spyOn(orch as any, 'classify');
-  const posts: string[] = [];
   await orch.handleMention(
     { text: '로그인 붙여줘', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' },
-    async (t) => { posts.push(t); },
-    'c1',
+    async () => {}, 'c1',
   );
   expect(spyClassify).not.toHaveBeenCalled();
-  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙여줘', 'c1', expect.any(Function));
+  expect(spyAnswer).toHaveBeenCalledWith(
+    expect.objectContaining({ mode: 'code', repoPath: 'C:/repo/app' }), 'c1',
+  );
 });
 
 it('Code 모드인데 repoPath 미바인딩이면 안내만 한다', async () => {
   const orch = makeOrchestrator();
-  const spyProposal = jest.spyOn(orch as any, 'startProposal');
   const posts: string[] = [];
   await orch.handleMention(
     { text: '뭐든', userId: 'c1', mode: 'code' },
     async (t) => { posts.push(t); }, 'c1',
   );
-  expect(spyProposal).not.toHaveBeenCalled();
   expect(posts.join('')).toMatch(/폴더|folder/i);
 });
 

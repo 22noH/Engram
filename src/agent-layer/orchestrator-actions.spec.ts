@@ -20,7 +20,7 @@ function makeOrchestrator(classifyJson = '{"kind":"chat","team":[]}') {
   return o;
 }
 
-it('startProposal(코드 모드)은 완성조건 게시에 승인/취소 actions를 첨부한다', async () => {
+it('startProposal(escalate)은 완성조건 게시에 승인/취소 actions를 첨부한다', async () => {
   const orch = makeOrchestrator();
   (orch as any).proposeProject = async () => ({
     id: 'p1',
@@ -29,13 +29,14 @@ it('startProposal(코드 모드)은 완성조건 게시에 승인/취소 actions
   });
   const posts: { text: string; actions?: any }[] = [];
   const post = async (text: string, actions?: any): Promise<void> => { posts.push({ text, actions }); };
-  await orch.handleMention({ text: '로그인 붙여줘', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+  // proposeReady 대기에서 '구현 시작' → startProposal
+  (orch as any).pending.set('c1', { kind: 'proposeReady', repoPath: 'C:/repo/app', goal: '로그인 붙이기' });
+  await orch.handleMention({ text: '구현 시작', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
   const approve = posts.find((p) => p.actions);
   expect(approve?.actions).toEqual([
     { label: '✅ 승인', send: '승인', confirm: '자율 코딩을 시작할까요?' },
     { label: '취소', send: '취소' },
   ]);
-  // 텍스트 프롬프트는 그대로(폴백 안전망) 유지되는지도 확인.
   expect(approve?.text).toContain('맞으면 @Engram 승인 / 취소는 @Engram 취소');
 });
 

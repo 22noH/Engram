@@ -54,3 +54,32 @@ it('Code 모드인데 repoPath 없으면 폴더 안내만', async () => {
   await orch.handleMention({ text: '뭐든', userId: 'c1', mode: 'code' }, post, 'c1');
   expect(posts[0].text).toMatch(/폴더|folder/i);
 });
+
+it('[구현 시작] 누르면 startProposal로 escalate', async () => {
+  const orch = makeOrch('바로 붙일게.\n```engram:propose\n{"goal":"로그인 붙이기"}\n```');
+  const spyProposal = jest.spyOn(orch as any, 'startProposal').mockResolvedValue(undefined);
+  const { post } = collect();
+  // 1) 코드요청 → pending=proposeReady
+  await orch.handleMention(
+    { text: '로그인 붙여줘', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
+  );
+  // 2) 구현 시작 → startProposal(repoPath, goal)
+  await orch.handleMention(
+    { text: '구현 시작', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
+  );
+  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙이기', 'c1', expect.any(Function));
+  expect((orch as any).pending.get('c1')).toBeUndefined(); // proposeReady 소비됨
+});
+
+it('proposeReady 중 비매칭 메시지는 제안을 버리고 일반 대화로 흐른다', async () => {
+  const orch = makeOrch('그건 이래.'); // 두 번째 턴은 마커 없는 일반 답
+  const spyProposal = jest.spyOn(orch as any, 'startProposal').mockResolvedValue(undefined);
+  const { posts, post } = collect();
+  (orch as any).pending.set('c1', { kind: 'proposeReady', repoPath: 'C:/repo/app', goal: 'X' });
+  await orch.handleMention(
+    { text: '아니 그거 말고 이건 뭐야?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
+  );
+  expect(spyProposal).not.toHaveBeenCalled();
+  expect((orch as any).pending.get('c1')).toBeUndefined(); // 스테일 제안 정리
+  expect(posts[posts.length - 1].text).toContain('그건 이래'); // 대화로 응답
+});

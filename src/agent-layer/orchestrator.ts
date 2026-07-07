@@ -166,6 +166,15 @@ export class Orchestrator {
         await this.approveProject(p.projectId);
         this.launchCoding(p.projectId, p.path, threadKey, post);
         return;
+      } else if (p.kind === 'proposeReady') {
+        if (trimmed === '구현 시작' || trimmed === '승인' || trimmed === 'approve') {
+          this.pending.delete(threadKey);
+          if (!(await this.channelGate('coding', msg.userId, post))) return;
+          await this.startProposal(p.repoPath, p.goal, threadKey, post);
+          return;
+        }
+        // 비매칭 → 스테일 제안 버리고 아래 일반 흐름으로(disambiguate와 동일 패턴)
+        this.pending.delete(threadKey);
       }
     }
     // escape hatch: code <repoRef> <goal>
