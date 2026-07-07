@@ -70,7 +70,6 @@ export default function App() {
   };
 
   const ch = channels.find((c) => c.id === current);
-  const fill = (text: string) => { const i = document.getElementById('input') as HTMLInputElement | null; if (i) { i.value = text; i.focus(); } };
 
   // 답을 기대하며 "생각 중" 표시(멘션-전용 채널에서 비멘션이면 안 띄움 — chat.html expectReply 이전).
   const expectReply = (channelId: string, text: string) => {
@@ -131,7 +130,7 @@ export default function App() {
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
-                      onPick={fill} onSend={(text) => sendText(text)} />
+                      onSend={(text) => sendText(text)} />
                   ));
                 })()}
                 {current && awaiting.has(current) && (

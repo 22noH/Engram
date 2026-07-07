@@ -768,7 +768,7 @@ export class Orchestrator {
       await Promise.all(open.map((ticket) => this.sem!.run(async () => {
         if (this.runState !== 'running') return;
         try {
-          report(`  코딩 중: ${ticket.area} — ${ticket.instruction}`);
+          report(`  코딩 중: ${ticket.area}`);
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'RUNNING', attempts: ticket.attempts + 1 });
           const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk);
           budgetSpent += 1; // ponytail: 호출 수 근사. 실토큰 회계는 후속(§14).
