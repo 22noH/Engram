@@ -16,6 +16,7 @@ import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
 import { detectGate } from './gate-detect';
 import { loadPrompt } from './prompt-store';
+import { buildCodeChatPrompt, extractPropose, CODE_CHAT_DEFAULT } from './code-chat';
 import { CodingGit } from '../knowledge-core/coding-git';
 import { CodingSpecialist } from './coding-specialist';
 import { ReviewerAgent } from './reviewer-agent';
@@ -61,7 +62,8 @@ const TRIAGE_DEFAULT = [
 // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
 type PendingCode =
   | { kind: 'disambiguate'; candidates: string[]; goal: string }
-  | { kind: 'approve'; projectId: string; path: string };
+  | { kind: 'approve'; projectId: string; path: string }
+  | { kind: 'proposeReady'; repoPath: string; goal: string };
 
 // 허브(설계 §7.1). 모든 흐름이 경유 — Gateway는 Orchestrator만 알고 에이전트를 직접 모른다.
 // 매 턴 대화를 ConversationStore에 적재(B 수집 소스).
@@ -235,15 +237,20 @@ export class Orchestrator {
       return;
     }
 
-    // Code 채널(Phase 10): classify 건너뛰고 바인딩된 repoPath로 바로 코딩(오분류 차단).
-    // 벽은 아님 — 위의 escape hatch(team/ask/code/schedule)가 이미 처리됐다면 여기 안 옴.
+    // Code 채널(2026-07-07): 대화 기본. 레포 읽고 답하고, 코드요청이면 [구현 시작] 제안(escalate).
+    // 대화 자체는 게이트 없음(질문=chat과 동급). 코딩 게이트는 '구현 시작' 클릭 시(proposeReady 처리).
     if (msg.mode === 'code') {
       if (!msg.repoPath) {
         await post('이 채널엔 아직 작업 폴더가 없어요. 채널에 들어가 폴더를 먼저 선택해 주세요 📁');
         return;
       }
-      if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startProposal(msg.repoPath, trimmed, threadKey, post);
+      const { reply, goal } = await this.answerInCode(msg, threadKey);
+      if (goal && this.fence && this.projects) {
+        this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
+        await post(reply, [{ label: '구현 시작', send: '구현 시작' }]);
+      } else {
+        await post(reply); // 코딩 미배선이거나 순수 대화면 답만
+      }
       return;
     }
 
@@ -355,6 +362,32 @@ export class Orchestrator {
       return;
     }
     await this.startProposal(matches[0], goal, threadKey, post);
+  }
+
+  // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
+  // 조회만 한다 — 게시·pending은 호출 분기(Step 6)가 결정. 읽기전용이라 게이트 없음(질문=chat 동급).
+  private async answerInCode(msg: CoreMessage, threadKey: string): Promise<{ reply: string; goal?: string }> {
+    if (!this.codeBrain || !msg.repoPath) return { reply: '지금 답하기 어려웠어요 🙏' };
+
+    let recent = '';
+    try {
+      const recs = await this.conversations.recent(msg.userId, 6);
+      recent = recs.map((r) => `Q: ${r.question}\nA: ${r.answer.slice(0, 400)}`).join('\n');
+    } catch { /* 연속성 실패는 무시 — 답변은 계속 */ }
+
+    const tasks = this.tracker.status(threadKey);
+    const taskStatus = tasks.length ? tasks.map((t) => `- ${t.question} — ${t.state}`).join('\n') : '';
+
+    const prompt = buildCodeChatPrompt(loadPrompt('code-chat', CODE_CHAT_DEFAULT), {
+      repoPath: msg.repoPath, userText: msg.text.trim(), recent, taskStatus,
+    });
+    // 읽기전용 도구 + --add-dir로 레포 읽기 보장(헤드리스 claude가 cwd 밖을 막을 수 있음).
+    const r = await this.codeBrain.complete(prompt, undefined, {
+      cwd: msg.repoPath,
+      extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
+    });
+    if (r.isError) return { reply: '지금 답하기 어려웠어요 🙏' };
+    return extractPropose(r.text);
   }
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기.
