@@ -26,8 +26,10 @@ export function buildCodeChatPrompt(
 }
 
 // 두뇌 답에서 propose 마커를 떼어내고 goal을 뽑는다. 마커 없거나 깨지면 답만 반환.
+// 마커는 계약상 "답변 맨 끝"에만 온다(buildCodeChatPrompt) → 끝($)에 앵커한다.
+// 그래야 답변 중간에 인용된 마커(예: 이 기능 자체를 설명할 때)를 신호로 오인하지 않는다.
 export function extractPropose(text: string): { reply: string; goal?: string } {
-  const m = text.match(/```engram:propose\s*([\s\S]*?)```/);
+  const m = text.match(/```engram:propose\s*([\s\S]*?)```\s*$/);
   if (!m) return { reply: text.trim() };
   const reply = text.replace(m[0], '').trim();
   try {

@@ -18,6 +18,13 @@ describe('extractPropose', () => {
     const t = '답.\n```engram:propose\n{"goal":"  "}\n```';
     expect(extractPropose(t).goal).toBeUndefined();
   });
+  it('마커가 답변 중간에 인용되면(끝이 아니면) 신호로 취급 안 함 — 원문 그대로, goal 없음', () => {
+    // 예: 이 기능 자체를 설명하며 마커를 인용하는 경우
+    const t = '시스템은 ```engram:propose\n{"goal":"예시"}\n``` 블록을 답 끝에 붙여요. 그냥 설명이에요.';
+    const r = extractPropose(t);
+    expect(r.goal).toBeUndefined();
+    expect(r.reply).toBe(t.trim()); // 마커를 안 지움(신호 아님)
+  });
 });
 
 describe('buildCodeChatPrompt', () => {
