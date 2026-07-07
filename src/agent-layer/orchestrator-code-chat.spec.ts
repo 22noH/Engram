@@ -36,6 +36,21 @@ it('Code 채널 질문은 대화 답변만 — 버튼·제안 없음', async () 
   expect(posts[0].actions).toBeUndefined();
 });
 
+it('Code 채널 대화는 다음 턴 연속성을 위해 ConversationStore에 적재된다', async () => {
+  const brain = { complete: async () => ({ text: '원인은 X.', costUsd: 0, isError: false }) } as any;
+  const append = jest.fn(async () => {});
+  const conversations = { append, recent: async () => [] } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    {} as any, null as any, null as any, null as any, null as any,
+    brain, { assertWritable() {} } as any, null as any, { all: () => [] } as any, null as any,
+  );
+  const { post } = collect();
+  await o.handleMention({ text: '왜 막혔어?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+  expect(append).toHaveBeenCalledWith('c1', expect.objectContaining({ question: '왜 막혔어?', answer: '원인은 X.' }));
+});
+
 it('Code 채널 코드요청은 답변 + [구현 시작] 버튼 + pending=proposeReady', async () => {
   const orch = makeOrch('바로 붙일게.\n```engram:propose\n{"goal":"로그인 붙이기"}\n```');
   const { posts, post } = collect();

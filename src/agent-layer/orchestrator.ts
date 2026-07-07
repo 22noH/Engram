@@ -254,6 +254,10 @@ export class Orchestrator {
         return;
       }
       const { reply, goal } = await this.answerInCode(msg, threadKey);
+      // 이 채널의 다음 턴 연속성을 위해 Q&A 적재(answerInCode의 recent가 읽는다). 실패는 continuity만 포기.
+      try {
+        await this.conversations.append(msg.userId, { ts: new Date().toISOString(), question: msg.text, answer: reply, sources: [] });
+      } catch { /* 적재 실패는 답변에 영향 없음 */ }
       if (goal && this.fence && this.projects) {
         this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
         await post(reply, [{ label: '구현 시작', send: '구현 시작' }]);
@@ -391,6 +395,7 @@ export class Orchestrator {
       repoPath: msg.repoPath, userText: msg.text.trim(), recent, taskStatus,
     });
     // 읽기전용 도구 + --add-dir로 레포 읽기 보장(헤드리스 claude가 cwd 밖을 막을 수 있음).
+    // 읽기전용은 이 allowedTools에 쓰기 도구가 없음에 의존한다 — 프로필(brains.json)이 Edit/Write를 직접 주면 깨질 수 있음(기본 프로필 extraArgs는 비어 안전).
     const r = await this.codeBrain.complete(prompt, undefined, {
       cwd: msg.repoPath,
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
