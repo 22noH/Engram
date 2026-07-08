@@ -26,3 +26,15 @@ it('없는 페르소나는 throw', async () => {
   const sp = new SpecialistAgent(r, fakeFence, () => new FakeBrain(), fakeRag, { warn() {}, error() {} } as any);
   await expect(sp.contribute('Ghost', 'q', 'default')).rejects.toThrow();
 });
+
+it('specialist prompt: english + interactive directive', async () => {
+  let captured = '';
+  const brain = { complete: async (p: string) => { captured = p; return { text: 'x', costUsd: 0 }; } };
+  const registry = { get: () => ({ prompt: 'PERSONA', brain: 'claude' }) };
+  const rag = { search: async () => [] };
+  const resolveBrain = () => brain;
+  const s = new SpecialistAgent(registry as any, {} as any, resolveBrain as any, rag as any, { error(){} } as any);
+  await s.contribute('Manager', 'question', 'u');
+  expect(/[가-힣]/.test(captured)).toBe(false);
+  expect(captured).toContain("Respond in the language of the user's latest message.");
+});

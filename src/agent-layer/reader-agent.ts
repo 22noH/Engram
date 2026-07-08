@@ -6,6 +6,7 @@ import { PinoLogger } from '../pal/logger';
 import { CoreMessage } from '../edge/core-message';
 import { InsightContext } from '../knowledge-core/insight/insight-context';
 import { ConversationStore, ConversationRecord } from '../knowledge-core/conversation-store';
+import { outputDirective } from './language';
 
 const NO_HITS_HEADER = '⚠ 위키에 관련 내용 없음 — 일반 지식 기반 답변\n\n';
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
@@ -65,24 +66,24 @@ export class ReaderAgent {
     const context = hits.map((h, i) => `[${i + 1}] ${h.title} (slug: ${h.slug})\n${h.text}`).join('\n\n');
     const clip = (s: string): string => (s.length > 400 ? s.slice(0, 400) + '…' : s);
     const recentBlock = recent.length
-      ? `# 직전 대화 (연속성 참고 — 사실 근거 아님, 근거는 아래 위키)\n${recent
-          .map((r) => `사용자: ${clip(r.question)}\nEngram: ${clip(r.answer)}`)
+      ? `# Prior conversation (continuity reference — not evidence; evidence is the wiki below)\n${recent
+          .map((r) => `User: ${clip(r.question)}\nEngram: ${clip(r.answer)}`)
           .join('\n')}\n\n`
       : '';
     const insightBlock = ctx
-      ? `# 참고용 사용자 맥락 (답의 근거 아님 — 근거는 아래 위키)\n${ctx}\n\n`
+      ? `# User context for reference (not evidence — evidence is the wiki below)\n${ctx}\n\n`
       : '';
     return [
-      '아래 검색된 위키 내용을 우선 근거로 질문에 답하라.',
-      '사용한 근거는 [n]으로 표기하라. 검색 내용으로 답할 수 없으면 위키 밖 일반 지식임을 명시하라.',
-      '직전 대화가 있으면 그 흐름을 이어서 답하라(짧은 답장·지시어는 직전 대화 기준으로 해석).',
-      // UI 렌더 지원(수치가 실제 있을 때만, 지어내지 말 것):
-      '수치·시계열이 있으면 차트 블록을 함께 넣어라(UI가 그래프로 렌더): ```chart {"type":"bar|line|pie","title":"제목","labels":["A","B"],"values":[1,2],"unit":"%"} ``` (bar/line=추이·비교, pie=비중).',
-      '항목별 값 비교는 마크다운 표(| 헤더 | ... |)로도 좋다 — 등락은 ▲2.3%(상승)·▼1.1%(하락)처럼 화살표를 붙이면 UI가 초록/빨강으로 칠한다. 할 일 목록은 - [ ] / - [x] 체크박스로.',
+      'Answer the question using the searched wiki content below as the primary basis.',
+      'Mark the evidence you use with [n]. If the search content cannot answer it, state that this is general knowledge outside the wiki.',
+      'If there is prior conversation, continue its flow (interpret short replies and pronouns against the prior conversation).',
+      'If there are numbers/time series, include a chart block (the UI renders it as a graph): ```chart {"type":"bar|line|pie","title":"title","labels":["A","B"],"values":[1,2],"unit":"%"} ``` (bar/line = trend/compare, pie = share).',
+      'Per-item comparisons also work as a markdown table (| header | ... |) — for changes attach arrows like ▲2.3% (up) / ▼1.1% (down) and the UI colors them green/red. Use - [ ] / - [x] checkboxes for to-do lists.',
+      outputDirective('interactive'),
       '',
-      recentBlock + insightBlock + `# 검색된 위키\n${context || '(없음)'}`,
+      recentBlock + insightBlock + `# Searched wiki\n${context || '(none)'}`,
       '',
-      `# 질문\n${question}`,
+      `# Question\n${question}`,
     ].join('\n');
   }
 }

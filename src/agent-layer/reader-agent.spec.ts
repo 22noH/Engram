@@ -90,7 +90,7 @@ describe('ReaderAgent 인사이트 주입', () => {
     const ctx = { latest: async () => '(2026-06-28 기준) 도커 집중' } as unknown as InsightContext;
     const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, insightLogger, ctx);
     await reader.handle({ text: 'q', userId: 'default' });
-    expect(prompt).toContain('참고용 사용자 맥락');
+    expect(prompt).toContain('User context for reference');
     expect(prompt).toContain('도커 집중');
   });
 
@@ -98,7 +98,7 @@ describe('ReaderAgent 인사이트 주입', () => {
     let prompt = '';
     const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, insightLogger);
     await reader.handle({ text: 'q', userId: 'default' });
-    expect(prompt).not.toContain('참고용 사용자 맥락');
+    expect(prompt).not.toContain('User context for reference');
   });
 });
 
@@ -114,7 +114,7 @@ describe('ReaderAgent 직전 대화 주입(연속성)', () => {
     } as any;
     const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, logger2, undefined, convs);
     await reader.handle({ text: '1 웹검색허용', userId: 'ch-1' });
-    expect(prompt).toContain('# 직전 대화');
+    expect(prompt).toContain('# Prior conversation');
     expect(prompt).toContain('코스피 요약해줘');
     expect(prompt).toContain('허용할까요?');
   });
@@ -123,7 +123,7 @@ describe('ReaderAgent 직전 대화 주입(연속성)', () => {
     let prompt = '';
     const reader = new ReaderAgent(ragWith([]), brainEcho((p) => { prompt = p; }) as any, logger2);
     await reader.handle({ text: 'q', userId: 'default' });
-    expect(prompt).not.toContain('# 직전 대화');
+    expect(prompt).not.toContain('# Prior conversation');
   });
 
   it('recent()가 던져도 답변은 진행된다(연속성만 포기)', async () => {
@@ -143,4 +143,12 @@ describe('ReaderAgent 직전 대화 주입(연속성)', () => {
     expect(prompt).toContain('A'.repeat(400) + '…');
     expect(prompt).not.toContain('A'.repeat(401));
   });
+});
+
+it('reader prompt: english + interactive directive + chart contract', () => {
+  const r = new ReaderAgent({} as any, {} as any, { error(){} } as any);
+  const p = (r as any).buildPrompt('question?', [], '', []) as string;
+  expect(/[가-힣]/.test(p)).toBe(false);
+  expect(p).toContain("Respond in the language of the user's latest message.");
+  expect(p).toContain('```chart');
 });

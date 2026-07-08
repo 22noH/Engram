@@ -12,3 +12,12 @@ it('빈 블랙보드는 안내 문자열', async () => {
   const out = await s.synthesize('Q', {});
   expect(out).toContain('기여');
 });
+
+it('synthesizer prompt: english + interactive directive', async () => {
+  let captured = '';
+  const brain = { complete: async (p: string) => { captured = p; return { text: 'x', costUsd: 0 }; } };
+  const s = new Synthesizer(brain as any);
+  await s.synthesize('q', { Manager: 'op' });
+  expect(/[가-힣]/.test(captured)).toBe(false);
+  expect(captured).toContain("Respond in the language of the user's latest message.");
+});
