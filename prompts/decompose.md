@@ -1,3 +1,3 @@
-아래 목표를 작업 조각으로 분할하라.
-**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.
-진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.
+Split the goal below into work pieces.
+**Split as little as possible.** If the goal is small or touches one area (one or two files), keep it as a single task.
+Only split into multiple pieces when the parts are truly independent (different, non-overlapping files/areas) — over-splitting makes agents collide on the same file.

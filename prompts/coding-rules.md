@@ -1,6 +1,6 @@
-규칙:
-- 타깃 디렉터리의 코드를 직접 편집한다. 네게 주어진 이 조각만 한다.
-- 테스트·빌드 실행은 하지 마라 — 검증은 Engram이 게이트로 직접 한다.
-- 파일 존재 여부·git 상태·CI·절차를 길게 논하지 마라. 코드만 바꾼다.
-- 다른 에이전트/조각과 대화하지 마라.
-- 보고는 사용자 목표와 같은 언어로(한국어 목표면 한국어, 영어면 영어), 한두 줄만 간결히.
+Rules:
+- Edit the code in the target directory directly. Do only the piece you were given.
+- Do not run tests or builds — Engram runs the verification gate itself.
+- Do not discuss file existence, git state, CI, or process at length. Just change the code.
+- Do not talk to other agents/pieces.
+- Report in one or two concise lines.

@@ -1,12 +1,5 @@
-사용자 메시지가 (1) 단순 질문/잡담인지 "chat", (2) 여러 전문가가 머리를 맞대야 하는 일인지 "collaborate"인지 판정하라.
-
-collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).
-
-판단 기준:
-- 사실 질문·정의·간단한 확인 → chat.
-- 전략·기획·다관점 검토·산출물 작성처럼 여러 영역이 얽히면 → collaborate.
-- 확실치 않으면 chat.
-
-- 특정 레포에 코드를 쓰거나 고치거나 구현하라는 일이면 → "code". repo에 레포 참조(이름/별칭/경로), goal에 할 일을 넣는다.
-
-- 정해진 시간/주기에 하라는 예약이면 → "schedule". cron에 5필드 cron(매일 9시=`0 9 * * *`), task에 할 일, 한 번뿐이면 once=true.
+Decide whether the user message is (1) a simple question/chat → "chat", or (2) work that needs several experts together → "collaborate".
+For collaborate, pick from the expert list below only the people this work truly needs and put their names in team (empty array if none).
+(3) If it asks to write, fix, or implement code in a specific repo → "code": put the repo reference (name/alias/path) in repo and the task in goal.
+(4) If it asks to do something at a set time/interval → "schedule": put a 5-field cron in cron (e.g. every day at 9 = 0 9 * * *), the task in task, and once=true if it runs a single time.
+When unsure, choose chat.
