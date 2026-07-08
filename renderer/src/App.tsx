@@ -9,8 +9,13 @@ import { Palette, filterCommands } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
 import { T } from './i18n';
 
-// 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${name}` (채널id 매핑).
-// 채널은 이름으로 식별되는 논리 채널 — 여러 연결이 동명 채널을 가지면 하나로 합쳐 보인다.
+// 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
+// — 동일 연결에 동명·타모드 채널(예: chat "일반"과 code "일반")이 있어도 충돌 않게 mode로 한정한다).
+// 채널은 이름+모드로 식별되는 논리 채널 — 여러 연결이 동명·동모드 채널을 가지면 하나로 합쳐 보인다.
+function chanKey(connId: string, mode: string, name: string): string {
+  return `${connId}::${mode}::${name}`;
+}
+
 export default function App() {
   const [connState, setConnState] = useState(() => loadConnections());
   useEffect(() => { saveConnections(connState); }, [connState]);
@@ -24,7 +29,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
-  const [errText, setErrText] = useState('');
+  const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
@@ -35,6 +40,7 @@ export default function App() {
   const chanIdByConnNameRef = useRef(chanIdByConnName); chanIdByConnNameRef.current = chanIdByConnName;
   const msgsByConnChRef = useRef(msgsByConnCh); msgsByConnChRef.current = msgsByConnCh;
   const channelsByConnRef = useRef(channelsByConn); channelsByConnRef.current = channelsByConn;
+  const modeRef = useRef(mode); modeRef.current = mode;
 
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름 키 — 그 연결의 channels 프레임이 그 이름을 갖고 돌아오면 flush.
@@ -45,7 +51,9 @@ export default function App() {
       setChannelsByConn((prev) => ({ ...prev, [connId]: f.list }));
       setChanIdByConnName((prev) => {
         const next = new Map(prev);
-        for (const c of f.list) next.set(`${connId}::${c.name}`, c.id);
+        // Minor: 이 연결의 기존 엔트리를 먼저 지우고 새로 채운다 — 삭제된 채널이 stale로 안 남게.
+        for (const key of next.keys()) if (key.startsWith(`${connId}::`)) next.delete(key);
+        for (const c of f.list) next.set(chanKey(connId, c.mode ?? 'chat', c.name), c.id);
         return next;
       });
       const pending = pendingSendRef.current.get(connId);
@@ -75,12 +83,18 @@ export default function App() {
       }
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
-      setErrText(f.text);
+      setErrText((prev) => ({ ...prev, [connId]: f.text }));
     }
   }
 
   function onOpen(connId: string) {
-    setErrText(''); // 재연결 시 이전 에러 툴팁 제거
+    // 재연결 시 이 연결분 에러만 지운다(다른 연결의 에러를 덮어쓰지 않게 — 연결별 상태).
+    setErrText((prev) => {
+      if (!(connId in prev)) return prev;
+      const next = { ...prev };
+      delete next[connId];
+      return next;
+    });
     // 재연결 시 이 연결분만 파일 진실원과 재동기화(다른 연결의 캐시는 그대로 둔다).
     setMsgsByConnCh((prev) => {
       const next = new Map(prev);
@@ -90,7 +104,7 @@ export default function App() {
     send(connId, { t: 'channels' });
     const name = currentNameRef.current;
     if (name) {
-      const chanId = chanIdByConnNameRef.current.get(`${connId}::${name}`);
+      const chanId = chanIdByConnNameRef.current.get(chanKey(connId, modeRef.current, name));
       if (chanId) send(connId, { t: 'history', channelId: chanId });
     }
   }
@@ -108,38 +122,38 @@ export default function App() {
   useEffect(() => {
     if (!currentName) return;
     for (const c of connState.connections) {
-      const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+      const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
       if (chanId && !msgsByConnCh.has(`${c.id}::${chanId}`)) {
         send(c.id, { t: 'history', channelId: chanId });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentName, channelsByConn]);
+  }, [currentName, mode, channelsByConn]);
 
   // 새 메시지/채널 전환/생각중 변화 시 맨 아래로(chat.html box.scrollTop=scrollHeight 이전).
   const mergedMsgs = useMemo(() => {
     if (!currentName) return [] as Msg[];
     const parts = connState.connections
       .map((c) => {
-        const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+        const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
         if (!chanId) return null;
         return { connId: c.id, messages: msgsByConnCh.get(`${c.id}::${chanId}`) ?? [] };
       })
       .filter((x): x is { connId: string; messages: Msg[] } => x !== null);
     return mergeThreads(parts);
-  }, [currentName, connState.connections, chanIdByConnName, msgsByConnCh]);
+  }, [currentName, mode, connState.connections, chanIdByConnName, msgsByConnCh]);
 
   // anchor(및 답)의 소유 연결 — 스레드 답글을 그 스레드를 연 Engram으로 라우팅하는 데 쓰인다.
   const anchorConn = useMemo(() => {
     const m = new Map<string, string>();
     if (!currentName) return m;
     for (const c of connState.connections) {
-      const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+      const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
       if (!chanId) continue;
       for (const msg of msgsByConnCh.get(`${c.id}::${chanId}`) ?? []) m.set(msg.id, c.id);
     }
     return m;
-  }, [currentName, connState.connections, chanIdByConnName, msgsByConnCh]);
+  }, [currentName, mode, connState.connections, chanIdByConnName, msgsByConnCh]);
 
   useEffect(() => {
     const box = msgsRef.current;
@@ -160,7 +174,7 @@ export default function App() {
   // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
   const fanoutToName = (name: string, build: (channelId: string) => ClientFrame) => {
     for (const c of connState.connections) {
-      const chanId = chanIdByConnName.get(`${c.id}::${name}`);
+      const chanId = chanIdByConnName.get(chanKey(c.id, mode, name));
       if (chanId) send(c.id, build(chanId));
     }
   };
@@ -185,7 +199,7 @@ export default function App() {
     const targetConnId = threadId
       ? (anchorConn.get(threadId) ?? connState.defaultConnId)
       : routeTarget(text, connState.defaultConnId, connState.connections);
-    const channelId = chanIdByConnName.get(`${targetConnId}::${currentName}`);
+    const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
       send(targetConnId, { t: 'send', channelId, text, threadId });
     } else if (!threadId) {
@@ -201,7 +215,7 @@ export default function App() {
   return (
     <>
       <div id="titlebar">
-        <span id="dot" className={statusById[connState.defaultConnId] ? 'on' : ''} title={errText} />
+        <span id="dot" className={statusById[connState.defaultConnId] ? 'on' : ''} title={errText[connState.defaultConnId] ?? ''} />
         <span id="tbtitle">Engram</span>
         <select
           id="defaultEngram"
