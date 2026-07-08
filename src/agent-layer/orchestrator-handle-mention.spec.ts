@@ -23,7 +23,7 @@ it('분류 collaborate → ack 후 백그라운드 결과 post', async () => {
   const posts: string[] = [];
   await o.handleMention({ text: '서버 비용 줄여줘', userId: 'c1' }, async (t) => { posts.push(t); });
   await (o as any).drainForTest();
-  expect(posts[0]).toContain('알아볼게요');
+  expect(posts[0]).toContain('looking into it');
   expect(posts).toContain('종합');
 });
 
@@ -87,7 +87,7 @@ it('상태 → 진행 중 작업 보고', async () => {
   await o.handleMention({ text: '분석해줘', userId: 'c1' }, async () => {}); // 백그라운드 시작(미완)
   const statusPosts: string[] = [];
   await o.handleMention({ text: '상태', userId: 'c1' }, async (t) => { statusPosts.push(t); });
-  expect(statusPosts[0]).toContain('진행 중');
+  expect(statusPosts[0]).toContain('In progress');
   release();
   await (o as any).drainForTest();
 });
@@ -96,7 +96,7 @@ it('상태 — 작업 없으면 안내', async () => {
   const o = orc('{"kind":"chat","team":[]}');
   const posts: string[] = [];
   await o.handleMention({ text: 'status', userId: 'c9' }, async (t) => { posts.push(t); });
-  expect(posts[0]).toContain('없어요');
+  expect(posts[0]).toContain('No tasks currently running');
 });
 
 it('백그라운드 실패 → 사과 post(상주 불사)', async () => {
@@ -105,7 +105,7 @@ it('백그라운드 실패 → 사과 post(상주 불사)', async () => {
   const posts: string[] = [];
   await o.handleMention({ text: 'q', userId: 'c1' }, async (t) => { posts.push(t); });
   await (o as any).drainForTest();
-  expect(posts.some((p) => p.includes('문제가 생겼어요'))).toBe(true);
+  expect(posts.some((p) => p.includes('Something went wrong'))).toBe(true);
 });
 
 it('상태 — 실패한 작업은 (실패)로 표시', async () => {
@@ -115,5 +115,5 @@ it('상태 — 실패한 작업은 (실패)로 표시', async () => {
   await (o as any).drainForTest();
   const posts: string[] = [];
   await o.handleMention({ text: '상태', userId: 'c1' }, async (t) => { posts.push(t); });
-  expect(posts[0]).toContain('(실패)');
+  expect(posts[0]).toContain('(failed)');
 });

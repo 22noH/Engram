@@ -28,8 +28,8 @@ it('coding 차단: classify code → 안내, startCoding 미호출', async () =>
   const posts: string[] = [];
   await o.handleMention({ text: 'api에 g', userId: 'c1' }, async (t: string) => { posts.push(t); });
   expect(called).toBe(false);
-  expect(posts[0]).toContain('코딩');
-  expect(posts[0]).toContain('쓸 수 없어요');
+  expect(posts[0]).toContain('coding');
+  expect(posts[0]).toContain("doesn't allow");
 });
 
 it('coding 차단: code hatch도 동일', async () => {
@@ -47,7 +47,7 @@ it('coding 차단: resume hatch(자가 재개 발사)도 안내만', async () =>
   const posts: string[] = [];
   await o.handleMention({ text: 'resume p1 1', userId: 'c1' }, async (t: string) => { posts.push(t); });
   expect(called).toBe(false);
-  expect(posts[0]).toContain('코딩');
+  expect(posts[0]).toContain('coding');
 });
 
 it('schedule 차단: classify schedule·hatch → 안내, doSchedule 미호출', async () => {
@@ -58,8 +58,8 @@ it('schedule 차단: classify schedule·hatch → 안내, doSchedule 미호출',
   await o.handleMention({ text: '매일 9시 X', userId: 'c1' }, async (t: string) => { posts.push(t); });
   await o.handleMention({ text: 'schedule 0 9 * * * X', userId: 'c1' }, async (t: string) => { posts.push(t); });
   expect(called).toBe(false);
-  expect(posts[0]).toContain('예약');
-  expect(posts[1]).toContain('예약');
+  expect(posts[0]).toContain('scheduling');
+  expect(posts[1]).toContain('scheduling');
 });
 
 it('schedule 차단 채널에서도 예약목록·예약취소는 동작(읽기/정리)', async () => {
@@ -74,7 +74,7 @@ it('schedule 차단 채널에서도 예약목록·예약취소는 동작(읽기/
   await o.handleMention({ text: '예약목록', userId: 'c1' }, async (t: string) => { posts.push(t); });
   await o.handleMention({ text: '예약취소 x1', userId: 'c1' }, async (t: string) => { posts.push(t); });
   expect(posts[0]).toContain('#x1');
-  expect(posts[1]).toContain('취소');
+  expect(posts[1]).toContain('Cancelled');
 });
 
 it('collaborate 차단: classify collaborate·team·retry → 안내, launchCollaboration 미호출', async () => {
@@ -86,7 +86,7 @@ it('collaborate 차단: classify collaborate·team·retry → 안내, launchColl
   await o.handleMention({ text: 'team Manager 정리해줘', userId: 'c1' }, async (t: string) => { posts.push(t); });
   await o.handleMention({ text: 'retry 1 Manager 정리해줘', userId: 'c1' }, async (t: string) => { posts.push(t); });
   expect(called).toBe(0);
-  expect(posts.every((p) => p.includes('협업'))).toBe(true);
+  expect(posts.every((p) => p.includes('collaboration'))).toBe(true);
 });
 
 it('정책 미설정(기본값) → 전부 통과(기존 동작)', async () => {

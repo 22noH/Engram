@@ -27,8 +27,8 @@ describe('Orchestrator.codeRun', () => {
     const progress: string[] = [];
     const r = await o.codeRun('p', { maxRounds: 5, onProgress: (m) => progress.push(m) });
     expect(r.status).toBe('SUCCESS');
-    expect(progress.some((m) => m.includes('분해 완료'))).toBe(true); // 진행 narrate 호출 확인
-    expect(progress.some((m) => m.includes('착지'))).toBe(true);
+    expect(progress.some((m) => m.includes('Breakdown complete'))).toBe(true); // 진행 narrate 호출 확인
+    expect(progress.some((m) => m.includes('Landed'))).toBe(true);
   });
 
   it('게이트 계속 빨강 + 진전 없으면 STUCK', async () => {

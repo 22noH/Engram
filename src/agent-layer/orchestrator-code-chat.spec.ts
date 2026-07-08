@@ -59,7 +59,7 @@ it('Code 채널 코드요청은 답변 + [구현 시작] 버튼 + pending=propos
   );
   expect(posts).toHaveLength(1);
   expect(posts[0].text).toBe('바로 붙일게.');
-  expect(posts[0].actions).toEqual([{ label: '구현 시작', send: '구현 시작' }]);
+  expect(posts[0].actions).toEqual([{ label: 'Start implementation', send: '구현 시작' }]);
   expect((orch as any).pending.get('c1')).toEqual({ kind: 'proposeReady', repoPath: 'C:/repo/app', goal: '로그인 붙이기' });
 });
 

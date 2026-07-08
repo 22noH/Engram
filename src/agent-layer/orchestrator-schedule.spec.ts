@@ -32,7 +32,7 @@ it('classify schedule → scheduler.add 호출 + 확인 게시', async () => {
   const posts: string[] = [];
   await o.handleMention({ text: '매일 9시에 서버비 정리해줘', userId: 'c1' }, async (t) => { posts.push(t); });
   expect(sch.calls.add[0]).toMatchObject({ channelId: 'c1', cron: '0 9 * * *', task: '서버비 정리' });
-  expect(posts[0]).toContain('예약했어요');
+  expect(posts[0]).toContain('scheduled');
 });
 
 it('add가 null(잘못된 cron) → 되묻기', async () => {
@@ -40,7 +40,7 @@ it('add가 null(잘못된 cron) → 되묻기', async () => {
   o.setScheduler(fakeScheduler() as any);
   const posts: string[] = [];
   await o.handleMention({ text: '언젠가 X', userId: 'c1' }, async (t) => { posts.push(t); });
-  expect(posts[0]).toContain('언제인지');
+  expect(posts[0]).toContain('Not sure when you mean');
 });
 
 it('예약목록 → list 집계 게시', async () => {
@@ -58,7 +58,7 @@ it('예약취소 <id> → remove 호출', async () => {
   const posts: string[] = [];
   await o.handleMention({ text: '예약취소 x1', userId: 'c1' }, async (t) => { posts.push(t); });
   expect(sch.calls.remove).toEqual(['x1']);
-  expect(posts[0]).toContain('취소');
+  expect(posts[0]).toContain('Cancelled');
 });
 
 it('escape hatch "schedule <cron> <task>" → add', async () => {
@@ -72,7 +72,7 @@ it('scheduler 미주입 → 안내', async () => {
   const o = orc('{"kind":"schedule","cron":"0 9 * * *","task":"X"}');
   const posts: string[] = [];
   await o.handleMention({ text: '매일 9시 X', userId: 'c1' }, async (t) => { posts.push(t); });
-  expect(posts[0]).toContain('준비되지 않');
+  expect(posts[0]).toContain("isn't set up yet");
 });
 
 it('예약취소 — 다른 채널 소유 예약은 취소 안 함(채널 스코프)', async () => {
@@ -82,12 +82,12 @@ it('예약취소 — 다른 채널 소유 예약은 취소 안 함(채널 스코
   const posts: string[] = [];
   await o.handleMention({ text: '예약취소 other', userId: 'c1' }, async (t) => { posts.push(t); });
   expect(sch.calls.remove).toEqual([]); // 소유 아님 → remove 미호출
-  expect(posts[0]).toContain('못 찾');
+  expect(posts[0]).toContain("Couldn't find");
 });
 
 it('scheduler 미주입 상태의 예약취소 → 준비 안 됨 안내', async () => {
   const o = orc('{"kind":"chat","team":[]}'); // scheduler 미주입
   const posts: string[] = [];
   await o.handleMention({ text: '예약취소 x1', userId: 'c1' }, async (t) => { posts.push(t); });
-  expect(posts[0]).toContain('준비되지 않');
+  expect(posts[0]).toContain("isn't set up yet");
 });

@@ -33,6 +33,7 @@ import { computeResume } from './resume-policy';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import type { Action } from '../../shared/protocol';
 import { outputDirective, configuredLang } from './language';
+import { t } from './i18n';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 type PostFn = (text: string, actions?: Action[]) => Promise<void>;
@@ -149,13 +150,13 @@ export class Orchestrator {
     if (p) {
       if (trimmed === '취소' || trimmed === '아니오' || trimmed === 'cancel') {
         this.pending.delete(threadKey);
-        await post('취소했어요.');
+        await post(t('cancelled'));
         return;
       }
       if (p.kind === 'disambiguate') {
         if (/^\d+$/.test(trimmed)) {
           const n = parseInt(trimmed, 10);
-          if (n < 1 || n > p.candidates.length) { await post(`1~${p.candidates.length} 중에서 골라주세요.`); return; }
+          if (n < 1 || n > p.candidates.length) { await post(t('chooseFromRange', p.candidates.length)); return; }
           this.pending.delete(threadKey);
           await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post);
           return;
@@ -195,10 +196,10 @@ export class Orchestrator {
     }
     if (trimmed.startsWith('예약취소 ') || trimmed.startsWith('schedule cancel ')) {
       const id = (trimmed.startsWith('예약취소 ') ? trimmed.slice('예약취소 '.length) : trimmed.slice('schedule cancel '.length)).trim();
-      if (!this.scheduler) { await post('예약 기능이 준비되지 않았어요.'); return; }
+      if (!this.scheduler) { await post(t('scheduleNotReady')); return; }
       const mine = this.scheduler.list(msg.userId).some((e) => e.id === id);
       const ok = mine && this.scheduler.remove(id);
-      await post(ok ? '취소했어요.' : '그 예약을 못 찾았어요.');
+      await post(ok ? t('cancelled') : t('scheduleNotFound'));
       return;
     }
     if (trimmed.startsWith('schedule ')) {
@@ -225,7 +226,7 @@ export class Orchestrator {
         const attempt = parseInt(m[1], 10);
         const team = m[2].split(',').map((s) => s.trim()).filter(Boolean);
         if (!(await this.channelGate('collaborate', msg.userId, post))) return;
-        await post(`팀 구성: ${team.join('·')} — 다시 해볼게요 (재시도 ${attempt}/2)`);
+        await post(t('teamFormedRetry', team.join('·'), attempt));
         this.launchCollaboration(m[3], team.length ? team : ['Manager'], msg.userId, threadKey, post, attempt);
         return;
       }
@@ -238,7 +239,7 @@ export class Orchestrator {
       const q = sp < 0 ? '' : rest.slice(sp + 1);
       const team = names.length ? names : ['Manager'];
       if (!(await this.channelGate('collaborate', msg.userId, post))) return;
-      await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
+      await post(t('teamFormed', team.join('·')));
       this.launchCollaboration(q, team, msg.userId, threadKey, post);
       return;
     }
@@ -251,7 +252,7 @@ export class Orchestrator {
     // 대화 자체는 게이트 없음(질문=chat과 동급). 코딩 게이트는 '구현 시작' 클릭 시(proposeReady 처리).
     if (msg.mode === 'code') {
       if (!msg.repoPath) {
-        await post('이 채널엔 아직 작업 폴더가 없어요. 채널에 들어가 폴더를 먼저 선택해 주세요 📁');
+        await post(t('noRepoFolder'));
         return;
       }
       const { reply, goal } = await this.answerInCode(msg, threadKey);
@@ -261,7 +262,7 @@ export class Orchestrator {
       } catch { /* 적재 실패는 답변에 영향 없음 */ }
       if (goal && this.fence && this.projects) {
         this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
-        await post(reply, [{ label: '구현 시작', send: '구현 시작' }]);
+        await post(reply, [{ label: t('startImplementationLabel'), send: '구현 시작' }]);
       } else {
         await post(reply); // 코딩 미배선이거나 순수 대화면 답만
       }
@@ -282,7 +283,7 @@ export class Orchestrator {
     if (decision.kind === 'collaborate') {
       if (!(await this.channelGate('collaborate', msg.userId, post))) return;
       const team = decision.team.length ? decision.team : ['Manager'];
-      await post(`팀 구성: ${team.join('·')} — 알아볼게요`);
+      await post(t('teamFormed', team.join('·')));
       this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
       return;
     }
@@ -299,7 +300,7 @@ export class Orchestrator {
     post: PostFn,
     attempt = 0,
   ): void {
-    const t = this.tracker.start(threadKey, { question, team });
+    const tracked = this.tracker.start(threadKey, { question, team });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         const result = await this.collaborate(question, team, userId, { onProgress: post });
@@ -307,16 +308,16 @@ export class Orchestrator {
         await this.conversations
           .append(userId, { ts: new Date().toISOString(), question, answer: result, sources: [] })
           .catch(() => {});
-        this.tracker.finish(threadKey, t.id, 'done');
+        this.tracker.finish(threadKey, tracked.id, 'done');
         await post(result);
       } catch (err) {
-        this.tracker.finish(threadKey, t.id, 'failed');
+        this.tracker.finish(threadKey, tracked.id, 'failed');
         this.logger.warn(`백그라운드 협업 실패: ${String(err)}`, 'Orchestrator');
         try {
           // 자가 재시도(6b-3-2): 예외 실패만, 상한 2회. 예약 실패(미주입·null)는 기존 메시지 강등.
-          if (attempt >= 2) { await post('작업 중 문제가 생겼어요 — 사람이 봐야 해요 🙏'); return; }
+          if (attempt >= 2) { await post(t('collabFailedNeedHuman')); return; }
           if (await this.scheduleCollabRetry(question, team, threadKey, attempt, post)) return;
-          await post('작업 중 문제가 생겼어요 🙏');
+          await post(t('collabFailed'));
         } catch { /* post도 실패하면 포기 */ }
       }
     })().finally(() => {
@@ -349,8 +350,8 @@ export class Orchestrator {
     post: PostFn,
   ): Promise<boolean> {
     if (allows(this.policy(), channelId, cap)) return true;
-    const label: Record<string, string> = { coding: '코딩', schedule: '예약', collaborate: '협업' };
-    await post(`이 채널에선 ${label[cap]}을 쓸 수 없어요(채널 설정).`);
+    const label: Record<string, string> = { coding: t('capCoding'), schedule: t('capSchedule'), collaborate: t('capCollaborate') };
+    await post(t('channelCapBlocked', label[cap]));
     return false;
   }
 
@@ -363,16 +364,16 @@ export class Orchestrator {
   private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
     const matches = this.resolveRepoPaths(repoRef);
     if (matches.length === 0) {
-      await post(`'${repoRef}' 레포를 못 찾았어요. coderepos.json의 alias나 정확한 경로로 불러주세요.`);
+      await post(t('repoNotFound', repoRef));
       return;
     }
     if (matches.length > 1) {
       this.pending.set(threadKey, { kind: 'disambiguate', candidates: matches, goal });
       const actions: Action[] = [
         ...matches.map((m, i) => ({ label: `${i + 1}. ${m}`, send: String(i + 1) })),
-        { label: '취소', send: '취소' },
+        { label: t('cancelLabel'), send: '취소' },
       ];
-      await post(`여러 개 찾았어요:\n${matches.map((m, i) => `${i + 1}. ${m}`).join('\n')}\n@Engram <번호>로 골라주세요.`, actions);
+      await post(t('multipleReposFound', matches.map((m, i) => `${i + 1}. ${m}`).join('\n')), actions);
       return;
     }
     await this.startProposal(matches[0], goal, threadKey, post);
@@ -381,7 +382,7 @@ export class Orchestrator {
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
   // 조회만 한다 — 게시·pending은 호출 분기(Step 6)가 결정. 읽기전용이라 게이트 없음(질문=chat 동급).
   private async answerInCode(msg: CoreMessage, threadKey: string): Promise<{ reply: string; goal?: string }> {
-    if (!this.codeBrain || !msg.repoPath) return { reply: '지금 답하기 어려웠어요 🙏' };
+    if (!this.codeBrain || !msg.repoPath) return { reply: t('answerUnavailable') };
 
     let recent = '';
     try {
@@ -401,47 +402,45 @@ export class Orchestrator {
       cwd: msg.repoPath,
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
     });
-    if (r.isError) return { reply: '지금 답하기 어려웠어요 🙏' };
+    if (r.isError) return { reply: t('answerUnavailable') };
     return extractPropose(r.text);
   }
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기.
   private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
-    if (!this.fence || !this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
+    if (!this.fence || !this.projects) { await post(t('codingNotReady')); return; }
     try { this.fence.assertWritable(targetPath); }
-    catch { await post('그 경로엔 쓸 수 없어요(보호 경로).'); return; }
+    catch { await post(t('pathProtected')); return; }
     const cfg = await this.proposeProject(targetPath, goal);
     this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
     const crit = cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
     await post(
-      `📁 대상: ${targetPath}\n📋 완성조건:\n${crit}\n` +
-      `게이트: test=${cfg.gate.test}|build=${cfg.gate.build}|typecheck=${cfg.gate.typecheck}\n` +
-      `맞으면 @Engram 승인 / 취소는 @Engram 취소`,
+      t('proposalReady', targetPath, crit, cfg.gate.test, cfg.gate.build, cfg.gate.typecheck),
       [
-        { label: '✅ 승인', send: '승인', confirm: '자율 코딩을 시작할까요?' },
-        { label: '취소', send: '취소' },
+        { label: t('approveLabel'), send: '승인', confirm: t('startCodingConfirm') },
+        { label: t('cancelLabel'), send: '취소' },
       ],
     );
   }
 
   // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
   private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0): void {
-    const t = this.tracker.start(threadKey, { question: `코딩: ${targetPath}`, team: ['Coder'] });
+    const tracked = this.tracker.start(threadKey, { question: t('codingTaskLabel', targetPath), team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
-        await post('자율 코딩 시작할게요. 진행은 여기 올릴게요.');
+        await post(t('codingStarted'));
         const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); } });
-        this.tracker.finish(threadKey, t.id, r.status === 'SUCCESS' ? 'done' : 'failed');
+        this.tracker.finish(threadKey, tracked.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
-          if (attempt >= 2) { await post(`⚠️ 두 번 재개해도 못 끝냈어요 — 사람이 봐야 해요 🙏 (세션 ${r.sessionId})`); return; }
+          if (attempt >= 2) { await post(t('resumeGaveUp', r.sessionId)); return; }
           if (await this.scheduleCodingResume(projectId, r.status, threadKey, attempt, post)) return;
         }
         await post(this.codingResultMessage(r, targetPath));
       } catch (err) {
-        this.tracker.finish(threadKey, t.id, 'failed');
+        this.tracker.finish(threadKey, tracked.id, 'failed');
         this.logger.warn(`백그라운드 코딩 실패: ${String(err)}`, 'Orchestrator');
-        try { await post('코딩 중 문제가 생겼어요 🙏'); } catch { /* post도 실패하면 포기 */ }
+        try { await post(t('codingFailed')); } catch { /* post도 실패하면 포기 */ }
       }
     })().finally(() => {
       const idx = this.inflight.indexOf(work);
@@ -467,20 +466,20 @@ export class Orchestrator {
       { internal: true },
     );
     if (!e) return false;
-    const why = status === 'STUCK' ? '막힘(진전 정체)' : '예산 소진';
-    await post(`⏸ ${why} — ${human} 자동 재개 예약했어요 (#${e.id}, 재개 ${attempt + 1}/2). 멈추려면 @Engram 예약취소 ${e.id}`);
+    const why = status === 'STUCK' ? t('stuckLabel') : t('budgetLabel');
+    await post(t('resumeScheduled', why, human, e.id, attempt));
     return true;
   }
 
   // 예약된 코딩 재개 실행: 존재·승인 확인 → runState 복원(STUCK이 남긴 paused) → 백그라운드 재실행.
   private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn): Promise<void> {
-    if (!this.projects) { await post('코딩 기능이 준비되지 않았어요.'); return; }
+    if (!this.projects) { await post(t('codingNotReady')); return; }
     const project = await this.projects.get(projectId);
-    if (!project) { await post('그 프로젝트를 못 찾았어요.'); return; }
-    if (!project.approved) { await post('승인되지 않은 프로젝트예요.'); return; }
+    if (!project) { await post(t('projectNotFound')); return; }
+    if (!project.approved) { await post(t('projectNotApproved')); return; }
     // ponytail: runState는 전역 스위치(N=1 가정) — 재개가 engram pause로 멈춘 다른 코딩까지 풀 수 있다. N>1이면 프로젝트별 run-state로.
     this.setRunState('running');
-    await post(`▶ 이어서 할게요: ${project.targetPath} (재개 ${attempt}/2)`);
+    await post(t('resuming', project.targetPath, attempt));
     this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
   }
 
@@ -530,41 +529,41 @@ export class Orchestrator {
       { internal: true },
     );
     if (!e) return false;
-    await post(`⏸ 작업 중 문제가 생겼어요 — ${human} 다시 해볼게요 (#${e.id}, 재시도 ${attempt + 1}/2). 멈추려면 @Engram 예약취소 ${e.id}`);
+    await post(t('collabRetryScheduled', human, e.id, attempt));
     return true;
   }
 
   private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {
-    if (r.status === 'SUCCESS') return `✅ 코딩 완료: ${targetPath} (격리 브랜치에 착지 — 사람 머지 대기)`;
-    const why: Record<string, string> = { STUCK: '막힘(진전 정체)', STOPPED: '정지됨', BUDGET: '예산 소진' };
-    return `⚠️ 코딩 종료: ${why[r.status] ?? r.status} (세션 ${r.sessionId})`;
+    if (r.status === 'SUCCESS') return t('codingSuccessMessage', targetPath);
+    const why: Record<string, string> = { STUCK: t('stuckLabel'), STOPPED: t('stoppedLabel'), BUDGET: t('budgetLabel') };
+    return t('codingEndedMessage', why[r.status] ?? r.status, r.sessionId);
   }
 
   private async doSchedule(cron: string, task: string, once: boolean, channelId: string, threadKey: string, post: PostFn): Promise<void> {
-    if (!this.scheduler) { await post('예약 기능이 준비되지 않았어요.'); return; }
+    if (!this.scheduler) { await post(t('scheduleNotReady')); return; }
     const threadId = threadKey !== channelId ? threadKey : undefined;
     const e = this.scheduler.add({ channelId, threadId, cron, task, once });
-    if (!e) { await post('언제인지 잘 모르겠어요. "매일 아침 9시"처럼 다시 말해줄래요?'); return; }
-    await post(`네, 예약했어요 📅 (예약 #${e.id}, ${e.cron})${once ? ' — 1회' : ''}`);
+    if (!e) { await post(t('scheduleUnclear')); return; }
+    await post(t('scheduleCreated', e.id, e.cron, once));
   }
 
   private formatSchedules(channelId: string): string {
-    if (!this.scheduler) return '예약 기능이 준비되지 않았어요.';
+    if (!this.scheduler) return t('scheduleNotReady');
     const list = this.scheduler.list(channelId);
-    if (list.length === 0) return '예약이 없어요.';
-    return list.map((e: ScheduleEntry, i: number) => `${i + 1}. [#${e.id}] ${e.cron} — "${e.task.slice(0, 40)}"${e.once ? ' (1회)' : ''}`).join('\n');
+    if (list.length === 0) return t('noSchedules');
+    return list.map((e: ScheduleEntry, i: number) => t('scheduleListItem', i, e.id, e.cron, e.task.slice(0, 40), e.once)).join('\n');
   }
 
   // @Engram 상태 출력. 질문은 40자 잘라 표시(상대시간은 비범위 — 단순화).
   private formatStatus(tasks: TrackedTask[]): string {
-    if (tasks.length === 0) return '지금 진행 중이거나 최근 완료한 작업이 없어요.';
-    const line = (t: TrackedTask): string =>
-      `  - "${t.question.slice(0, 40)}" (팀: ${t.team.join('·') || '-'})${t.state === 'failed' ? ' (실패)' : ''}`;
-    const running = tasks.filter((t) => t.state === 'running');
-    const finished = tasks.filter((t) => t.state !== 'running');
+    if (tasks.length === 0) return t('noTasks');
+    const line = (tk: TrackedTask): string =>
+      t('taskLine', tk.question.slice(0, 40), tk.team.join('·') || '-', tk.state === 'failed');
+    const running = tasks.filter((tk) => tk.state === 'running');
+    const finished = tasks.filter((tk) => tk.state !== 'running');
     const parts: string[] = [];
-    if (running.length) parts.push(`진행 중 ${running.length}건:\n${running.map(line).join('\n')}`);
-    if (finished.length) parts.push(`최근 완료:\n${finished.map(line).join('\n')}`);
+    if (running.length) parts.push(t('runningCount', running.length, running.map(line).join('\n')));
+    if (finished.length) parts.push(t('recentlyDone', finished.map(line).join('\n')));
     return parts.join('\n');
   }
 
@@ -653,7 +652,7 @@ export class Orchestrator {
     const budget = new TurnBudget(opts.turnBudget ?? personas.length + 1);
     const session = await this.tasks.create({ kind: 'collaboration', question, assignees: personas });
     await this.tasks.transition(session.id, 'RUNNING');
-    await prog(`🧑‍🤝‍🧑 팀 구성: ${personas.join(', ')} — 각자 조사 시작합니다`);
+    await prog(t('teamFormedCollab', personas.join(', ')));
     await Promise.all(
       personas.map((p) =>
         this.sem!.run(async () => {
@@ -661,15 +660,15 @@ export class Orchestrator {
           try {
             const text = await this.specialist!.contribute(p, question, userId);
             await this.tasks!.contribute(session.id, p, text);
-            await prog(`✔ ${p} 의견 도착`);
+            await prog(t('opinionArrived', p));
           } catch (err) {
             this.logger.warn(`페르소나 기여 실패(스킵) ${p}: ${String(err)}`, 'Orchestrator');
-            await prog(`⚠ ${p} 스킵(오류)`);
+            await prog(t('personaSkipped', p));
           }
         }),
       ),
     );
-    await prog('📝 의견 종합 중…');
+    await prog(t('synthesizingOpinions'));
     const fresh = await this.tasks.get(session.id);
     const result = await this.synthesizer.synthesize(question, fresh?.blackboard ?? {});
     await this.tasks.setResult(session.id, result);
@@ -764,10 +763,10 @@ export class Orchestrator {
       ...(opts.channelId ? { channelId: opts.channelId } : {}),
     });
     await this.tasks!.transition(session.id, 'RUNNING');
-    report(`작업 분해 중… (두뇌 호출)`);
+    report(t('decomposing'));
     const initial = await this.decompose(project.acceptanceCriteria.join('\n'), this.codeBrain);
     await this.tasks!.addTickets(session.id, initial);
-    report(`분해 완료 — 작업 ${initial.length}개`);
+    report(t('decomposeDone', initial.length));
 
     const stuck = new StuckDetector(opts.stuckK ?? 3);
     const maxRounds = opts.maxRounds ?? 100;
@@ -778,26 +777,26 @@ export class Orchestrator {
 
       const fresh = await this.tasks!.get(session.id);
       const open = (fresh?.tickets ?? []).filter((t) => t.status !== 'SUCCESS');
-      report(`라운드 ${round + 1}: 작업 ${open.length}개 진행`);
+      report(t('roundProgress', round, open.length));
 
       // 동시 코딩(공유 체크아웃, N=concurrency). Semaphore가 동시 호출 제한.
       await Promise.all(open.map((ticket) => this.sem!.run(async () => {
         if (this.runState !== 'running') return;
         try {
-          report(`  코딩 중: ${ticket.area}`);
+          report(t('codingTicket', ticket.area));
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'RUNNING', attempts: ticket.attempts + 1 });
           const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk);
           budgetSpent += 1; // ponytail: 호출 수 근사. 실토큰 회계는 후속(§14).
-          report(`  게이트 실행 중: ${ticket.area}`);
+          report(t('gateRunning', ticket.area));
           const result = await this.gate!.run(project.targetPath, project.gate);
           if (result.pass) {
             await this.codingGit!.commitAll(project.targetPath, `engram: ${ticket.id} ${ticket.area}`);
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'SUCCESS', gate: { pass: true, output: summary } });
             await this.tasks!.contribute(session.id, ticket.id, summary);
-            report(`  ✓ 착지: ${ticket.area}`);
+            report(t('ticketLanded', ticket.area));
           } else {
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'PENDING', gate: { pass: false, output: result.output } });
-            report(`  ✗ 게이트 빨강(재시도 대기): ${ticket.area} [${result.failed ?? '실패'}]`);
+            report(t('gateFailed', ticket.area, result.failed ?? t('failureFallback')));
           }
         } catch (err) {
           this.logger.warn(`코딩 티켓 실패(재시도 대기) ${ticket.id}: ${String(err)}`, 'Orchestrator');
@@ -815,10 +814,10 @@ export class Orchestrator {
 
       if (allLanded) {
         // SUCCESS는 리뷰어 승인 경유만 — 오픈 티켓 0이어도 여기서 판정(우회 차단).
-        report(`완성조건 리뷰 중…`);
+        report(t('reviewingCriteria'));
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));
-        if (review.approved) { report(`✓ 완성조건 충족 — 완료`); return this.exit(session, 'SUCCESS'); }
-        report(`리뷰어 추가 작업 ${review.extraTickets.length}개`);
+        if (review.approved) { report(t('criteriaMet')); return this.exit(session, 'SUCCESS'); }
+        report(t('reviewerExtraTickets', review.extraTickets.length));
         await this.tasks!.addTickets(session.id, review.extraTickets.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
       }
 
@@ -845,7 +844,7 @@ export class Orchestrator {
     status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET',
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
     if (status === 'SUCCESS') {
-      await this.tasks!.setResult(session.id, '완성조건 충족 — 사람 머지 대기');
+      await this.tasks!.setResult(session.id, t('criteriaMetStored'));
       await this.tasks!.transition(session.id, 'SUCCESS');
       await this.tasks!.remove(session.id); // 진행상태 일회용 — 완료 시 삭제(findings는 위키 보존)
     } else {

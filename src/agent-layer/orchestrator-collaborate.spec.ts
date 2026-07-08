@@ -41,9 +41,9 @@ it('onProgress로 팀구성·각 기여·종합 진행을 게시한다(실패는
   const orc = new Orchestrator(null as any, null as any, logger, null as any, ts, specialist, synth, new Semaphore(2));
   const posts: string[] = [];
   await orc.collaborate('전략?', ['Brand', 'Trend'], 'default', { onProgress: async (t) => { posts.push(t); } });
-  expect(posts.some((p) => p.includes('팀 구성') && p.includes('Brand') && p.includes('Trend'))).toBe(true);
-  expect(posts.filter((p) => p.includes('의견 도착')).length).toBe(2);
-  expect(posts.some((p) => p.includes('종합 중'))).toBe(true);
+  expect(posts.some((p) => p.includes('Team') && p.includes('Brand') && p.includes('Trend'))).toBe(true);
+  expect(posts.filter((p) => p.includes("input is in")).length).toBe(2);
+  expect(posts.some((p) => p.includes('Synthesizing'))).toBe(true);
 });
 
 it('onProgress가 던져도 협업은 정상 완료된다', async () => {
