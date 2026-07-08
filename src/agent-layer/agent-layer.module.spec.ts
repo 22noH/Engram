@@ -24,7 +24,7 @@ describe('AgentLayerModule (integration)', () => {
     await moduleRef.init();
     const orch = moduleRef.get(Orchestrator);
     const out = await orch.route({ text: '없는질문', userId: 'default' });
-    expect(out).toContain('⚠ 위키에 관련 내용 없음');
+    expect(out).toContain('⚠ No related content in the wiki');
     await moduleRef.close();
   });
 });
