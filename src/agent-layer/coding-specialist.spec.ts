@@ -1,4 +1,4 @@
-import { CodingSpecialist } from './coding-specialist';
+import { CodingSpecialist, CODING_RULES_DEFAULT } from './coding-specialist';
 
 describe('CodingSpecialist', () => {
   const registry = { get: (n: string) => n === 'Dev' ? { name: 'Dev', brain: 'claude', tools: ['Bash','Edit','Write'], prompt: 'You code.' } : undefined } as any;
@@ -36,5 +36,21 @@ describe('CodingSpecialist', () => {
     const brain = { complete: () => Promise.resolve({ text: '', costUsd: 0, isError: true }) };
     const spec = new CodingSpecialist(registry, fence, () => brain as any, logger);
     await expect(spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: 'x', status: 'PENDING', attempts: 0, gate: null }, project)).rejects.toThrow();
+  });
+
+  it('coding-rules default is English', () => {
+    expect(/[가-힣]/.test(CODING_RULES_DEFAULT)).toBe(false);
+  });
+
+  it('work() prompt carries english labels + interactive directive', async () => {
+    let captured = '';
+    const brain2 = { complete: async (p: string) => { captured = p; return { text: 'x', costUsd: 0 }; } };
+    const registry2 = { get: () => ({ prompt: 'PERSONA', brain: 'claude' }) };
+    const fence2 = { codingAutoFlags: () => [] };
+    const resolveBrain2 = () => brain2;
+    const cs = new CodingSpecialist(registry2 as any, fence2 as any, resolveBrain2 as any, { error(){} } as any);
+    await cs.work('Coder', { id: 't', area: 'a', instruction: 'do' } as any, { targetPath: 'C:/x', writePaths: [] } as any);
+    expect(captured).toContain('# Work area');
+    expect(captured).toContain("Respond in the language of the user's latest message.");
   });
 });

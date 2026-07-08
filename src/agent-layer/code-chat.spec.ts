@@ -36,10 +36,16 @@ describe('buildCodeChatPrompt', () => {
   });
   it('recent·taskStatus 있으면 섹션으로 붙고, 없으면 생략', () => {
     const withCtx = buildCodeChatPrompt('X {path}', { repoPath: 'C:/r', userText: 'q', recent: 'Q: a\nA: b', taskStatus: '- 코딩: r — failed' });
-    expect(withCtx).toContain('최근 대화');
-    expect(withCtx).toContain('작업 상태');
+    expect(withCtx).toContain('Recent conversation');
+    expect(withCtx).toContain('Current task status in this thread');
     const without = buildCodeChatPrompt('X {path}', { repoPath: 'C:/r', userText: 'q' });
-    expect(without).not.toContain('최근 대화');
-    expect(without).not.toContain('작업 상태');
+    expect(without).not.toContain('Recent conversation');
+    expect(without).not.toContain('Current task status in this thread');
+  });
+  it('code-chat prompt: english + interactive + propose contract intact', () => {
+    const p = buildCodeChatPrompt(CODE_CHAT_DEFAULT, { repoPath: 'C:/x', userText: 'hi' });
+    expect(/[가-힣]/.test(p)).toBe(false);
+    expect(p).toContain("Respond in the language of the user's latest message.");
+    expect(p).toContain('```engram:propose');
   });
 });

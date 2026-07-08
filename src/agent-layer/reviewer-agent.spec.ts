@@ -1,4 +1,4 @@
-import { ReviewerAgent } from './reviewer-agent';
+import { ReviewerAgent, REVIEW_DEFAULT } from './reviewer-agent';
 
 describe('ReviewerAgent', () => {
   const make = (text: string) => new ReviewerAgent({ complete: () => Promise.resolve({ text, costUsd: 0, isError: false }) } as any);
@@ -19,5 +19,9 @@ describe('ReviewerAgent', () => {
   it('두뇌 에러도 approved=false', async () => {
     const r = await new ReviewerAgent({ complete: () => Promise.resolve({ text: '', costUsd: 0, isError: true }) } as any).review(['c1'], 's');
     expect(r.approved).toBe(false);
+  });
+
+  it('review default is English', () => {
+    expect(/[가-힣]/.test(REVIEW_DEFAULT)).toBe(false);
   });
 });

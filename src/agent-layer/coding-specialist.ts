@@ -6,15 +6,16 @@ import { PinoLogger } from '../pal/logger';
 import { CodingTicket } from '../knowledge-core/task-store';
 import { ProjectConfig } from '../knowledge-core/project-store';
 import { loadPrompt } from './prompt-store';
+import { outputDirective } from './language';
 
 // prompts/coding-rules.md 없을 때의 내장 기본값(out-of-box 동작 보장).
-const CODING_RULES_DEFAULT = [
-  '규칙:',
-  '- 타깃 디렉터리의 코드를 직접 편집한다. 네게 주어진 이 조각만 한다.',
-  '- 테스트·빌드 실행은 하지 마라 — 검증은 Engram이 게이트로 직접 한다.',
-  '- 파일 존재 여부·git 상태·CI·절차를 길게 논하지 마라. 코드만 바꾼다.',
-  '- 다른 에이전트/조각과 대화하지 마라.',
-  '- 보고는 사용자 목표와 같은 언어로, 한두 줄만 간결히.',
+export const CODING_RULES_DEFAULT = [
+  'Rules:',
+  '- Edit the code in the target directory directly. Do only the piece you were given.',
+  '- Do not run tests or builds — Engram runs the verification gate itself.',
+  '- Do not discuss file existence, git state, CI, or process at length. Just change the code.',
+  '- Do not talk to other agents/pieces.',
+  '- Report in one or two concise lines.',
 ].join('\n');
 
 // 제네릭 코딩 워커(설계 §3, §9). stateless. 코드 변경은 도구 부수효과(타깃 cwd).
@@ -31,13 +32,14 @@ export class CodingSpecialist {
   async work(personaName: string, ticket: CodingTicket, project: ProjectConfig, onChunk?: (t: string) => void): Promise<string> {
     const persona = this.registry.get(personaName);
     if (!persona) throw new Error(`알 수 없는 페르소나: ${personaName}`);
-    const failNote = ticket.gate && !ticket.gate.pass ? `\n# 직전 게이트 실패(고쳐라)\n${ticket.gate.output}` : '';
+    const failNote = ticket.gate && !ticket.gate.pass ? `\n# Previous gate failure (fix it)\n${ticket.gate.output}` : '';
     const prompt = [
       persona.prompt,
-      `\n# 작업 영역\n${ticket.area}`,
-      `\n# 할 일\n${ticket.instruction}`,
+      `\n# Work area\n${ticket.area}`,
+      `\n# Task\n${ticket.instruction}`,
       failNote,
       `\n${loadPrompt('coding-rules', CODING_RULES_DEFAULT)}`,
+      outputDirective('interactive'),
     ].join('\n');
     // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
     const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
