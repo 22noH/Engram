@@ -11,7 +11,7 @@ class FakeWS {
   send(d: string) { this.sent.push(d); }
   close() {}
 }
-beforeEach(() => { (globalThis as any).WebSocket = FakeWS as any; });
+beforeEach(() => { localStorage.clear(); (globalThis as any).WebSocket = FakeWS as any; });
 
 it('open 후 channels 프레임을 받으면 채널 탭·목록을 렌더한다', async () => {
   render(<App />);

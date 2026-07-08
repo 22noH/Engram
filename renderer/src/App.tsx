@@ -1,92 +1,198 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Channel, Message as Msg, ServerFrame } from '../../shared/protocol';
-import { useWs } from './ws/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Channel, ClientFrame, Message as Msg, ServerFrame } from '../../shared/protocol';
+import { loadConnections, saveConnections, setDefault } from './connections';
+import { useConnections } from './ws/connections-client';
+import { routeTarget, logicalChannels, mergeThreads } from './multi';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
 import { Palette, filterCommands } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
 import { T } from './i18n';
 
+// 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${name}` (채널id 매핑).
+// 채널은 이름으로 식별되는 논리 채널 — 여러 연결이 동명 채널을 가지면 하나로 합쳐 보인다.
 export default function App() {
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [current, setCurrent] = useState<string | null>(null);
+  const [connState, setConnState] = useState(() => loadConnections());
+  useEffect(() => { saveConnections(connState); }, [connState]);
+
+  const [channelsByConn, setChannelsByConn] = useState<Record<string, Channel[]>>({});
+  const [chanIdByConnName, setChanIdByConnName] = useState<Map<string, string>>(new Map());
+  const [msgsByConnCh, setMsgsByConnCh] = useState<Map<string, Msg[]>>(new Map());
+  const [currentName, setCurrentName] = useState<string | null>(null);
   const [mode, setMode] = useState<'chat' | 'code' | 'team'>('chat');
-  const [msgsByCh, setMsgsByCh] = useState<Map<string, Msg[]>>(new Map());
-  const [awaiting, setAwaiting] = useState<Set<string>>(new Set());
+  const [awaiting, setAwaiting] = useState<Set<string>>(new Set()); // 키=논리 채널 이름
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
   const [errText, setErrText] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const currentRef = useRef<string | null>(null); currentRef.current = current;
   const msgsRef = useRef<HTMLDivElement>(null);
-  // 새 메시지/채널 전환/생각중 변화 시 맨 아래로(chat.html box.scrollTop=scrollHeight 이전).
-  useEffect(() => {
-    const box = msgsRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [current, msgsByCh, awaiting]);
 
-  const onFrame = useCallback((f: ServerFrame) => {
+  // 최신 값을 ref로도 들고 있는다(chat.html/Phase11의 currentRef 패턴) — WS 이벤트 콜백이
+  // React 커밋 사이 타이밍에서도 항상 "마지막 렌더 기준 최신값"을 읽게 하기 위함.
+  const currentNameRef = useRef<string | null>(null); currentNameRef.current = currentName;
+  const chanIdByConnNameRef = useRef(chanIdByConnName); chanIdByConnNameRef.current = chanIdByConnName;
+  const msgsByConnChRef = useRef(msgsByConnCh); msgsByConnChRef.current = msgsByConnCh;
+  const channelsByConnRef = useRef(channelsByConn); channelsByConnRef.current = channelsByConn;
+
+  // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
+  // ponytail: 이름 키 — 그 연결의 channels 프레임이 그 이름을 갖고 돌아오면 flush.
+  const pendingSendRef = useRef<Map<string, { name: string; text: string }>>(new Map());
+
+  function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
-      setChannels(f.list);
-      setCurrent((cur) => (cur && f.list.some((c) => c.id === cur) ? cur : (f.list[0]?.id ?? null)));
-    } else if (f.t === 'history') {
-      setMsgsByCh((prev) => new Map(prev).set(f.channelId, f.messages));
-    } else if (f.t === 'msg') {
-      setMsgsByCh((prev) => {
+      setChannelsByConn((prev) => ({ ...prev, [connId]: f.list }));
+      setChanIdByConnName((prev) => {
         const next = new Map(prev);
-        next.set(f.channelId, [...(next.get(f.channelId) ?? []), f.message]);
+        for (const c of f.list) next.set(`${connId}::${c.name}`, c.id);
         return next;
       });
-      if (f.message.authorId === 'engram') { // 답 도착 → 생각 중 해제(chat.html replyArrived 이전)
-        const tm = awaitTimers.current.get(f.channelId);
-        if (tm) { clearTimeout(tm); awaitTimers.current.delete(f.channelId); }
-        setAwaiting((prev) => { const n = new Set(prev); n.delete(f.channelId); return n; });
+      const pending = pendingSendRef.current.get(connId);
+      if (pending) {
+        const chan = f.list.find((c) => c.name === pending.name);
+        if (chan) {
+          send(connId, { t: 'send', channelId: chan.id, text: pending.text });
+          pendingSendRef.current.delete(connId);
+        }
+      }
+    } else if (f.t === 'history') {
+      setMsgsByConnCh((prev) => new Map(prev).set(`${connId}::${f.channelId}`, f.messages));
+    } else if (f.t === 'msg') {
+      const key = `${connId}::${f.channelId}`;
+      setMsgsByConnCh((prev) => {
+        const next = new Map(prev);
+        next.set(key, [...(next.get(key) ?? []), f.message]);
+        return next;
+      });
+      if (f.message.authorId === 'engram') { // 답 도착 → 그 논리 채널 생각중 해제(chat.html replyArrived 이전)
+        const name = channelsByConnRef.current[connId]?.find((c) => c.id === f.channelId)?.name;
+        if (name) {
+          const tm = awaitTimers.current.get(name);
+          if (tm) { clearTimeout(tm); awaitTimers.current.delete(name); }
+          setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
+        }
       }
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
       setErrText(f.text);
     }
-  }, []);
+  }
 
-  const onOpen = useCallback(() => {
-    setMsgsByCh(new Map()); // 재연결 시 파일 진실원과 재동기화
+  function onOpen(connId: string) {
     setErrText(''); // 재연결 시 이전 에러 툴팁 제거
-    send({ t: 'channels' });
-    if (currentRef.current) send({ t: 'history', channelId: currentRef.current });
-  }, []);
+    // 재연결 시 이 연결분만 파일 진실원과 재동기화(다른 연결의 캐시는 그대로 둔다).
+    setMsgsByConnCh((prev) => {
+      const next = new Map(prev);
+      for (const key of next.keys()) if (key.startsWith(`${connId}::`)) next.delete(key);
+      return next;
+    });
+    send(connId, { t: 'channels' });
+    const name = currentNameRef.current;
+    if (name) {
+      const chanId = chanIdByConnNameRef.current.get(`${connId}::${name}`);
+      if (chanId) send(connId, { t: 'history', channelId: chanId });
+    }
+  }
 
-  const { send, connected } = useWs(onFrame, onOpen);
+  const { send, statusById } = useConnections(connState.connections, onFrame, onOpen);
 
-  const selectChannel = (id: string) => {
-    setCurrent(id);
-    if (!msgsByCh.has(id)) send({ t: 'history', channelId: id });
+  // currentName 없거나 모드 전환으로 안 보이면 그 모드의 첫 논리 채널로(chat.html/Phase11 onSetMode 대체).
+  useEffect(() => {
+    const names = logicalChannels(channelsByConn, mode);
+    setCurrentName((cur) => (cur && names.includes(cur) ? cur : (names[0] ?? null)));
+  }, [channelsByConn, mode]);
+
+  // currentName이 정해지거나(최초 선택 포함) 어느 연결의 channels 목록이 갱신될 때마다,
+  // 그 이름 채널을 가진 모든 연결 중 아직 기록이 없는 곳에 history를 요청(둘 다에서 동시에 커버).
+  useEffect(() => {
+    if (!currentName) return;
+    for (const c of connState.connections) {
+      const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+      if (chanId && !msgsByConnCh.has(`${c.id}::${chanId}`)) {
+        send(c.id, { t: 'history', channelId: chanId });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentName, channelsByConn]);
+
+  // 새 메시지/채널 전환/생각중 변화 시 맨 아래로(chat.html box.scrollTop=scrollHeight 이전).
+  const mergedMsgs = useMemo(() => {
+    if (!currentName) return [] as Msg[];
+    const parts = connState.connections
+      .map((c) => {
+        const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+        if (!chanId) return null;
+        return { connId: c.id, messages: msgsByConnCh.get(`${c.id}::${chanId}`) ?? [] };
+      })
+      .filter((x): x is { connId: string; messages: Msg[] } => x !== null);
+    return mergeThreads(parts);
+  }, [currentName, connState.connections, chanIdByConnName, msgsByConnCh]);
+
+  // anchor(및 답)의 소유 연결 — 스레드 답글을 그 스레드를 연 Engram으로 라우팅하는 데 쓰인다.
+  const anchorConn = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!currentName) return m;
+    for (const c of connState.connections) {
+      const chanId = chanIdByConnName.get(`${c.id}::${currentName}`);
+      if (!chanId) continue;
+      for (const msg of msgsByConnCh.get(`${c.id}::${chanId}`) ?? []) m.set(msg.id, c.id);
+    }
+    return m;
+  }, [currentName, connState.connections, chanIdByConnName, msgsByConnCh]);
+
+  useEffect(() => {
+    const box = msgsRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [currentName, mergedMsgs, awaiting]);
+
+  // 사이드바용 논리 채널 목록(기존 Channels 컴포넌트는 id 기반 — 여기선 id=name으로 합성).
+  const sidebarChannels: Channel[] = logicalChannels(channelsByConn, mode).map((name) => {
+    const fromDefault = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
+    const any = fromDefault ?? Object.values(channelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
+    return { id: name, name, respondMode: any?.respondMode ?? 'all', mode };
+  });
+  // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
+  const defaultChan = currentName
+    ? channelsByConn[connState.defaultConnId]?.find((c) => c.name === currentName && (c.mode ?? 'chat') === mode)
+    : undefined;
+
+  // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
+  const fanoutToName = (name: string, build: (channelId: string) => ClientFrame) => {
+    for (const c of connState.connections) {
+      const chanId = chanIdByConnName.get(`${c.id}::${name}`);
+      if (chanId) send(c.id, build(chanId));
+    }
   };
-  const onSetMode = (m: 'chat' | 'code' | 'team') => {
-    setMode(m);
-    const visible = channels.filter((c) => (c.mode || 'chat') === m);
-    if (!visible.some((c) => c.id === current)) setCurrent(visible[0]?.id ?? null);
-  };
-
-  const ch = channels.find((c) => c.id === current);
 
   // 답을 기대하며 "생각 중" 표시(멘션-전용 채널에서 비멘션이면 안 띄움 — chat.html expectReply 이전).
-  const expectReply = (channelId: string, text: string) => {
-    const c = channels.find((x) => x.id === channelId);
+  const expectReply = (name: string, text: string, connId: string) => {
+    const c = channelsByConn[connId]?.find((x) => x.name === name);
     if (c && c.respondMode === 'mention' && !/@engram/i.test(text)) return;
-    const prev = awaitTimers.current.get(channelId); if (prev) clearTimeout(prev);
-    awaitTimers.current.set(channelId, setTimeout(() => {
-      awaitTimers.current.delete(channelId);
-      setAwaiting((p) => { const n = new Set(p); n.delete(channelId); return n; });
+    const prev = awaitTimers.current.get(name); if (prev) clearTimeout(prev);
+    awaitTimers.current.set(name, setTimeout(() => {
+      awaitTimers.current.delete(name);
+      setAwaiting((p) => { const n = new Set(p); n.delete(name); return n; });
     }, 180000));
-    setAwaiting((p) => new Set(p).add(channelId));
+    setAwaiting((p) => new Set(p).add(name));
   };
 
+  // 전송 라우팅: threadId 있으면 그 앵커를 연 Engram으로, 없으면 @이름 또는 기본 Engram으로.
+  // 대상 연결에 그 이름 채널이 아직 없으면(지연 생성) createChannel 먼저 보내고 1건 버퍼링,
+  // 그 연결의 channels 프레임이 그 이름으로 돌아오면 onFrame이 flush한다.
   const sendText = (text: string, threadId?: string) => {
-    if (!text.trim() || !current) return;
-    send({ t: 'send', channelId: current, text, threadId });
-    expectReply(current, text);
+    if (!text.trim() || !currentName) return;
+    const targetConnId = threadId
+      ? (anchorConn.get(threadId) ?? connState.defaultConnId)
+      : routeTarget(text, connState.defaultConnId, connState.connections);
+    const channelId = chanIdByConnName.get(`${targetConnId}::${currentName}`);
+    if (channelId) {
+      send(targetConnId, { t: 'send', channelId, text, threadId });
+    } else if (!threadId) {
+      pendingSendRef.current.set(targetConnId, { name: currentName, text });
+      send(targetConnId, { t: 'createChannel', name: currentName, mode });
+    }
+    expectReply(currentName, text, targetConnId);
   };
 
   // '/'명령 팔레트에서 클릭·Enter로 명령을 입력창에 채운다(chat.html pickCmd 이전).
@@ -94,36 +200,45 @@ export default function App() {
 
   return (
     <>
-      <div id="titlebar"><span id="dot" className={connected ? 'on' : ''} title={errText} /><span id="tbtitle">Engram</span></div>
+      <div id="titlebar">
+        <span id="dot" className={statusById[connState.defaultConnId] ? 'on' : ''} title={errText} />
+        <span id="tbtitle">Engram</span>
+        <select
+          id="defaultEngram"
+          value={connState.defaultConnId}
+          onChange={(e) => setConnState((s) => setDefault(s, e.target.value))}
+        >
+          {connState.connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
       <div id="app">
         <Channels
-          channels={channels} current={current} mode={mode}
-          onSelect={selectChannel} onSetMode={onSetMode}
-          onCreate={(name, m) => send({ t: 'createChannel', name, mode: m })}
-          onDelete={(id) => send({ t: 'deleteChannel', id })}
-          onSetRespondMode={(id, m) => send({ t: 'setRespondMode', id, mode: m })}
+          channels={sidebarChannels} current={currentName} mode={mode}
+          onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
+          onCreate={(name, m) => send(connState.defaultConnId, { t: 'createChannel', name, mode: m })}
+          onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
+          onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
         />
         <div id="main">
-          {ch && (ch.mode || 'chat') === 'code' && ch.repoPath && (
-            <div id="chhdr" style={{ display: 'block' }} title={ch.repoPath}>
-              {'📁 ' + ch.repoPath.split(/[\\/]/).filter(Boolean).pop()}
+          {currentName && mode === 'code' && defaultChan?.repoPath && (
+            <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
+              {'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}
             </div>
           )}
-          {ch && (ch.mode || 'chat') === 'code' && !ch.repoPath ? (
-            <FolderEmpty onSetRepo={(p) => send({ t: 'setRepoPath', id: ch.id, repoPath: p })} />
+          {currentName && mode === 'code' && !defaultChan?.repoPath ? (
+            <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
           ) : (
             <>
               <div id="msgs" ref={msgsRef}>
                 {(() => {
-                  const msgs = msgsByCh.get(current ?? '') ?? [];
                   const byAnchor = new Map<string, Msg[]>();
-                  for (const m of msgs) {
+                  for (const m of mergedMsgs) {
                     if (m.threadId) {
                       const list = byAnchor.get(m.threadId);
                       if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
                     }
                   }
-                  return msgs.filter((m) => !m.threadId).map((m) => (
+                  return mergedMsgs.filter((m) => !m.threadId).map((m) => (
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
@@ -133,14 +248,14 @@ export default function App() {
                       onSend={(text) => sendText(text)} />
                   ));
                 })()}
-                {current && awaiting.has(current) && (
+                {currentName && awaiting.has(currentName) && (
                   <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
                 )}
               </div>
               {palFilter !== null && (
                 <Palette filter={palFilter} selected={palIdx} onPick={pickCmd} />
               )}
-              <div id="inputbar" style={ch ? undefined : { display: 'none' }}>
+              <div id="inputbar" style={currentName ? undefined : { display: 'none' }}>
                 <input id="input" type="text" placeholder={T.placeholder}
                   onChange={(e) => { const v = e.target.value; const open = v.startsWith('/'); setPalFilter(open ? v.slice(1).toLowerCase() : null); setPalIdx(0); }}
                   onKeyDown={(e) => {
