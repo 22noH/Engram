@@ -52,3 +52,10 @@ describe('loadChatConfig', () => {
     expect(loadChatConfig(dir, {}).port).toBe(47800);
   });
 });
+
+it('loadChatConfig reads optional language field', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cfg-'));
+  fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ language: 'ko' }));
+  expect(loadChatConfig(dir, {} as any).language).toBe('ko');
+  expect(loadChatConfig(fs.mkdtempSync(path.join(os.tmpdir(), 'cfg2-')), {} as any).language).toBeUndefined();
+});

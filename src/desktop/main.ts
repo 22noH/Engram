@@ -10,6 +10,7 @@ import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
+import { resolveLanguage } from '../agent-layer/language';
 import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
@@ -42,7 +43,8 @@ const T = {
 function startChild(): void {
   const entry = path.join(app.getAppPath(), 'dist', 'src', 'main.js');
   childStartedAt = Date.now();
-  child = utilityProcess.fork(entry, [], { env: childEnv, stdio: 'ignore', serviceName: 'engram-core' });
+  const lang = resolveLanguage(loadChatConfig(configDir).language, app.getLocale());
+  child = utilityProcess.fork(entry, [], { env: { ...childEnv, ENGRAM_LANG: lang }, stdio: 'ignore', serviceName: 'engram-core' });
   child.on('exit', () => {
     child = null;
     if (quitting) return;
@@ -161,7 +163,8 @@ function openChat(): void {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     nodeHttp.get(healthUrl, (res) => {
       res.resume();
-      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}` }); // 헬스 200 → 클라 로드(설정 포트 주입)
+      const lang = resolveLanguage(cfg.language, app.getLocale());
+      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}` }); // 헬스 200 → 클라 로드(설정 포트·언어 주입)
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.

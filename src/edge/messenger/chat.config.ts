@@ -8,6 +8,7 @@ export interface ChatConfig {
   enabled: boolean;
   port: number;
   bind: string;
+  language?: string; // BCP-47 코드(예 'ko'/'en'). 미설정=OS 로케일 폴백(main.ts).
 }
 
 function validPort(v: unknown): number | null {
@@ -30,5 +31,6 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
   const bind = (typeof env.ENGRAM_CHAT_BIND === 'string' && env.ENGRAM_CHAT_BIND)
     || (typeof raw.bind === 'string' && raw.bind)
     || '127.0.0.1';
-  return { enabled: raw.enabled !== false, port, bind };
+  const language = typeof raw.language === 'string' && raw.language.trim() ? raw.language.trim() : undefined;
+  return { enabled: raw.enabled !== false, port, bind, language };
 }
