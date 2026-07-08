@@ -92,4 +92,16 @@ describe('InsightReporter', () => {
     expect(await store.get('default', '2026-06-27')).not.toBeNull(); // 미설정=보존
     expect(await store.get('default', '2026-06-28')).not.toBeNull();
   });
+
+  it('insight prompt: no Korean, appends configured-language directive', () => {
+    const r = new InsightReporter({} as any, {} as any, {} as any, { log(){}, warn(){}, error(){} } as any);
+    process.env.ENGRAM_LANG = 'ko';
+    const p = (r as any).buildPrompt(
+      { queryCount: 1, topTerms: [], topPages: [] },
+      [{ question: 'q', answer: 'a', ts: '' }],
+    ) as string;
+    expect(/[가-힣]/.test(p)).toBe(false);            // 지시문·메트릭 라벨 전부 영어
+    expect(p).toContain('Respond in Korean.');         // 자율=설정 언어
+    delete process.env.ENGRAM_LANG;
+  });
 });

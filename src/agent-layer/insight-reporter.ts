@@ -6,12 +6,13 @@ import { computeDayMetrics, DayMetrics } from '../knowledge-core/insight/metrics
 import { loadPrompt } from './prompt-store';
 import { PinoLogger } from '../pal/logger';
 import { DEFAULT_USER } from '../pal/path-resolver';
+import { outputDirective, configuredLang } from './language';
 
 // prompts/insight.md 없을 때의 내장 기본값(out-of-box 보장).
 const INSIGHT_DEFAULT =
-  '당신은 사용자의 하루 사용 기록을 분석하는 보조자다. 메트릭과 대화를 바탕으로 ' +
-  '오늘 무엇에 집중했는지·관심 이동·미해결 질문을 3~5문장 한국어 서술로 요약하라. ' +
-  '기록에 드러난 것만 적고, 목록이 아니라 문단으로.';
+  "You analyze the user's daily usage. Based on the metrics and conversations, " +
+  'summarize in 3-5 sentences what they focused on today, how their attention shifted, ' +
+  'and any unresolved questions. Write only what the records show, as prose paragraphs rather than a list.';
 
 // 일일 인사이트 생성(설계 §5.4). 메트릭(결정적) + 두뇌 1콜 서술. agent-layer 위치 — BRAIN 소비(IngesterAgent와 동렬).
 @Injectable()
@@ -52,11 +53,12 @@ export class InsightReporter {
       .join('\n');
     return [
       loadPrompt('insight', INSIGHT_DEFAULT),
+      outputDirective('autonomous', configuredLang()),
       '',
-      `# 메트릭`,
-      `질의 ${metrics.queryCount}건 · 자주 쓴 단어: ${metrics.topTerms.map((t) => t.term).join(', ') || '(없음)'} · 자주 본 페이지: ${metrics.topPages.map((p) => p.slug).join(', ') || '(없음)'}`,
+      `# Metrics`,
+      `Queries ${metrics.queryCount} · frequent terms: ${metrics.topTerms.map((t) => t.term).join(', ') || '(none)'} · frequent pages: ${metrics.topPages.map((p) => p.slug).join(', ') || '(none)'}`,
       '',
-      `# 오늘 대화`,
+      `# Today's conversations`,
       qa,
     ].join('\n');
   }
