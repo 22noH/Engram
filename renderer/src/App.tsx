@@ -49,8 +49,9 @@ export default function App() {
   const modeRef = useRef(mode); modeRef.current = mode;
 
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
-  // ponytail: 이름 키 — 그 연결의 channels 프레임이 그 이름을 갖고 돌아오면 flush.
-  const pendingSendRef = useRef<Map<string, { name: string; text: string }>>(new Map());
+  // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
+  // (모드를 안 보면 동명·타모드 채널로 잘못 flush될 수 있다 — Minor #4).
+  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string }>>(new Map());
 
   function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
@@ -64,7 +65,7 @@ export default function App() {
       });
       const pending = pendingSendRef.current.get(connId);
       if (pending) {
-        const chan = f.list.find((c) => c.name === pending.name);
+        const chan = f.list.find((c) => c.name === pending.name && (c.mode ?? 'chat') === pending.mode);
         if (chan) {
           send(connId, { t: 'send', channelId: chan.id, text: pending.text });
           pendingSendRef.current.delete(connId);
@@ -116,6 +117,31 @@ export default function App() {
   }
 
   const { send, statusById } = useConnections(connState.connections, onFrame, onOpen);
+
+  // 연결이 제거되면 그 connId분 채널/메시지 캐시를 지운다 — 안 지우면 사이드바에 고스트 채널이 남는다.
+  const connIds = connState.connections.map((c) => c.id).join(',');
+  useEffect(() => {
+    const live = new Set(connState.connections.map((c) => c.id));
+    setChannelsByConn((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const id of Object.keys(next)) if (!live.has(id)) { delete next[id]; changed = true; }
+      return changed ? next : prev;
+    });
+    setChanIdByConnName((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const key of next.keys()) if (!live.has(key.split('::')[0])) { next.delete(key); changed = true; }
+      return changed ? next : prev;
+    });
+    setMsgsByConnCh((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const key of next.keys()) if (!live.has(key.split('::')[0])) { next.delete(key); changed = true; }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connIds]);
 
   // currentName 없거나 모드 전환으로 안 보이면 그 모드의 첫 논리 채널로(chat.html/Phase11 onSetMode 대체).
   useEffect(() => {
@@ -205,11 +231,18 @@ export default function App() {
     const targetConnId = threadId
       ? (anchorConn.get(threadId) ?? connState.defaultConnId)
       : routeTarget(text, connState.defaultConnId, connState.connections);
+    // Minor #5: 대상 연결 소켓이 안 열려 있으면 조용히 버리지 말고 그 연결 에러란에 안내만 남긴다
+    // (전송·생각중 타이머 시작은 하지 않는다 — spec §7).
+    if (!statusById[targetConnId]) {
+      const targetName = connState.connections.find((c) => c.id === targetConnId)?.name ?? targetConnId;
+      setErrText((prev) => ({ ...prev, [targetConnId]: T.notConnected(targetName) }));
+      return;
+    }
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
       send(targetConnId, { t: 'send', channelId, text, threadId });
     } else if (!threadId) {
-      pendingSendRef.current.set(targetConnId, { name: currentName, text });
+      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
     }
     expectReply(currentName, text, targetConnId);

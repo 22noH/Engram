@@ -31,4 +31,5 @@ export const T = {
   mentionHint: ko ? '@ 뒤에 이름을 넣으면 그 Engram에게만 보내요' : 'Type a name after @ to send to just that Engram',
   removeEngram: ko ? '삭제' : 'Remove',
   close: ko ? '닫기' : 'Close',
+  notConnected: (name: string) => (ko ? `'${name}' 연결이 없어요` : `'${name}' isn't connected`),
 };
