@@ -8,7 +8,7 @@ describe('loadPrompt', () => {
     // 실제 레포의 prompts/coding-rules.md를 읽어 fallback이 아닌 파일 내용이 오는지 확인.
     const out = loadPrompt('coding-rules', 'FALLBACK_표식');
     expect(out).not.toBe('FALLBACK_표식');
-    expect(out).toContain('이 조각만'); // 파일 내용
+    expect(out).toContain('Do only the piece you were given'); // 파일 내용(영어)
   });
 
   it('파일이 없으면 fallback(내장 기본값)을 쓴다 — out-of-box 동작 보장', () => {
