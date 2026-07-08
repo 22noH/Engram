@@ -32,31 +32,32 @@ import { SchedulerPort, ScheduleEntry } from './schedule-store';
 import { computeResume } from './resume-policy';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import type { Action } from '../../shared/protocol';
+import { outputDirective, configuredLang } from './language';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 type PostFn = (text: string, actions?: Action[]) => Promise<void>;
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
-const DECOMPOSE_DEFAULT = [
-  '아래 목표를 작업 조각으로 분할하라.',
-  '**가능한 한 적게 나눠라.** 목표가 작거나 한 영역(한두 파일)이면 작업 1개로 둬라.',
-  '진짜로 독립적인(서로 다른 파일/영역, 겹치지 않는) 부분일 때만 여러 개로 쪼개라 — 과분해는 에이전트끼리 같은 파일을 두고 혼란을 일으킨다.',
+export const DECOMPOSE_DEFAULT = [
+  'Split the goal below into work pieces.',
+  '**Split as little as possible.** If the goal is small or touches one area (one or two files), keep it as a single task.',
+  'Only split into multiple pieces when the parts are truly independent (different, non-overlapping files/areas) — over-splitting makes agents collide on the same file.',
 ].join('\n');
 
 // prompts/ambient.md 없을 때의 내장 기본값. JSON 계약은 observe()가 코드에서 덧붙인다.
-const AMBIENT_DEFAULT = [
-  '대화 메시지와 위키 발췌가 주어진다. 위키 정보가 이 대화에 실질적으로 도움이 될 때만 끼어들어라.',
-  '확실하지 않으면 끼어들지 마라 — interject=false가 기본값이다.',
-  '끼어들 땐 한두 문장으로 요점만, 근거 위키 페이지(slug)를 함께 밝혀라.',
+export const AMBIENT_DEFAULT = [
+  'You are given a chat message and wiki excerpts. Interject only when the wiki information is genuinely helpful to this conversation.',
+  'If unsure, do not interject — interject=false is the default.',
+  'When you do interject, give just the point in one or two sentences and cite the wiki page (slug) you relied on.',
 ].join('\n');
 
 // prompts/triage.md 없을 때의 내장 기본값. JSON 계약은 classify()가 코드에서 덧붙인다.
-const TRIAGE_DEFAULT = [
-  '사용자 메시지가 (1) 단순 질문/잡담인지 "chat", (2) 여러 전문가가 머리를 맞대야 하는 일인지 "collaborate"인지 판정하라.',
-  'collaborate면 아래 전문가 목록에서 이 일에 꼭 필요한 사람만 골라 team에 이름을 넣어라(없으면 빈 배열).',
-  '(3) 특정 레포(코드 저장소)에 코드를 쓰거나 고치거나 구현하라는 일이면 "code" — repo에 레포 참조(이름/별칭/경로), goal에 할 일을 넣어라.',
-  '(4) 정해진 시간/주기에 무언가를 하라는 예약이면 "schedule" — cron에 5필드 cron(예: 매일 9시=0 9 * * *), task에 할 일, 반복 아니고 한 번이면 once=true를 넣어라.',
-  '확실치 않으면 chat을 택하라.',
+export const TRIAGE_DEFAULT = [
+  'Decide whether the user message is (1) a simple question/chat → "chat", or (2) work that needs several experts together → "collaborate".',
+  'For collaborate, pick from the expert list below only the people this work truly needs and put their names in team (empty array if none).',
+  '(3) If it asks to write, fix, or implement code in a specific repo → "code": put the repo reference (name/alias/path) in repo and the task in goal.',
+  '(4) If it asks to do something at a set time/interval → "schedule": put a 5-field cron in cron (e.g. every day at 9 = 0 9 * * *), the task in task, and once=true if it runs a single time.',
+  'When unsure, choose chat.',
 ].join('\n');
 
 // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
@@ -589,9 +590,10 @@ export class Orchestrator {
       if (hits.length === 0) return;
       const prompt = [
         loadPrompt('ambient', AMBIENT_DEFAULT),
-        `\n# 대화 메시지\n${text}`,
-        `\n# 위키 발췌\n${hits.map((h) => `- [${h.slug}] ${h.text.slice(0, 200)}`).join('\n')}`,
-        '\n반드시 이 JSON만: {"interject":true|false,"text":"한두 문장"}',
+        outputDirective('autonomous', configuredLang()),
+        `\n# Chat message\n${text}`,
+        `\n# Wiki excerpts\n${hits.map((h) => `- [${h.slug}] ${h.text.slice(0, 200)}`).join('\n')}`,
+        '\nOutput only this JSON: {"interject":true|false,"text":"one or two sentences"}',
       ].join('\n');
       const r = await this.codeBrain.complete(prompt);
       if (r.isError) return;
@@ -614,10 +616,10 @@ export class Orchestrator {
     const aliases = Object.keys(this.codeRepos().aliases);
     const prompt = [
       loadPrompt('triage', TRIAGE_DEFAULT),
-      `\n# 사용 가능한 전문가\n${roster || '(없음)'}`,
-      `\n# 코딩 가능한 레포(alias)\n${aliases.join(', ') || '(없음)'}`,
-      `\n# 사용자 메시지\n${text}`,
-      '\n반드시 이 JSON만: {"kind":"chat"|"collaborate"|"code"|"schedule","team":["이름",...],"repo":"레포참조","goal":"할 일","cron":"0 9 * * *","task":"할 일","once":false}',
+      `\n# Available experts\n${roster || '(none)'}`,
+      `\n# Code repos (alias)\n${aliases.join(', ') || '(none)'}`,
+      `\n# User message\n${text}`,
+      '\nOutput only this JSON: {"kind":"chat"|"collaborate"|"code"|"schedule","team":["name",...],"repo":"repo ref","goal":"the task","cron":"0 9 * * *","task":"the task","once":false}',
     ].join('\n');
     try {
       const r = await this.codeBrain.complete(prompt);
@@ -679,8 +681,8 @@ export class Orchestrator {
   async decompose(goal: string, brain: BrainProvider): Promise<Array<{ id: string; area: string; instruction: string }>> {
     const prompt = [
       loadPrompt('decompose', DECOMPOSE_DEFAULT),
-      `\n# 목표\n${goal}`,
-      '\n반드시 이 JSON만: {"tickets":[{"area":"디렉터리/영역","instruction":"할 일"}]}',
+      `\n# Goal\n${goal}`,
+      '\nOutput only this JSON: {"tickets":[{"area":"directory/area","instruction":"the task"}]}',
     ].join('\n');
     const r = await brain.complete(prompt);
     const tickets = this.parseTickets(r.isError ? '' : r.text);
@@ -707,9 +709,9 @@ export class Orchestrator {
     if (!this.projects || !this.codeBrain || !this.fence) throw new Error('proposeProject 협력자 미주입');
     this.fence.assertWritable(targetPath); // denyPaths/writePaths 밖 거부(자기수정 차단 ③)
     const prompt = [
-      '아래 목표에 대한 완성조건(검증 가능한 항목)을 추정하라.',
-      `\n# 목표\n${goal}\n# 타깃 경로\n${targetPath}`,
-      '\n반드시 이 JSON만: {"acceptanceCriteria":["..."]}',
+      'Estimate the acceptance criteria (verifiable items) for the goal below.',
+      `\n# Goal\n${goal}\n# Target path\n${targetPath}`,
+      '\nOutput only this JSON: {"acceptanceCriteria":["..."]}',
     ].join('\n');
     const r = await this.codeBrain.complete(prompt);
     const draft = this.parseProposal(r.isError ? '' : r.text);

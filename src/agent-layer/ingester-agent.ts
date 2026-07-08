@@ -9,6 +9,7 @@ import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { PinoLogger } from '../pal/logger';
 import { DEFAULT_USER } from '../pal/path-resolver';
 import { parseJsonBlock } from './parse-json-block';
+import { outputDirective } from './language';
 export { parseJsonBlock } from './parse-json-block';
 
 interface JudgeOut {
@@ -33,10 +34,11 @@ export class IngesterAgent {
 
   async extractFacts(convText: string): Promise<ScoredFact[]> {
     const prompt = [
-      '아래 대화에서 위키에 기록할 가치가 있는 사실만 추출하라.',
-      '각 사실에 중요도(importance) 1~5점과 대화에서의 근거 인용(sourceQuote)을 달아라.',
-      '출력은 JSON 배열만: [{"claim": string, "importance": number, "sourceQuote": string}]',
-      '', `# 대화\n${convText}`,
+      'Extract from the conversation below only the facts worth recording in the wiki.',
+      'For each fact, attach an importance (1-5) and a source quote (sourceQuote) from the conversation.',
+      'Output only a JSON array: [{"claim": string, "importance": number, "sourceQuote": string}]',
+      outputDirective('source'),
+      '', `# Conversation\n${convText}`,
     ].join('\n');
     const res = await this.writer.complete(prompt);
     if (res.isError) { this.logger.error('writer 추출 실패', String(res.raw ?? 'writer error'), 'IngesterAgent'); return []; }
@@ -98,15 +100,15 @@ export class IngesterAgent {
   private async judgeFact(fact: ScoredFact, hits: SearchResult[]): Promise<JudgeOut | null> {
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title} (slug: ${h.slug})\n${h.text}`).join('\n\n');
     const prompt = [
-      '아래 후보 사실을 검증하라(너는 작성자가 아닌 검증자다).',
-      '기존 위키와 비교해 판정하라:',
-      '- create: 신규 주제 → 새 페이지',
-      '- append: 기존 페이지에 보강(targetSlug=기존 slug)',
-      '- supersede: 기존과 모순 → 기존을 대체(targetSlug=기존 slug, conflictSlugs 명시, 덮어쓰기 금지)',
-      '- reject: 근거 부족·환각·무가치',
-      '출력은 JSON 객체만: {"verdict","targetSlug","title","category","confidence","reason","conflictSlugs"}',
-      '', `# 후보 사실\n${fact.claim}\n근거: ${fact.sourceQuote}`,
-      '', `# 관련 기존 위키\n${ctx || '(없음)'}`,
+      'Verify the candidate fact below (you are the verifier, not the writer).',
+      'Judge by comparing with the existing wiki:',
+      '- create: new topic → new page',
+      '- append: strengthen an existing page (targetSlug = existing slug)',
+      '- supersede: contradicts existing → replace it (targetSlug = existing slug, list conflictSlugs; no overwriting)',
+      '- reject: insufficient evidence, hallucination, or no value',
+      'Output only a JSON object: {"verdict","targetSlug","title","category","confidence","reason","conflictSlugs"}',
+      '', `# Candidate fact\n${fact.claim}\nsource: ${fact.sourceQuote}`,
+      '', `# Related existing wiki\n${ctx || '(none)'}`,
     ].join('\n');
     const res = await this.judge.complete(prompt);
     if (res.isError) { this.logger.error('judge 호출 실패', String(res.raw ?? 'judge error'), 'IngesterAgent'); return null; }

@@ -146,3 +146,23 @@ describe('IngesterAgent.run', () => {
     expect(props.items).toHaveLength(0); // 락 못 잡으면 아무것도 안 함
   });
 });
+
+describe('IngesterAgent 프롬프트 영어화', () => {
+  it('extractFacts prompt: english + source directive + json contract', async () => {
+    let captured = '';
+    const brain = { complete: async (p: string) => { captured = p; return { text: '[]', costUsd: 0 }; } };
+    const ing = new IngesterAgent({} as any, {} as any, brain as any, brain as any, {} as any, {} as any, { error(){} } as any, {} as any);
+    await ing.extractFacts('conv');
+    expect(/[가-힣]/.test(captured)).toBe(false);
+    expect(captured).toContain('Write the extracted facts in the same language as the source text.');
+    expect(captured).toContain('"claim"');
+  });
+  it('judgeFact prompt: english + json contract', async () => {
+    let captured = '';
+    const judge = { complete: async (p: string) => { captured = p; return { text: '{"verdict":"reject","confidence":0,"reason":"x"}', costUsd: 0 }; } };
+    const ing = new IngesterAgent({} as any, {} as any, judge as any, judge as any, {} as any, {} as any, { error(){} } as any, {} as any);
+    await (ing as any).judgeFact({ claim: 'c', importance: 3, sourceQuote: 's' }, []);
+    expect(/[가-힣]/.test(captured)).toBe(false);
+    expect(captured).toContain('Output only a JSON object');
+  });
+});

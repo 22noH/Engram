@@ -1,4 +1,4 @@
-import { Orchestrator } from './orchestrator';
+import { Orchestrator, DECOMPOSE_DEFAULT, AMBIENT_DEFAULT, TRIAGE_DEFAULT } from './orchestrator';
 
 describe('Orchestrator.decompose', () => {
   const make = () => new Orchestrator({} as any, {} as any, { warn() {}, log() {} } as any, {} as any);
@@ -74,5 +74,9 @@ describe('Orchestrator (스텁)', () => {
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, reporter as any,
     );
     expect((await orch.insight('default'))?.report).toBe('r');
+  });
+
+  it('classification defaults are English', () => {
+    for (const s of [DECOMPOSE_DEFAULT, AMBIENT_DEFAULT, TRIAGE_DEFAULT]) expect(/[가-힣]/.test(s)).toBe(false);
   });
 });
