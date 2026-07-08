@@ -7,8 +7,8 @@ import { CoreMessage } from '../edge/core-message';
 import { InsightContext } from '../knowledge-core/insight/insight-context';
 import { ConversationStore, ConversationRecord } from '../knowledge-core/conversation-store';
 import { outputDirective } from './language';
+import { t } from './i18n';
 
-const NO_HITS_HEADER = '⚠ 위키에 관련 내용 없음 — 일반 지식 기반 답변\n\n';
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
 
 // A 읽기(설계 §7.2). 질문 → RAG 검색 → 컨텍스트 종합 → 답 + 출처.
@@ -32,7 +32,7 @@ export class ReaderAgent {
     try {
       const hits = await this.rag.search(msg.text, 5, msg.userId);
       onSources?.(hits.map((h) => h.slug));
-      const header = hits.length === 0 ? NO_HITS_HEADER : '';
+      const header = hits.length === 0 ? t('noHitsHeader') : '';
       if (header) emit(header);
 
       const ctx = this.insight ? await this.insight.latest(msg.userId) : '';
@@ -43,19 +43,19 @@ export class ReaderAgent {
       } catch { recent = []; }
       const result = await this.brain.complete(this.buildPrompt(msg.text, hits, ctx, recent), onChunk);
       if (result.isError) {
-        const m = '답변 생성 실패: 두뇌 호출 오류';
+        const m = t('answerGenFailedBrainError');
         emit(m);
         return header + m;
       }
 
       const sources = hits.length
-        ? `\n\n───\n출처: ${hits.map((h, i) => `[${i + 1}] ${h.title} (${h.slug})`).join(' · ')}`
+        ? t('sourcesFooter', hits.map((h, i) => `[${i + 1}] ${h.title} (${h.slug})`).join(' · '))
         : '';
       if (sources) emit(sources);
       return header + result.text + sources;
     } catch (err) {
       this.logger.error('ReaderAgent.handle 실패', String(err), 'ReaderAgent');
-      const m = `답변 생성 실패: ${String(err)}`;
+      const m = t('answerGenFailedWithError', String(err));
       emit(m);
       return m;
     }

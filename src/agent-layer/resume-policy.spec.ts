@@ -4,12 +4,13 @@ afterEach(() => {
   delete process.env.ENGRAM_RESUME_STUCK_MIN;
   delete process.env.ENGRAM_RESUME_COLLAB_MIN;
   delete process.env.ENGRAM_RESUME_BUDGET_HOUR;
+  delete process.env.ENGRAM_LANG;
 });
 
 it('STUCK: 60분 뒤 once cron(분 시 일 월 *)', () => {
   const r = computeResume('STUCK', new Date(2026, 6, 2, 13, 32)); // 2026-07-02 13:32
   expect(r.cron).toBe('32 14 2 7 *');
-  expect(r.human).toBe('60분 뒤(14:32)');
+  expect(r.human).toBe('in 60 min (14:32)');
 });
 
 it('COLLAB: 30분 뒤 — 자정 넘김이면 일/월 정확히 증가', () => {
@@ -20,13 +21,25 @@ it('COLLAB: 30분 뒤 — 자정 넘김이면 일/월 정확히 증가', () => {
 it('BUDGET: 오늘 9시가 지났으면 내일 9시', () => {
   const r = computeResume('BUDGET', new Date(2026, 6, 2, 10, 0));
   expect(r.cron).toBe('0 9 3 7 *');
-  expect(r.human).toContain('내일');
+  expect(r.human).toContain('tomorrow');
 });
 
 it('BUDGET: 오늘 9시 전이면 오늘 9시', () => {
   const r = computeResume('BUDGET', new Date(2026, 6, 2, 3, 0));
   expect(r.cron).toBe('0 9 2 7 *');
-  expect(r.human).toContain('오늘');
+  expect(r.human).toContain('today');
+});
+
+it('ENGRAM_LANG=ko이면 한국어 human 문자열을 돌려준다', () => {
+  process.env.ENGRAM_LANG = 'ko';
+  try {
+    const r = computeResume('STUCK', new Date(2026, 6, 2, 13, 32));
+    expect(r.human).toBe('60분 뒤(14:32)');
+    const b = computeResume('BUDGET', new Date(2026, 6, 2, 10, 0));
+    expect(b.human).toContain('내일');
+  } finally {
+    delete process.env.ENGRAM_LANG;
+  }
 });
 
 it('env 오버라이드: ENGRAM_RESUME_STUCK_MIN=5', () => {

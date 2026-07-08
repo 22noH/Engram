@@ -25,53 +25,75 @@ describe('ReaderAgent', () => {
     const out = await reader.handle({ text: '질문', userId: 'default' });
     expect(rag.search).toHaveBeenCalledWith('질문', 5, 'default');
     expect(out).toContain('답이다');
-    expect(out).toContain('출처:');
+    expect(out).toContain('Sources:');
     expect(out).toContain('A페이지');
     expect(out).toContain('(a)');
   });
 
-  it('검색 결과가 없으면 경고 머리말을 붙이고 출처는 없다', async () => {
+  it('검색 결과가 없으면 경고 머리말을 붙이고 출처는 없다(기본 en)', async () => {
     const rag = stubRag([]);
     const reader = new ReaderAgent(rag, new FakeBrain({ text: '일반답', costUsd: 0, isError: false }), logger);
     const out = await reader.handle({ text: '질문', userId: 'default' });
-    expect(out).toContain('⚠ 위키에 관련 내용 없음');
-    expect(out).not.toContain('출처:');
+    expect(out).toContain('No related content in the wiki');
+    expect(out).not.toContain('Sources:');
   });
 
-  it('brain이 isError면 실패 메시지를 반환한다', async () => {
+  it('brain이 isError면 실패 메시지를 반환한다(기본 en)', async () => {
     const rag = stubRag([{ slug: 'a', title: 'A', text: 'b', score: 1 }]);
     const reader = new ReaderAgent(rag, new FakeBrain({ text: '', costUsd: 0, isError: true }), logger);
     const out = await reader.handle({ text: '질문', userId: 'default' });
-    expect(out).toContain('답변 생성 실패');
+    expect(out).toContain('Answer generation failed');
   });
 
-  it('예외가 나도 프로세스를 죽이지 않고 실패 메시지를 반환한다', async () => {
+  it('예외가 나도 프로세스를 죽이지 않고 실패 메시지를 반환한다(기본 en)', async () => {
     const rag = { search: jest.fn(async () => { throw new Error('rag down'); }) } as any;
     const reader = new ReaderAgent(rag, new FakeBrain(), logger);
     const out = await reader.handle({ text: '질문', userId: 'default' });
-    expect(out).toContain('답변 생성 실패');
+    expect(out).toContain('Answer generation failed');
     expect(logger.error).toHaveBeenCalled();
   });
 
-  it('onChunk로 머리말·본문·출처를 흘려보낸다(스트리밍)', async () => {
+  it('onChunk로 머리말·본문·출처를 흘려보낸다(스트리밍, 기본 en)', async () => {
     const rag = stubRag([{ slug: 'a', title: 'A페이지', text: 'b', score: 1 }]);
     const reader = new ReaderAgent(rag, new FakeBrain({ text: '스트림답', costUsd: 0, isError: false }), logger);
     const chunks: string[] = [];
     const out = await reader.handle({ text: '질문', userId: 'default' }, (t) => chunks.push(t));
     const joined = chunks.join('');
     expect(joined).toContain('스트림답');
-    expect(joined).toContain('출처:');
+    expect(joined).toContain('Sources:');
     expect(out).toBe(joined);
   });
 
-  it('isError + onChunk일 때 반환값 == 스트리밍 청크의 합', async () => {
+  it('isError + onChunk일 때 반환값 == 스트리밍 청크의 합(기본 en)', async () => {
     const rag = stubRag([{ slug: 'a', title: 'A페이지', text: 'b', score: 1 }]);
     const reader = new ReaderAgent(rag, new FakeBrain({ text: '', costUsd: 0, isError: true }), logger);
     const chunks: string[] = [];
     const out = await reader.handle({ text: '질문', userId: 'default' }, (t) => chunks.push(t));
     const joined = chunks.join('');
     expect(out).toBe(joined);
-    expect(out).toContain('답변 생성 실패');
+    expect(out).toContain('Answer generation failed');
+  });
+
+  it('ENGRAM_LANG=ko면 한국어 머리말/출처/실패 메시지', async () => {
+    process.env.ENGRAM_LANG = 'ko';
+    try {
+      const rag0 = stubRag([]);
+      const reader0 = new ReaderAgent(rag0, new FakeBrain({ text: '일반답', costUsd: 0, isError: false }), logger);
+      const out0 = await reader0.handle({ text: '질문', userId: 'default' });
+      expect(out0).toContain('⚠ 위키에 관련 내용 없음');
+
+      const rag1 = stubRag([{ slug: 'a', title: 'A페이지', text: '본문', score: 1 }]);
+      const reader1 = new ReaderAgent(rag1, new FakeBrain({ text: '답이다', costUsd: 0, isError: false }), logger);
+      const out1 = await reader1.handle({ text: '질문', userId: 'default' });
+      expect(out1).toContain('출처:');
+
+      const rag2 = stubRag([{ slug: 'a', title: 'A', text: 'b', score: 1 }]);
+      const reader2 = new ReaderAgent(rag2, new FakeBrain({ text: '', costUsd: 0, isError: true }), logger);
+      const out2 = await reader2.handle({ text: '질문', userId: 'default' });
+      expect(out2).toContain('답변 생성 실패');
+    } finally {
+      delete process.env.ENGRAM_LANG;
+    }
   });
 });
 

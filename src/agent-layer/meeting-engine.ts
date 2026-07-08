@@ -4,6 +4,7 @@ import { WikiEngine } from '../knowledge-core/wiki/wiki-engine';
 import { TaskStore } from '../knowledge-core/task-store';
 import { PinoLogger } from '../pal/logger';
 import { DEFAULT_USER } from '../pal/path-resolver';
+import { t } from './i18n';
 
 export interface MeetingDef { name: string; schedule: string; roster: string[]; agenda: string }
 
@@ -23,7 +24,7 @@ export class MeetingEngine {
     const slug = `meeting-${def.name}-${date}`;
     // Record(서기)가 회의록을 위키에(설계 §7.3 산출물 매핑). 회의록은 확정 기록 → published.
     await this.wiki.createPage(
-      { slug, title: `${def.name} 회의록 (${date})`, category: 'meeting', body: `# 안건\n${def.agenda}\n\n# 결론\n${summary}`, status: 'published' },
+      { slug, title: t('meetingMinutesTitle', def.name, date), category: 'meeting', body: `${t('agendaHeader')}\n${def.agenda}\n\n${t('conclusionHeader')}\n${summary}`, status: 'published' },
       userId,
     );
     const decision = await this.tasks.create({ kind: 'board-decision', question: def.agenda, assignees: def.roster });
