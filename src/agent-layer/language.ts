@@ -13,11 +13,8 @@ export function languageName(code: string): string {
 
 // 설정 언어 해석: chat.json.language → OS 로케일(2자) → en.
 export function resolveLanguage(cfgLang?: string, osLocale?: string): string {
-  const c = cfgLang?.trim();
-  if (c) return c;
-  const o = osLocale?.trim();
-  if (o) return o.slice(0, 2).toLowerCase();
-  return 'en';
+  const pick = (s?: string): string => { const v = s?.trim(); return v ? v.toLowerCase().split('-')[0] : ''; };
+  return pick(cfgLang) || pick(osLocale) || 'en';
 }
 
 // 백엔드가 보는 설정 언어(자율 출력·회의록 등). main.ts가 ENGRAM_LANG로 주입.

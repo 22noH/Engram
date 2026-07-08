@@ -10,6 +10,8 @@ describe('language helpers', () => {
     expect(resolveLanguage('ko', 'en-US')).toBe('ko');
     expect(resolveLanguage(' ', 'ko-KR')).toBe('ko');
     expect(resolveLanguage(undefined, undefined)).toBe('en');
+    expect(resolveLanguage('ko-KR', undefined)).toBe('ko');
+    expect(resolveLanguage('EN', undefined)).toBe('en');
   });
   it('configuredLang reads ENGRAM_LANG, defaults en', () => {
     expect(configuredLang({ ENGRAM_LANG: 'ko' } as any)).toBe('ko');
