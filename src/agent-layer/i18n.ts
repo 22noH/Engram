@@ -17,6 +17,7 @@ const MESSAGES: Record<string, Entry> = {
   collabFailedNeedHuman: { en: () => 'Something went wrong — a human needs to take a look 🙏', ko: () => '작업 중 문제가 생겼어요 — 사람이 봐야 해요 🙏' },
   collabFailed: { en: () => 'Something went wrong 🙏', ko: () => '작업 중 문제가 생겼어요 🙏' },
   answerUnavailable: { en: () => "Couldn't answer just now 🙏", ko: () => '지금 답하기 어려웠어요 🙏' },
+  mentionHandleFailed: { en: () => "Can't handle that right now 🙏", ko: () => '지금 처리가 안 되네요 🙏' },
   codingNotReady: { en: () => "Coding isn't set up yet.", ko: () => '코딩 기능이 준비되지 않았어요.' },
   pathProtected: { en: () => "Can't write there (protected path).", ko: () => '그 경로엔 쓸 수 없어요(보호 경로).' },
   projectNotFound: { en: () => "Couldn't find that project.", ko: () => '그 프로젝트를 못 찾았어요.' },

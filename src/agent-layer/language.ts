@@ -19,7 +19,7 @@ export function resolveLanguage(cfgLang?: string, osLocale?: string): string {
 
 // 백엔드가 보는 설정 언어(자율 출력·회의록 등). main.ts가 ENGRAM_LANG로 주입.
 export function configuredLang(env: NodeJS.ProcessEnv = process.env): string {
-  const v = env.ENGRAM_LANG?.trim();
+  const v = env.ENGRAM_LANG?.trim().toLowerCase();
   return v || 'en';
 }
 

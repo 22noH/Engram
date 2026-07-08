@@ -1,6 +1,7 @@
 import { MessengerPort } from './messenger.port';
 import { CoreMessage } from '../core-message';
 import { ChannelPolicy, allows } from '../../agent-layer/channel-policy';
+import { t } from '../../agent-layer/i18n';
 import type { Action } from '../../../shared/protocol';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 import 회피·테스트 용이).
@@ -30,7 +31,7 @@ export function bindMessenger(
       await orchestrator.handleMention({ text: e.text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}) }, post, threadKey);
     } catch (err) {
       logger.warn(`멘션 처리 실패: ${String(err)}`, 'Messenger');
-      try { await post('지금 처리가 안 되네요 🙏'); } catch { /* post도 실패하면 포기 */ }
+      try { await post(t('mentionHandleFailed')); } catch { /* post도 실패하면 포기 */ }
     }
   });
 

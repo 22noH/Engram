@@ -16,6 +16,7 @@ describe('language helpers', () => {
   it('configuredLang reads ENGRAM_LANG, defaults en', () => {
     expect(configuredLang({ ENGRAM_LANG: 'ko' } as any)).toBe('ko');
     expect(configuredLang({} as any)).toBe('en');
+    expect(configuredLang({ ENGRAM_LANG: 'KO' } as any)).toBe('ko');
   });
   it('outputDirective returns the standard strings', () => {
     expect(outputDirective('interactive')).toBe("Respond in the language of the user's latest message.");

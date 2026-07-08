@@ -37,7 +37,7 @@ it('handleMention이 던지면 사과 + 로그(상주 불사)', async () => {
   const orch = { handleMention: async () => { throw new Error('boom'); } };
   bindMessenger(m, orch as any, { warn: (msg: string) => warns.push(msg) } as any);
   await m.emit({ text: 'x', channelId: 'c1', authorId: 'u1', target: 'T1' });
-  expect(m.replies[0].text).toContain('처리가 안 되네요');
+  expect(m.replies[0].text).toContain("Can't handle that right now");
   expect(warns.length).toBe(1);
 });
 

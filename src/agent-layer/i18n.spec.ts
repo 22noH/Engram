@@ -25,4 +25,9 @@ describe('t()', () => {
   it('unknown key throws (dev guard)', () => {
     expect(() => t('___nope___')).toThrow();
   });
+  it('mentionHandleFailed', () => {
+    expect(t('mentionHandleFailed')).toBe("Can't handle that right now 🙏");
+    process.env.ENGRAM_LANG = 'ko';
+    expect(t('mentionHandleFailed')).toBe('지금 처리가 안 되네요 🙏');
+  });
 });
