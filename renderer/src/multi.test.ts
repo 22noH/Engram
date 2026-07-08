@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { routeTarget, logicalChannels, mergeThreads } from './multi';
 
 const conns = [{ id: 'home', name: '집', endpoint: '' }, { id: 'work', name: '회사', endpoint: '' }];
