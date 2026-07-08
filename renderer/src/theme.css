@@ -111,3 +111,50 @@ input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line)
 input[type=text]:focus { border-color:var(--accent); }
 button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; cursor:pointer;
          color:var(--accent-text); font-weight:600; }
+
+/* Phase 12 — Engram 선택기(입력바 오른쪽, 보내기 옆) */
+#engramSelector { position:relative; flex:none; }
+#engramSelector .chip { display:flex; align-items:center; gap:6px; background:var(--panel);
+                        border:1px solid var(--line); color:var(--text); font-weight:500;
+                        font-size:12.5px; padding:0 12px; height:38px; border-radius:8px; }
+#engramSelector .chip:hover { background:var(--hover); }
+#engramSelector .dot { width:7px; height:7px; border-radius:50%; background:#f26d6d; flex:none; }
+#engramSelector .dot.on { background:#56d364; }
+#engramMenu { position:absolute; bottom:46px; right:0; min-width:200px; background:var(--panel);
+              border:1px solid var(--line); border-radius:8px; padding:4px; z-index:10;
+              box-shadow:0 8px 24px rgba(0,0,0,.4); }
+#engramMenu .item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px;
+                    cursor:pointer; font-size:13px; color:var(--text); }
+#engramMenu .item:hover { background:var(--hover); }
+#engramMenu .item.sel .name { font-weight:600; }
+#engramMenu .item .name { flex:1; }
+#engramMenu .item .check { color:var(--accent); }
+#engramMenu .sep { height:1px; background:var(--line); margin:4px 2px; }
+#engramMenu .item.manage { color:var(--accent); }
+
+/* Manage Engrams 모달 */
+#manageOverlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex;
+                 align-items:center; justify-content:center; z-index:20; }
+#manageModal { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+               padding:18px; width:420px; max-width:92vw; }
+#manageModal h2 { font-size:15px; margin-bottom:10px; }
+.engramListHead { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px;
+                  margin-bottom:6px; }
+.engramRow { display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid var(--line); }
+.engramRow .name { font-weight:600; min-width:80px; }
+.engramRow .endpoint { flex:1; color:var(--dim); font-family:Consolas,'Courier New',monospace; font-size:12px;
+                       overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.engramRow .default { color:var(--accent); font-size:12px; font-weight:600; }
+.engramRow button { font-size:12px; padding:0 10px; height:28px; }
+.engramRow button.danger { background:transparent; border:1px solid var(--line); color:#f26d6d; }
+#addEngram { display:flex; gap:8px; margin-top:12px; }
+#addEngram input { flex:1; min-width:0; }
+#manageClose { margin-top:14px; background:transparent; border:1px solid var(--line); color:var(--text); }
+
+/* '@' 자동완성 팝오버(팔레트와 같은 이디엄) */
+#mention { position:absolute; bottom:64px; left:16px; right:16px; z-index:9; background:var(--panel);
+           border:1px solid var(--line); border-radius:8px; padding:4px; max-height:40vh; overflow-y:auto; }
+#mention .hint { color:var(--dim); font-size:11px; padding:4px 10px; }
+#mention .item { padding:7px 10px; border-radius:6px; cursor:pointer; }
+#mention .item:hover, #mention .item.sel { background:var(--accent-soft); }
+#mention .cmd { color:var(--accent); font-family:Consolas,'Courier New',monospace; font-size:12.5px; }

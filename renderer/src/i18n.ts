@@ -20,4 +20,15 @@ export const T = {
   pickFolderBtn: ko ? '폴더 선택' : 'Choose folder',
   pickFolderPath: ko ? '폴더 경로 입력…' : 'Folder path…',
   newCodeChannelPrompt: ko ? '코드 채널 이름:' : 'Code channel name:',
+  // Phase 12 — 다중 연결 UI(Engram 선택기·Manage 모달·@ 자동완성)
+  engrams: ko ? 'Engram 목록' : 'Engrams',
+  addEngram: ko ? 'Engram 추가' : 'Add Engram',
+  manageEngrams: ko ? 'Engram 관리…' : 'Manage Engrams…',
+  default: ko ? '기본' : 'Default',
+  setDefault: ko ? '기본으로 지정' : 'Set default',
+  engramNamePh: ko ? '이름' : 'Name',
+  engramEndpointPh: ko ? '엔드포인트 (예: ws://192.168.0.9:47800)' : 'Endpoint (e.g. ws://192.168.0.9:47800)',
+  mentionHint: ko ? '@ 뒤에 이름을 넣으면 그 Engram에게만 보내요' : 'Type a name after @ to send to just that Engram',
+  removeEngram: ko ? '삭제' : 'Remove',
+  close: ko ? '닫기' : 'Close',
 };

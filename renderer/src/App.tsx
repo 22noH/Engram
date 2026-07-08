@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Channel, ClientFrame, Message as Msg, ServerFrame } from '../../shared/protocol';
-import { loadConnections, saveConnections, setDefault } from './connections';
+import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads } from './multi';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
-import { Palette, filterCommands } from './components/Palette';
+import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
+import { EngramSelector } from './components/EngramSelector';
+import { ManageEngrams } from './components/ManageEngrams';
+import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
 import { T } from './i18n';
 
 // 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
@@ -29,6 +32,9 @@ export default function App() {
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
+  const [inputText, setInputText] = useState('');                   // 입력값 미러(@ 자동완성 필터용 — input은 여전히 비제어)
+  const [mentionIdx, setMentionIdx] = useState(0);                  // @ 자동완성 선택 인덱스(방향키)
+  const [showManage, setShowManage] = useState(false);              // Manage Engrams 모달
   const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -210,21 +216,38 @@ export default function App() {
   };
 
   // '/'명령 팔레트에서 클릭·Enter로 명령을 입력창에 채운다(chat.html pickCmd 이전).
-  const pickCmd = (insert: string) => { const i = document.getElementById('input') as HTMLInputElement; i.value = insert; i.focus(); setPalFilter(null); };
+  // 단, 'engram' 항목은 텍스트가 아니라 동작 — Manage Engrams 모달을 연다.
+  const pickCmd = (insert: string) => {
+    setPalFilter(null);
+    if (insert === MANAGE_ENGRAMS_INSERT) { setShowManage(true); return; }
+    const i = document.getElementById('input') as HTMLInputElement;
+    i.value = insert; i.focus(); setInputText(insert);
+  };
+
+  // '@' 자동완성에서 클릭·Enter로 이름을 고르면 커서 앞 '@토큰'을 '@이름 '으로 치환한다.
+  const pickMention = (name: string) => {
+    const i = document.getElementById('input') as HTMLInputElement;
+    const v = i.value.replace(/(^|\s)@(\S*)$/, (_all, pre: string) => `${pre}@${name} `);
+    i.value = v; i.focus(); setInputText(v);
+  };
+  const mentionNames = connState.connections.map((c) => c.name);
 
   return (
     <>
       <div id="titlebar">
         <span id="dot" className={statusById[connState.defaultConnId] ? 'on' : ''} title={errText[connState.defaultConnId] ?? ''} />
-        <span id="tbtitle">Engram</span>
-        <select
-          id="defaultEngram"
-          value={connState.defaultConnId}
-          onChange={(e) => setConnState((s) => setDefault(s, e.target.value))}
-        >
-          {connState.connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <span id="tbtitle">Engram Desktop</span>
       </div>
+      {showManage && (
+        <ManageEngrams
+          connections={connState.connections}
+          defaultConnId={connState.defaultConnId}
+          onAdd={(name, endpoint) => setConnState((s) => addConnection(s, name, endpoint))}
+          onRemove={(id) => setConnState((s) => removeConnection(s, id))}
+          onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
+          onClose={() => setShowManage(false)}
+        />
+      )}
       <div id="app">
         <Channels
           channels={sidebarChannels} current={currentName} mode={mode}
@@ -266,12 +289,21 @@ export default function App() {
                   <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
                 )}
               </div>
-              {palFilter !== null && (
+              {palFilter !== null ? (
                 <Palette filter={palFilter} selected={palIdx} onPick={pickCmd} />
+              ) : (
+                <MentionAutocomplete text={inputText} names={mentionNames} selected={mentionIdx} onPick={pickMention} />
               )}
               <div id="inputbar" style={currentName ? undefined : { display: 'none' }}>
                 <input id="input" type="text" placeholder={T.placeholder}
-                  onChange={(e) => { const v = e.target.value; const open = v.startsWith('/'); setPalFilter(open ? v.slice(1).toLowerCase() : null); setPalIdx(0); }}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setInputText(v);
+                    const open = v.startsWith('/');
+                    setPalFilter(open ? v.slice(1).toLowerCase() : null);
+                    setPalIdx(0);
+                    setMentionIdx(0);
+                  }}
                   onKeyDown={(e) => {
                     if (palFilter !== null) { // 팔레트 열림: 방향키/Enter/Esc는 팔레트 조작(전송 아님)
                       const items = filterCommands(palFilter);
@@ -279,13 +311,25 @@ export default function App() {
                       if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setPalIdx((p) => (p - 1 + items.length) % items.length); return; }
                       if (e.key === 'Enter' && items.length) { e.preventDefault(); pickCmd(items[Math.min(palIdx, items.length - 1)].insert); return; }
                       if (e.key === 'Escape') { setPalFilter(null); return; }
+                    } else { // 팔레트 닫힘: '@' 자동완성 열려 있으면 방향키/Enter는 그쪽 조작
+                      const items = mentionCandidates(inputText, mentionNames);
+                      if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); setMentionIdx((p) => (p + 1) % items.length); return; }
+                      if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setMentionIdx((p) => (p - 1 + items.length) % items.length); return; }
+                      if (e.key === 'Enter' && items.length) { e.preventDefault(); pickMention(items[Math.min(mentionIdx, items.length - 1)]); return; }
                     }
                     if (e.key === 'Enter') {
                       const i = e.target as HTMLInputElement;
-                      sendText(i.value); i.value = '';
+                      sendText(i.value); i.value = ''; setInputText('');
                     }
                   }} />
-                <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; }}>{T.send}</button>
+                <EngramSelector
+                  connections={connState.connections}
+                  defaultConnId={connState.defaultConnId}
+                  statusById={statusById}
+                  onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
+                  onManage={() => setShowManage(true)}
+                />
+                <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; setInputText(''); }}>{T.send}</button>
               </div>
             </>
           )}
