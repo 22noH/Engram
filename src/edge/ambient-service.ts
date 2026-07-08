@@ -6,6 +6,7 @@ import { ChannelPolicy, allows } from '../agent-layer/channel-policy';
 import { ProposalStore } from '../knowledge-core/proposal-store';
 import { resolveCron } from './digest.scheduler';
 import { DEFAULT_USER } from '../pal/path-resolver';
+import { t } from '../agent-layer/i18n';
 
 // 인사이트 실행자(Orchestrator 구조적 타입 — 순환 회피).
 interface InsightRunner {
@@ -38,10 +39,10 @@ export class AmbientService {
       if (!allows(this.policy, channelId, 'ambient')) continue;
       try {
         const ins = await this.orchestrator.insight(channelId, this.yesterday());
-        if (ins?.report) await this.port.postToChannel(channelId, `☀️ 어제 이 채널: ${ins.report}`);
+        if (ins?.report) await this.port.postToChannel(channelId, t('yesterdayChannelInsight', ins.report));
         const pending = await this.proposals.listPending(channelId);
         if (pending.length > 0) {
-          await this.port.postToChannel(channelId, `📋 위키 결재 대기 ${pending.length}건 — 터미널에서 engram review로 승인해줘`);
+          await this.port.postToChannel(channelId, t('wikiPendingApproval', pending.length));
         }
       } catch (err) {
         this.logger.warn(`ambient 실패(스킵) ${channelId}: ${String(err)}`, 'Ambient');

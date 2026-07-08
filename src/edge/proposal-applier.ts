@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { WikiEngine } from '../knowledge-core/wiki/wiki-engine';
 import { ProposalStore, Proposal } from '../knowledge-core/proposal-store';
+import { t } from '../agent-layer/i18n';
 
 // 승인된 제안을 op별로 위키에 반영(설계 §6 ⑥ 반영). 라이브 위키는 여기서만 변경.
 @Injectable()
@@ -14,7 +15,7 @@ export class ProposalApplier {
     } else {
       const merged = [...new Set([...existing.frontmatter.sources, ...p.sources])];
       const marker = p.op === 'supersede'
-        ? `\n\n<!-- superseded by 제안 ${p.id} (출처: ${p.sources.join(', ')}) -->\n${p.payload}`
+        ? t('supersededMarker', p.id, p.sources.join(', '), p.payload)
         : `\n\n${p.payload}`;
       await this.wiki.updatePage(p.targetSlug, { body: existing.body + marker, sources: merged }, p.userId);
     }

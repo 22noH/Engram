@@ -26,7 +26,7 @@ describe('ProposalApplier', () => {
     expect(calls.update.body).toContain('새 내용');
     expect(calls.update.sources).toEqual(expect.arrayContaining(['old', 'conv:1']));
   });
-  it('supersede는 기존 본문을 보존하고 마커+내용을 덧붙인다(덮어쓰기 금지)', async () => {
+  it('supersede는 기존 본문을 보존하고 마커+내용을 덧붙인다(덮어쓰기 금지, 기본 en)', async () => {
     const calls: any = {};
     const wiki = {
       getPage: async () => ({ slug: 'alpha', frontmatter: { sources: ['old'] }, body: '기존 본문' }),
@@ -34,9 +34,24 @@ describe('ProposalApplier', () => {
     } as any;
     await new ProposalApplier(wiki, { markApproved: jest.fn() } as any).apply(baseProp('supersede', 'alpha') as any);
     expect(calls.update.body).toContain('기존 본문');        // 기존 보존(덮어쓰기 아님)
-    expect(calls.update.body).toContain('superseded');       // 마커 존재
+    expect(calls.update.body).toContain('superseded by proposal id1 (sources: conv:1)'); // 마커(기본 en)
     expect(calls.update.body).toContain('새 내용');          // 새 payload 추가
     expect(calls.update.body.indexOf('기존 본문')).toBeLessThan(calls.update.body.indexOf('새 내용')); // 기존이 앞
+  });
+
+  it('supersede 마커는 ENGRAM_LANG=ko일 때 한국어', async () => {
+    process.env.ENGRAM_LANG = 'ko';
+    try {
+      const calls: any = {};
+      const wiki = {
+        getPage: async () => ({ slug: 'alpha', frontmatter: { sources: ['old'] }, body: '기존 본문' }),
+        updatePage: async (_s: string, p: any) => { calls.update = p; return {} as any; },
+      } as any;
+      await new ProposalApplier(wiki, { markApproved: jest.fn() } as any).apply(baseProp('supersede', 'alpha') as any);
+      expect(calls.update.body).toContain('superseded by 제안 id1 (출처: conv:1)');
+    } finally {
+      delete process.env.ENGRAM_LANG;
+    }
   });
   it('append 대상이 없으면 create로 강등한다', async () => {
     const calls: any = {};

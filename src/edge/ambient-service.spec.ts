@@ -30,7 +30,7 @@ function svc(opts: {
   return { s, port, calls };
 }
 
-it('인사이트 있는 채널만 ☀️ 게시(어제 날짜로 호출)', async () => {
+it('인사이트 있는 채널만 ☀️ 게시(어제 날짜로 호출, 기본 en)', async () => {
   const root = tmpRoot('c1', 'c2');
   const { s, port, calls } = svc({
     root,
@@ -39,15 +39,28 @@ it('인사이트 있는 채널만 ☀️ 게시(어제 날짜로 호출)', async
   await s.tick();
   expect(calls).toEqual(expect.arrayContaining([['c1', '2026-07-01'], ['c2', '2026-07-01']]));
   const suns = port.channelPosts.filter((p) => p.text.startsWith('☀️'));
-  expect(suns).toEqual([{ channelId: 'c1', threadId: undefined, text: '☀️ 어제 이 채널: 어제는 RAG 얘기가 많았어요' }]);
+  expect(suns).toEqual([{ channelId: 'c1', threadId: undefined, text: '☀️ Yesterday in this channel: 어제는 RAG 얘기가 많았어요' }]);
 });
 
-it('결재 대기>0 채널만 📋 게시', async () => {
+it('결재 대기>0 채널만 📋 게시(기본 en)', async () => {
   const root = tmpRoot('c1', 'c2');
   const { s, port } = svc({ root, pending: async (u) => (u === 'c2' ? [{}, {}, {}] : []) });
   await s.tick();
   const notes = port.channelPosts.filter((p) => p.text.startsWith('📋'));
-  expect(notes).toEqual([{ channelId: 'c2', threadId: undefined, text: '📋 위키 결재 대기 3건 — 터미널에서 engram review로 승인해줘' }]);
+  expect(notes).toEqual([{ channelId: 'c2', threadId: undefined, text: '📋 3 wiki item(s) awaiting approval — approve them with `engram review` in the terminal' }]);
+});
+
+it('결재 대기>0 채널만 📋 게시(ENGRAM_LANG=ko)', async () => {
+  process.env.ENGRAM_LANG = 'ko';
+  try {
+    const root = tmpRoot('c1', 'c2');
+    const { s, port } = svc({ root, pending: async (u) => (u === 'c2' ? [{}, {}, {}] : []) });
+    await s.tick();
+    const notes = port.channelPosts.filter((p) => p.text.startsWith('📋'));
+    expect(notes).toEqual([{ channelId: 'c2', threadId: undefined, text: '📋 위키 결재 대기 3건 — 터미널에서 engram review로 승인해줘' }]);
+  } finally {
+    delete process.env.ENGRAM_LANG;
+  }
 });
 
 it('ambient=false 채널은 스킵(insight 미호출)', async () => {
