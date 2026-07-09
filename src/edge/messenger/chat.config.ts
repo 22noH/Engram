@@ -2,13 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // 자체 채팅 서버 설정(스펙 §3). 기본 = 가동·127.0.0.1:47800. enabled:false만 끔.
-// 비밀 아님(토큰 없음) — env는 포트/바인딩 오버라이드 용도.
+// token 설정 시 모든 ws 연결이 인증 필요(Phase 13). env는 포트/바인딩/토큰 오버라이드.
 
 export interface ChatConfig {
   enabled: boolean;
   port: number;
   bind: string;
   language?: string; // BCP-47 코드(예 'ko'/'en'). 미설정=OS 로케일 폴백(main.ts).
+  token?: string;    // 설정 시 모든 ws 연결이 auth 프레임으로 제시해야 함. 미설정=무인증(현행).
 }
 
 function validPort(v: unknown): number | null {
@@ -32,5 +33,8 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
     || (typeof raw.bind === 'string' && raw.bind)
     || '127.0.0.1';
   const language = typeof raw.language === 'string' && raw.language.trim() ? raw.language.trim() : undefined;
-  return { enabled: raw.enabled !== false, port, bind, language };
+  const token = (typeof env.ENGRAM_CHAT_TOKEN === 'string' && env.ENGRAM_CHAT_TOKEN.trim())
+    || (typeof raw.token === 'string' && raw.token.trim())
+    || undefined;
+  return { enabled: raw.enabled !== false, port, bind, language, token };
 }
