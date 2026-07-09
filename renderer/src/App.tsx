@@ -218,8 +218,11 @@ export default function App() {
     : undefined;
 
   // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
+  // team 모드는 스코프된 연결(viewConns=기본 연결 하나)에만 보낸다 — 안 그러면 동명 팀채널이
+  // 다른 브레인에도 있을 때 그쪽까지 삭제/변경되어 Phase14가 금지한 교차 연결 오염이 재발한다.
   const fanoutToName = (name: string, build: (channelId: string) => ClientFrame) => {
-    for (const c of connState.connections) {
+    const targets = mode === 'team' ? viewConns : connState.connections;
+    for (const c of targets) {
       const chanId = chanIdByConnName.get(chanKey(c.id, mode, name));
       if (chanId) send(c.id, build(chanId));
     }
@@ -336,7 +339,7 @@ export default function App() {
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
-                      myName={mode === 'team' ? displayName : undefined}
+                      myName={mode === 'team' ? displayName.trim() : undefined}
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
