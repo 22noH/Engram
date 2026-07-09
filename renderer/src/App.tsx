@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Channel, ClientFrame, Message as Msg, ServerFrame } from '../../shared/protocol';
 import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
 import { useConnections } from './ws/connections-client';
-import { routeTarget, logicalChannels, mergeThreads } from './multi';
+import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
+import { loadDisplayName, saveDisplayName } from './display-name';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
@@ -37,6 +38,7 @@ export default function App() {
   const [showManage, setShowManage] = useState(false);              // Manage Engrams 모달
   const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [displayName, setDisplayName] = useState(loadDisplayName());
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +53,7 @@ export default function App() {
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
   // (모드를 안 보면 동명·타모드 채널로 잘못 flush될 수 있다 — Minor #4).
-  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string }>>(new Map());
+  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string; authorId?: string }>>(new Map());
 
   function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
@@ -67,7 +69,7 @@ export default function App() {
       if (pending) {
         const chan = f.list.find((c) => c.name === pending.name && (c.mode ?? 'chat') === pending.mode);
         if (chan) {
-          send(connId, { t: 'send', channelId: chan.id, text: pending.text });
+          send(connId, { t: 'send', channelId: chan.id, text: pending.text, ...(pending.authorId ? { authorId: pending.authorId } : {}) });
           pendingSendRef.current.delete(connId);
         }
       }
@@ -120,6 +122,16 @@ export default function App() {
 
   const { send, statusById } = useConnections(connState.connections, onFrame, onOpen);
 
+  // team은 기본 연결(그 서버) 하나로 스코프. Ask/Code는 원본 그대로(무변경).
+  const viewConns = useMemo(
+    () => scopedConnections(connState.connections, mode, connState.defaultConnId),
+    [connState.connections, mode, connState.defaultConnId],
+  );
+  const viewChannelsByConn = useMemo(
+    () => scopedChannels(channelsByConn, mode, connState.defaultConnId),
+    [channelsByConn, mode, connState.defaultConnId],
+  );
+
   // 연결이 제거되면 그 connId분 채널/메시지 캐시를 지운다 — 안 지우면 사이드바에 고스트 채널이 남는다.
   const connIds = connState.connections.map((c) => c.id).join(',');
   useEffect(() => {
@@ -147,27 +159,27 @@ export default function App() {
 
   // currentName 없거나 모드 전환으로 안 보이면 그 모드의 첫 논리 채널로(chat.html/Phase11 onSetMode 대체).
   useEffect(() => {
-    const names = logicalChannels(channelsByConn, mode);
+    const names = logicalChannels(viewChannelsByConn, mode);
     setCurrentName((cur) => (cur && names.includes(cur) ? cur : (names[0] ?? null)));
-  }, [channelsByConn, mode]);
+  }, [viewChannelsByConn, mode]);
 
   // currentName이 정해지거나(최초 선택 포함) 어느 연결의 channels 목록이 갱신될 때마다,
   // 그 이름 채널을 가진 모든 연결 중 아직 기록이 없는 곳에 history를 요청(둘 다에서 동시에 커버).
   useEffect(() => {
     if (!currentName) return;
-    for (const c of connState.connections) {
+    for (const c of viewConns) {
       const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
       if (chanId && !msgsByConnCh.has(`${c.id}::${chanId}`)) {
         send(c.id, { t: 'history', channelId: chanId });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentName, mode, channelsByConn]);
+  }, [currentName, mode, viewChannelsByConn]);
 
   // 새 메시지/채널 전환/생각중 변화 시 맨 아래로(chat.html box.scrollTop=scrollHeight 이전).
   const mergedMsgs = useMemo(() => {
     if (!currentName) return [] as Msg[];
-    const parts = connState.connections
+    const parts = viewConns
       .map((c) => {
         const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
         if (!chanId) return null;
@@ -175,19 +187,19 @@ export default function App() {
       })
       .filter((x): x is { connId: string; messages: Msg[] } => x !== null);
     return mergeThreads(parts);
-  }, [currentName, mode, connState.connections, chanIdByConnName, msgsByConnCh]);
+  }, [currentName, mode, viewConns, chanIdByConnName, msgsByConnCh]);
 
   // anchor(및 답)의 소유 연결 — 스레드 답글을 그 스레드를 연 Engram으로 라우팅하는 데 쓰인다.
   const anchorConn = useMemo(() => {
     const m = new Map<string, string>();
     if (!currentName) return m;
-    for (const c of connState.connections) {
+    for (const c of viewConns) {
       const chanId = chanIdByConnName.get(chanKey(c.id, mode, currentName));
       if (!chanId) continue;
       for (const msg of msgsByConnCh.get(`${c.id}::${chanId}`) ?? []) m.set(msg.id, c.id);
     }
     return m;
-  }, [currentName, mode, connState.connections, chanIdByConnName, msgsByConnCh]);
+  }, [currentName, mode, viewConns, chanIdByConnName, msgsByConnCh]);
 
   useEffect(() => {
     const box = msgsRef.current;
@@ -195,9 +207,9 @@ export default function App() {
   }, [currentName, mergedMsgs, awaiting]);
 
   // 사이드바용 논리 채널 목록(기존 Channels 컴포넌트는 id 기반 — 여기선 id=name으로 합성).
-  const sidebarChannels: Channel[] = logicalChannels(channelsByConn, mode).map((name) => {
-    const fromDefault = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
-    const any = fromDefault ?? Object.values(channelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
+  const sidebarChannels: Channel[] = logicalChannels(viewChannelsByConn, mode).map((name) => {
+    const fromDefault = viewChannelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
+    const any = fromDefault ?? Object.values(viewChannelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     return { id: name, name, respondMode: any?.respondMode ?? 'all', mode };
   });
   // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
@@ -230,9 +242,12 @@ export default function App() {
   // 그 연결의 channels 프레임이 그 이름으로 돌아오면 onFrame이 flush한다.
   const sendText = (text: string, threadId?: string) => {
     if (!text.trim() || !currentName) return;
+    if (mode === 'team' && !displayName.trim()) return; // 닉네임 없으면 team 전송 차단
     const targetConnId = threadId
       ? (anchorConn.get(threadId) ?? connState.defaultConnId)
-      : routeTarget(text, connState.defaultConnId, connState.connections);
+      : mode === 'team'
+        ? connState.defaultConnId               // team: @라우팅 안 씀 → @Engram은 멘션으로 전달
+        : routeTarget(text, connState.defaultConnId, connState.connections);
     // Minor #5: 대상 연결 소켓이 안 열려 있으면 조용히 버리지 말고 그 연결 에러란에 안내만 남긴다
     // (전송·생각중 타이머 시작은 하지 않는다 — spec §7).
     if (!statusById[targetConnId]) {
@@ -240,11 +255,12 @@ export default function App() {
       setErrText((prev) => ({ ...prev, [targetConnId]: T.notConnected(targetName) }));
       return;
     }
+    const authorId = mode === 'team' && displayName.trim() ? displayName.trim() : undefined;
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
-      send(targetConnId, { t: 'send', channelId, text, threadId });
+      send(targetConnId, { t: 'send', channelId, text, threadId, ...(authorId ? { authorId } : {}) });
     } else if (!threadId) {
-      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
+      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text, authorId });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
     }
     expectReply(currentName, text, targetConnId);
@@ -301,6 +317,12 @@ export default function App() {
             <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
           ) : (
             <>
+              {mode === 'team' && (
+                <div id="teamName">
+                  <input type="text" placeholder={T.displayNamePh} value={displayName}
+                    onChange={(e) => { setDisplayName(e.target.value); saveDisplayName(e.target.value); }} />
+                </div>
+              )}
               <div id="msgs" ref={msgsRef}>
                 {(() => {
                   const byAnchor = new Map<string, Msg[]>();
@@ -314,6 +336,7 @@ export default function App() {
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
+                      myName={mode === 'team' ? displayName : undefined}
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}

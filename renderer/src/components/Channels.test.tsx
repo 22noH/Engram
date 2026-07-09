@@ -6,9 +6,9 @@ const base = {
   current: 'a', onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {},
 } as any;
 
-it('Ask·Code 탭 렌더, Team은 flag off면 안 보인다', () => {
+it('Ask·Code·Team 탭 모두 렌더된다(Phase 14: TEAM_CHAT=true)', () => {
   render(<Channels {...base} mode="chat" />);
   expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
-  expect(screen.queryByText(/Team|^채팅$/)).toBeNull(); // TEAM_CHAT=false
+  expect(screen.getByText(/Team|^채팅$/)).toBeInTheDocument();
 });
