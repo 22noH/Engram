@@ -1,5 +1,5 @@
-import { it, expect } from 'vitest';
-import { routeTarget, logicalChannels, mergeThreads } from './multi';
+import { it, expect, describe } from 'vitest';
+import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 
 const conns = [{ id: 'home', name: '집', endpoint: '' }, { id: 'work', name: '회사', endpoint: '' }];
 
@@ -49,4 +49,26 @@ it('mergeThreads: orphan replies (anchor missing) are appended at the end', () =
   ] } as any;
   const merged = mergeThreads([{ connId: 'home', ...a }]);
   expect(merged.map((m) => m.id)).toEqual(['m1', 'orphan']);
+});
+
+describe('team 단일연결 스코프', () => {
+  it('scopedConnections: team은 기본 연결만, 그 외 모드는 전부', () => {
+    const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }, { id: 'b', name: 'B', endpoint: 'ws://b' }];
+    expect(scopedConnections(conns, 'team', 'a')).toEqual([{ id: 'a', name: 'A', endpoint: 'ws://a' }]);
+    expect(scopedConnections(conns, 'chat', 'a')).toBe(conns);
+    expect(scopedConnections(conns, 'code', 'a')).toBe(conns);
+  });
+
+  it('scopedChannels: team은 기본 연결 채널만(동명 team 채널 오합침 방지)', () => {
+    const cbc = {
+      a: [{ id: '1', name: 'general', respondMode: 'mention' as const, mode: 'team' as const }],
+      b: [{ id: '2', name: 'general', respondMode: 'mention' as const, mode: 'team' as const }],
+    };
+    expect(Object.keys(scopedChannels(cbc, 'team', 'a'))).toEqual(['a']);
+    expect(scopedChannels(cbc, 'chat', 'a')).toBe(cbc);
+  });
+
+  it('scopedChannels: team에 기본 연결 항목이 없으면 빈 배열', () => {
+    expect(scopedChannels({}, 'team', 'a')).toEqual({ a: [] });
+  });
 });
