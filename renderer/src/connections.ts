@@ -1,4 +1,4 @@
-import { WS_URL } from './config';
+import { WS_URL, LOCAL_TOKEN } from './config';
 
 export interface Connection { id: string; name: string; endpoint: string; token?: string }
 interface State { connections: Connection[]; defaultConnId: string }
@@ -11,16 +11,27 @@ function seed(): State {
   return { connections: [{ id: 'local', name: 'Local', endpoint: defaultEndpoint() }], defaultConnId: 'local' };
 }
 
-export function loadConnections(): State {
+export function loadConnections(localToken: string | undefined = LOCAL_TOKEN): State {
+  let s: State;
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return seed();
-    const s = JSON.parse(raw) as State;
-    if (!s.connections?.length) return seed();
-    // 기본이 사라졌으면 첫 연결로 보정
-    if (!s.connections.some((c) => c.id === s.defaultConnId)) s.defaultConnId = s.connections[0].id;
-    return s;
-  } catch { return seed(); }
+    if (!raw) { s = seed(); }
+    else {
+      const parsed = JSON.parse(raw) as State;
+      if (!parsed.connections?.length) s = seed();
+      else {
+        if (!parsed.connections.some((c) => c.id === parsed.defaultConnId)) parsed.defaultConnId = parsed.connections[0].id;
+        s = parsed;
+      }
+    }
+  } catch { s = seed(); }
+  // 로컬 연결 토큰은 main(chat.json)이 진실원 — 부팅 주입값으로 맞춘다.
+  // ponytail: localToken 있을 때만 패치. 서버 토큰 해제 후 stale 토큰이 남아도 무인증 서버는 무시하므로 무해.
+  if (localToken) {
+    const local = s.connections.find((c) => c.id === 'local');
+    if (local) local.token = localToken;
+  }
+  return s;
 }
 
 export function saveConnections(state: State): void {

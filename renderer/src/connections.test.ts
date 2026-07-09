@@ -32,4 +32,12 @@ describe('connections store', () => {
     const s = addConnection(loadConnections(), 'Plain', 'ws://p');
     expect(s.connections.find((c) => c.name === 'Plain')?.token).toBeUndefined();
   });
+  it('loadConnections: LOCAL_TOKEN이 있으면 local 연결에 실린다(신규 시드)', () => {
+    localStorage.clear();
+    expect(loadConnections('injected').connections.find((c) => c.id === 'local')?.token).toBe('injected');
+  });
+  it('loadConnections: LOCAL_TOKEN이 있으면 기존 local 연결에도 패치된다', () => {
+    saveConnections({ connections: [{ id: 'local', name: 'Local', endpoint: 'ws://x' }], defaultConnId: 'local' });
+    expect(loadConnections('patched').connections.find((c) => c.id === 'local')?.token).toBe('patched');
+  });
 });
