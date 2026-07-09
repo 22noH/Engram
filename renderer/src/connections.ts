@@ -1,6 +1,6 @@
 import { WS_URL } from './config';
 
-export interface Connection { id: string; name: string; endpoint: string }
+export interface Connection { id: string; name: string; endpoint: string; token?: string }
 interface State { connections: Connection[]; defaultConnId: string }
 
 const KEY = 'engram.connections';
@@ -32,8 +32,8 @@ function newId(state: State, name: string): string {
   return g ?? `${name}-${state.connections.length}-${state.connections.length}`;
 }
 
-export function addConnection(state: State, name: string, endpoint: string): State {
-  const conn: Connection = { id: newId(state, name), name, endpoint };
+export function addConnection(state: State, name: string, endpoint: string, token?: string): State {
+  const conn: Connection = { id: newId(state, name), name, endpoint, ...(token ? { token } : {}) };
   return { connections: [...state.connections, conn], defaultConnId: state.defaultConnId };
 }
 

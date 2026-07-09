@@ -23,4 +23,13 @@ describe('connections store', () => {
     expect(a.connections).toHaveLength(1);
     expect(b.connections).toHaveLength(2);
   });
+  it('addConnection: token을 저장하고 로드에서 복원한다', () => {
+    const s = addConnection(loadConnections(), 'Remote', 'ws://r', 'tok');
+    saveConnections(s);
+    expect(loadConnections().connections.find((c) => c.name === 'Remote')?.token).toBe('tok');
+  });
+  it('addConnection: token 없으면 undefined(필드 미포함)', () => {
+    const s = addConnection(loadConnections(), 'Plain', 'ws://p');
+    expect(s.connections.find((c) => c.name === 'Plain')?.token).toBeUndefined();
+  });
 });
