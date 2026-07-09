@@ -156,8 +156,11 @@ export class SelfMessenger implements MessengerPort {
     if (!text.trim() || !channelId) return;
     const ch = this.store.listChannels().find((c) => c.id === channelId);
     if (!ch) { this.sendTo(ws, { t: 'error', text: 'unknown channel' }); return; }
+    // 자가선언 이름 수용. 단 'engram'은 예약(사람이 Engram 사칭 방지) → owner로 강등.
+    let author = typeof f.authorId === 'string' && f.authorId ? f.authorId : 'owner';
+    if (author.toLowerCase() === 'engram') author = 'owner';
     const msg = this.store.appendMessage(channelId, {
-      authorId: typeof f.authorId === 'string' && f.authorId ? f.authorId : 'owner',
+      authorId: author,
       text,
       threadId: typeof f.threadId === 'string' && f.threadId ? f.threadId : undefined,
     });
