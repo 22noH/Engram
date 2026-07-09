@@ -245,3 +245,74 @@ it('지연 생성 flush는 이름뿐 아니라 모드도 맞아야 한다(동명
   });
   expect(workWS.sent.some((s) => s.includes('"send"') && s.includes('"channelId":"w-code"'))).toBe(false);
 });
+
+// Phase 14: team 탭 전송 배선(리뷰 지적 — 자동화 가드 없음) 커버리지.
+it('team 모드에서 닉네임을 설정하고 보내면 authorId가 담긴 send 프레임이 나간다', async () => {
+  seedTwoConnections();
+  render(<App />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  act(() => {
+    homeWS.msg({ t: 'channels', list: [{ id: 't1', name: '팀', respondMode: 'all', mode: 'team' }] });
+  });
+
+  fireEvent.click(screen.getByText(T.tabTeam));
+  await waitFor(() => expect(screen.getByText('# 팀')).toBeInTheDocument());
+
+  const nameInput = document.querySelector('#teamName input') as HTMLInputElement;
+  act(() => { fireEvent.change(nameInput, { target: { value: 'Alice' } }); });
+
+  const input = document.getElementById('input') as HTMLInputElement;
+  act(() => { fireEvent.change(input, { target: { value: 'hi team' } }); });
+  act(() => { fireEvent.keyDown(input, { key: 'Enter' }); });
+
+  await waitFor(() => {
+    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"authorId":"Alice"'))).toBe(true);
+  });
+});
+
+it('team 모드에서 닉네임이 없으면 전송이 나가지 않는다(send 프레임 없음)', async () => {
+  seedTwoConnections();
+  render(<App />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  act(() => {
+    homeWS.msg({ t: 'channels', list: [{ id: 't1', name: '팀', respondMode: 'all', mode: 'team' }] });
+  });
+
+  fireEvent.click(screen.getByText(T.tabTeam));
+  await waitFor(() => expect(screen.getByText('# 팀')).toBeInTheDocument());
+
+  // 닉네임 입력을 하지 않는다(기본값 '').
+  const input = document.getElementById('input') as HTMLInputElement;
+  act(() => { fireEvent.change(input, { target: { value: 'hi team' } }); });
+  act(() => { fireEvent.keyDown(input, { key: 'Enter' }); });
+
+  expect(homeWS.sent.some((s) => s.includes('"send"'))).toBe(false);
+});
+
+it('team 채널은 기본 연결로만 스코프된다 — 다른 연결의 동명 team 채널·기록과 안 섞인다', async () => {
+  seedTwoConnections(); // defaultConnId: 'home'
+  render(<App />);
+  const [homeWS, workWS] = FakeWS.instances;
+  act(() => { homeWS.open(); workWS.open(); });
+  act(() => {
+    homeWS.msg({ t: 'channels', list: [{ id: 'h-team', name: '팀', respondMode: 'all', mode: 'team' }] });
+    workWS.msg({ t: 'channels', list: [{ id: 'w-team', name: '팀', respondMode: 'all', mode: 'team' }] });
+  });
+
+  fireEvent.click(screen.getByText(T.tabTeam));
+  await waitFor(() => expect(screen.getByText('# 팀')).toBeInTheDocument());
+
+  act(() => {
+    homeWS.msg({ t: 'history', channelId: 'h-team', messages: [{ id: 'm1', authorId: 'a', text: 'from home team', ts: '2026-01-01T00:00:00Z' }] });
+    workWS.msg({ t: 'history', channelId: 'w-team', messages: [{ id: 'm2', authorId: 'b', text: 'from work team', ts: '2026-01-01T00:01:00Z' }] });
+  });
+
+  // 기본 연결(home)의 기록만 보이고, work의 동명 team 채널 기록은 섞이지 않는다.
+  await waitFor(() => expect(screen.getByText('from home team')).toBeInTheDocument());
+  expect(screen.queryByText('from work team')).not.toBeInTheDocument();
+
+  // work 연결에는 team 채널 기록 요청 자체가 나가지 않는다(스코프 밖 — history 폴링 트리거 안 됨).
+  expect(workWS.sent.some((s) => s.includes('"history"') && s.includes('"channelId":"w-team"'))).toBe(false);
+});
