@@ -133,3 +133,45 @@ it('opens new sockets and closes removed ones when connections array changes', (
   expect(result.current.statusById.b).toBeUndefined(); // 제거된 연결 상태는 지워짐
   expect(result.current.statusById.a).toBe(true); // a는 유지된 채 그대로
 });
+
+it('토큰이 있으면 open 시 auth 프레임을 가장 먼저 보낸다', () => {
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 'sekret' }];
+  renderHook(() => useConnections(conns, () => {}));
+  act(() => { FakeWS.instances[0].open(); });
+  expect(FakeWS.instances[0].sent[0]).toBe(JSON.stringify({ t: 'auth', token: 'sekret' }));
+});
+
+it('토큰이 없으면 auth 프레임을 보내지 않는다', () => {
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
+  renderHook(() => useConnections(conns, () => {}));
+  act(() => { FakeWS.instances[0].open(); });
+  expect(FakeWS.instances[0].sent).toHaveLength(0);
+});
+
+it('authErr 수신 시 재연결하지 않는다', () => {
+  vi.useFakeTimers();
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 'wrong' }];
+  renderHook(() => useConnections(conns, () => {}));
+  act(() => {
+    FakeWS.instances[0].open();
+    FakeWS.instances[0].msg({ t: 'authErr' });
+    FakeWS.instances[0].close();
+  });
+  act(() => { vi.advanceTimersByTime(30000); });
+  expect(FakeWS.instances).toHaveLength(1); // 재연결 시도 없음
+  vi.useRealTimers();
+});
+
+it('토큰을 바꾸면 소켓을 새 토큰으로 재접속한다', () => {
+  const { rerender } = renderHook(
+    ({ connections }) => useConnections(connections, () => {}),
+    { initialProps: { connections: [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 't1' }] } },
+  );
+  act(() => { FakeWS.instances[0].open(); });
+  expect(FakeWS.instances).toHaveLength(1);
+  act(() => { rerender({ connections: [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 't2' }] }); });
+  expect(FakeWS.instances).toHaveLength(2);          // 재생성
+  expect(FakeWS.instances[0].readyState).toBe(3);    // 옛 소켓 닫힘
+  act(() => { FakeWS.instances[1].open(); });
+  expect(FakeWS.instances[1].sent[0]).toBe(JSON.stringify({ t: 'auth', token: 't2' }));
+});

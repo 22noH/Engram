@@ -9,6 +9,8 @@ interface Slot {
   attempt: number;
   closed: boolean;
   timer: ReturnType<typeof setTimeout> | null;
+  authFailed: boolean;   // authErr 받으면 true → 재연결 중단
+  token?: string;        // 이 소켓이 붙을 때 쓴 토큰(변경 감지용)
 }
 
 // 연결마다 소켓 하나. connections 배열이 바뀌면(추가/삭제) 그에 맞춰 소켓을 열고/닫는다.
@@ -25,15 +27,16 @@ export function useConnections(
   const onOpenRef = useRef(onOpen); onOpenRef.current = onOpen;
   const connectionsRef = useRef(connections); connectionsRef.current = connections;
 
-  const ids = connections.map((c) => c.id).join(',');
+  const ids = connections.map((c) => `${c.id}:${c.token ?? ''}`).join(',');
 
   useEffect(() => {
     const slots = slotsRef.current;
     const wanted = new Map(connections.map((c) => [c.id, c]));
 
-    // 사라진 연결의 소켓은 닫는다.
+    // 사라졌거나 토큰이 바뀐 슬롯은 닫는다(토큰 변경=재접속 필요).
     for (const [id, slot] of slots) {
-      if (wanted.has(id)) continue;
+      const w = wanted.get(id);
+      if (w && w.token === slot.token) continue;
       slot.closed = true;
       if (slot.timer) clearTimeout(slot.timer);
       slot.ws?.close();
@@ -50,7 +53,7 @@ export function useConnections(
     for (const conn of connections) {
       if (slots.has(conn.id)) continue;
       const connId = conn.id;
-      const slot: Slot = { ws: null, attempt: 0, closed: false, timer: null };
+      const slot: Slot = { ws: null, attempt: 0, closed: false, timer: null, authFailed: false, token: conn.token };
       slots.set(connId, slot);
 
       const connect = () => {
@@ -60,12 +63,14 @@ export function useConnections(
         slot.ws = ws;
         ws.onopen = () => {
           slot.attempt = 0;
+          const tok = connectionsRef.current.find((c) => c.id === connId)?.token;
+          if (tok) ws.send(JSON.stringify({ t: 'auth', token: tok }));
           setStatusById((s) => ({ ...s, [connId]: true }));
           onOpenRef.current?.(connId);
         };
         ws.onclose = () => {
           setStatusById((s) => ({ ...s, [connId]: false }));
-          if (slot.closed) return;
+          if (slot.closed || slot.authFailed) return;
           const d = DELAYS[Math.min(slot.attempt++, DELAYS.length - 1)];
           slot.timer = setTimeout(connect, d);
         };
@@ -73,6 +78,7 @@ export function useConnections(
         ws.onmessage = (ev) => {
           let f: ServerFrame;
           try { f = JSON.parse(ev.data as string) as ServerFrame; } catch { return; }
+          if (f.t === 'authErr') slot.authFailed = true; // onclose가 재연결 중단
           onFrameRef.current(connId, f);
         };
       };
