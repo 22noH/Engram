@@ -7,7 +7,8 @@ import { ChatConfig } from './chat.config';
 
 // 자체 메신저 어댑터(Phase 9, 스펙 §4.1). http(헬스 프로브)+ws 서버 내장.
 // 생성자는 비연결 — 리슨은 start()에서(Discord 어댑터 관례).
-// 기본 바인딩 127.0.0.1 — 인증 없음. 개방(0.0.0.0)은 9b(토큰 인증)까지 금지(README 명시).
+// 기본 바인딩 127.0.0.1. token(chat.json/ENGRAM_CHAT_TOKEN) 설정 시 모든 연결이 auth 프레임 필요(Phase 13).
+// 인터넷 노출은 여전히 TLS 앞단(터널/리버스 프록시)이 필수 — Engram은 릴레이/TLS를 제공하지 않는다.
 
 export interface SelfTarget {
   channelId: string;
@@ -26,6 +27,7 @@ export class SelfMessenger implements MessengerPort {
   private wss?: WebSocketServer;
   private handler?: (e: MentionEvent) => Promise<void>;
   private msgHandler?: (e: MentionEvent) => Promise<void>;
+  private authed = new WeakSet<WebSocket>();
 
   constructor(
     private readonly cfg: ChatConfig,
@@ -61,6 +63,14 @@ export class SelfMessenger implements MessengerPort {
       this.opts.logger.warn(`웹소켓 서버 오류(채팅 비활성 가능): ${String(err)}`, 'SelfChat');
     });
     this.wss.on('connection', (ws) => {
+      if (!this.cfg.token) {
+        this.authed.add(ws); // 무인증 모드: 즉시 통과(현행 동작)
+      } else {
+        const timer = setTimeout(() => {
+          if (!this.authed.has(ws)) { try { ws.close(); } catch { /* 격리 */ } }
+        }, 5000);
+        ws.once('close', () => clearTimeout(timer));
+      }
       ws.on('message', (raw) => { void this.handleFrame(ws, String(raw)); });
       ws.on('error', () => { /* 접속 단위 격리 */ });
     });
@@ -82,7 +92,7 @@ export class SelfMessenger implements MessengerPort {
   private broadcast(frame: ServerFrame): void {
     const data = JSON.stringify(frame);
     for (const c of this.wss?.clients ?? []) {
-      if (c.readyState === WebSocket.OPEN) {
+      if (c.readyState === WebSocket.OPEN && this.authed.has(c)) {
         try { c.send(data); } catch { /* 격리 */ }
       }
     }
@@ -91,6 +101,15 @@ export class SelfMessenger implements MessengerPort {
   private async handleFrame(ws: WebSocket, raw: string): Promise<void> {
     let f: Record<string, unknown>;
     try { f = JSON.parse(raw) as Record<string, unknown>; } catch { return; } // 손상 무시
+    if (this.cfg.token && !this.authed.has(ws)) {
+      if (f?.t === 'auth' && f.token === this.cfg.token) {
+        this.authed.add(ws); // 승격 — 이후 정상 처리
+      } else {
+        this.sendTo(ws, { t: 'authErr' });
+        try { ws.close(); } catch { /* 격리 */ }
+      }
+      return;
+    }
     try {
       switch (f?.t) {
         case 'send': return await this.onSend(ws, f);

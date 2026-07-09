@@ -243,3 +243,50 @@ describe('SelfMessenger 프로토콜 확장', () => {
     expect(f.list.find((c: { name: string }) => c.name === 'people').mode).toBe('team');
   });
 });
+
+describe('SelfMessenger 인증(토큰)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-auth-'));
+    store = new ChatStore(dir);
+    store.listChannels(); // general 생성
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', token: 'sekret' }, store, { logger: noLog });
+    await sm.start();
+  });
+  afterEach(async () => {
+    await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('올바른 auth 후 channels 프레임이 처리된다', async () => {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'auth', token: 'sekret' }));
+    c.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('channels');
+    c.terminate();
+  });
+
+  it('틀린 토큰 → authErr 후 서버가 소켓을 닫는다', async () => {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'auth', token: 'wrong' }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('authErr');
+    await once(c, 'close');
+    c.terminate();
+  });
+
+  it('auth 없이 바로 channels → authErr(미처리)', async () => {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('authErr');
+    c.terminate();
+  });
+});

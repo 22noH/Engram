@@ -27,6 +27,7 @@ export interface Message {
 
 // 클라 → 서버
 export type ClientFrame =
+  | { t: 'auth'; token: string }
   | { t: 'channels' }
   | { t: 'history'; channelId: string; before?: string }
   | { t: 'send'; channelId: string; text: string; threadId?: string; authorId?: string }
@@ -40,4 +41,5 @@ export type ServerFrame =
   | { t: 'channels'; list: Channel[] }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
+  | { t: 'authErr' }
   | { t: 'error'; text: string };
