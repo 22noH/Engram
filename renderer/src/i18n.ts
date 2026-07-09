@@ -28,6 +28,8 @@ export const T = {
   setDefault: ko ? '기본으로 지정' : 'Set default',
   engramNamePh: ko ? '이름' : 'Name',
   engramEndpointPh: ko ? '엔드포인트 (예: ws://192.168.0.9:47800)' : 'Endpoint (e.g. ws://192.168.0.9:47800)',
+  tokenPh: ko ? '토큰 (선택)' : 'Token (optional)',
+  authFailed: ko ? '인증 실패 — 토큰을 확인하세요' : 'Authentication failed — check the token',
   mentionHint: ko ? '@ 뒤에 이름을 넣으면 그 Engram에게만 보내요' : 'Type a name after @ to send to just that Engram',
   removeEngram: ko ? '삭제' : 'Remove',
   close: ko ? '닫기' : 'Close',

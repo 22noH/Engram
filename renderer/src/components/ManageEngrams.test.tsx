@@ -20,7 +20,7 @@ it('submitting the add form calls onAdd(name, endpoint)', () => {
   fireEvent.change(screen.getByPlaceholderText(/Name/), { target: { value: 'Laptop' } });
   fireEvent.change(screen.getByPlaceholderText(/Endpoint/), { target: { value: 'ws://10.0.0.2:47800' } });
   fireEvent.click(screen.getByText('Add Engram'));
-  expect(onAdd).toHaveBeenCalledWith('Laptop', 'ws://10.0.0.2:47800');
+  expect(onAdd).toHaveBeenCalledWith('Laptop', 'ws://10.0.0.2:47800', undefined);
 });
 
 it('does not call onAdd when name or endpoint is blank', () => {
@@ -43,4 +43,24 @@ it('clicking "set default" on a non-default row calls onSetDefault(id)', () => {
   render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={() => {}} onRemove={() => {}} onSetDefault={onSetDefault} onClose={() => {}} />);
   fireEvent.click(screen.getByText('Set default'));
   expect(onSetDefault).toHaveBeenCalledWith('b');
+});
+
+it('토큰 입력을 onAdd 3번째 인자로 넘긴다', () => {
+  const calls: unknown[][] = [];
+  const { container } = render(
+    <ManageEngrams
+      connections={[{ id: 'local', name: 'Local', endpoint: 'ws://x' }]}
+      defaultConnId="local"
+      onAdd={(...a) => calls.push(a)}
+      onRemove={() => {}}
+      onSetDefault={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const inputs = container.querySelectorAll('#addEngram input');
+  fireEvent.change(inputs[0], { target: { value: 'Remote' } });
+  fireEvent.change(inputs[1], { target: { value: 'ws://r' } });
+  fireEvent.change(inputs[2], { target: { value: 'tok' } });
+  fireEvent.click(screen.getByText(/Add Engram|Engram 추가/));
+  expect(calls[0]).toEqual(['Remote', 'ws://r', 'tok']);
 });

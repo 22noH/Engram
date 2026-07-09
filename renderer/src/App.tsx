@@ -88,6 +88,8 @@ export default function App() {
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
         }
       }
+    } else if (f.t === 'authErr') {
+      setErrText((prev) => ({ ...prev, [connId]: T.authFailed }));
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
       setErrText((prev) => ({ ...prev, [connId]: f.text }));
@@ -275,7 +277,7 @@ export default function App() {
         <ManageEngrams
           connections={connState.connections}
           defaultConnId={connState.defaultConnId}
-          onAdd={(name, endpoint) => setConnState((s) => addConnection(s, name, endpoint))}
+          onAdd={(name, endpoint, token) => setConnState((s) => addConnection(s, name, endpoint, token))}
           onRemove={(id) => setConnState((s) => removeConnection(s, id))}
           onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
           onClose={() => setShowManage(false)}
