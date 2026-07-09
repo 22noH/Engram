@@ -107,6 +107,12 @@ describe('SelfMessenger 코어', () => {
     expect(f.message.authorId).toBe('owner');
   });
 
+  it('공백 낀 engram 사칭도 강등한다', async () => {
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: '  Engram  ' }));
+    const f = await nextFrame(client);
+    expect(f.message.authorId).toBe('owner');
+  });
+
   it('손상 프레임·빈 text는 무시(서버 불사)', async () => {
     client.send('{broken');
     client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '  ' }));
