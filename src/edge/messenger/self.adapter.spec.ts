@@ -289,4 +289,42 @@ describe('SelfMessenger 인증(토큰)', () => {
     expect(f.t).toBe('authErr');
     c.terminate();
   });
+
+  it('인증된 소켓의 브로드캐스트는 미인증 소켓에 격리된다', async () => {
+    const authed = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(authed, 'open');
+    authed.send(JSON.stringify({ t: 'auth', token: 'sekret' }));
+
+    const silent = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(silent, 'open');
+    const silentMsgs: unknown[] = [];
+    silent.on('message', (d) => silentMsgs.push(JSON.parse(String(d))));
+
+    authed.send(JSON.stringify({ t: 'createChannel', name: 'iso-test' }));
+    const f = await nextFrame(authed);
+    expect(f.t).toBe('channels');
+    expect(f.list.map((c: { name: string }) => c.name)).toContain('iso-test');
+
+    // 짧은 대기 후에도 미인증 소켓은 브로드캐스트를 하나도 못 받았어야 한다.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(silentMsgs).toEqual([]);
+
+    authed.terminate();
+    silent.terminate();
+  });
+
+  // jest 가짜 타이머(useFakeTimers)로 서버측 setTimeout만 전진시켜봤으나, 콜백은 즉시(≈25ms) 실행돼도
+  // 실제 소켓으로의 authErr 프레임 도달은 여전히 ≈5000ms 실시간이 걸렸다(fake timer↔실 ws 소켓 I/O 간
+  // 알 수 없는 상호작용 — 속도 이득이 없어 fake로 얻는 게 없다). 그래서 실시간 대기로 단순화 —
+  // 결정적이며(5초 타임아웃은 서버 상수) 매직도 없다. 테스트 자체 timeout만 여유있게 늘린다.
+  it('5초간 침묵하면 auth 타임아웃 → authErr 전송 후 소켓을 닫는다', async () => {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const framePromise = nextFrame(c);
+    const closePromise = once(c, 'close');
+    const f = await framePromise;
+    expect(f.t).toBe('authErr');
+    await closePromise;
+    c.terminate();
+  }, 8000);
 });

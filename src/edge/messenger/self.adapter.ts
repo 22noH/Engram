@@ -67,7 +67,10 @@ export class SelfMessenger implements MessengerPort {
         this.authed.add(ws); // 무인증 모드: 즉시 통과(현행 동작)
       } else {
         const timer = setTimeout(() => {
-          if (!this.authed.has(ws)) { try { ws.close(); } catch { /* 격리 */ } }
+          if (!this.authed.has(ws)) {
+            this.sendTo(ws, { t: 'authErr' });
+            try { ws.close(); } catch { /* 격리 */ }
+          }
         }, 5000);
         ws.once('close', () => clearTimeout(timer));
       }
