@@ -54,6 +54,7 @@ export default function App() {
   const msgsByConnChRef = useRef(msgsByConnCh); msgsByConnChRef.current = msgsByConnCh;
   const channelsByConnRef = useRef(channelsByConn); channelsByConnRef.current = channelsByConn;
   const modeRef = useRef(mode); modeRef.current = mode;
+  const wikiOpenRef = useRef<WikiPageDto | null>(null); wikiOpenRef.current = wikiOpen;
 
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
@@ -107,7 +108,8 @@ export default function App() {
       else if (f.t === 'proposals') setProposals(f.list);
       else if (f.t === 'wikiChanged') {
         send(connState.defaultConnId, { t: 'wikiList' });
-        setWikiOpen((cur) => { if (cur) send(connState.defaultConnId, { t: 'wikiGet', slug: cur.slug }); return cur; });
+        const open = wikiOpenRef.current;
+        if (open) send(connState.defaultConnId, { t: 'wikiGet', slug: open.slug });
       }
       else if (f.t === 'proposalsChanged') send(connState.defaultConnId, { t: 'proposalsList' });
     }

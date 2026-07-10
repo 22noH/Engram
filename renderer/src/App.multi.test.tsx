@@ -369,6 +369,6 @@ it('승인함 제안 승인 시 proposalApprove 전송', async () => {
     homeWS.msg({ t: 'proposals', list: [{ id: 'p1', op: 'create', targetSlug: 's1', title: 'P1', category: 'c', payload: 'body', sources: [], importance: 2, confidence: 0.5, reason: 'r' }] });
   });
   fireEvent.click(screen.getByText(/inbox|승인함/i));
-  fireEvent.click(screen.getByText(/approve|승인/i));
+  fireEvent.click(screen.getByRole('button', { name: /approve|승인/i }));
   await waitFor(() => expect(homeWS.sent.some((s) => s.includes('"proposalApprove"') && s.includes('"id":"p1"'))).toBe(true));
 });

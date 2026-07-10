@@ -46,6 +46,7 @@ export class SelfMessenger implements MessengerPort {
   private handler?: (e: MentionEvent) => Promise<void>;
   private msgHandler?: (e: MentionEvent) => Promise<void>;
   private authed = new WeakSet<WebSocket>();
+  private approving = new Set<string>();
 
   constructor(
     private readonly cfg: ChatConfig,
@@ -183,11 +184,17 @@ export class SelfMessenger implements MessengerPort {
         }
         case 'proposalApprove': {
           if (!this.wikiDeps || typeof f.id !== 'string') return;
-          const p = await this.wikiDeps.proposals.get(f.id);
-          if (!p || p.status !== 'pending') return; // 없거나 이미 처리 — 조용히 무시
-          await this.wikiDeps.applier.apply(p);
-          this.broadcast({ t: 'wikiChanged' });
-          this.broadcast({ t: 'proposalsChanged' });
+          if (this.approving.has(f.id)) return;  // 동시 승인 창 — 중복 반영 차단
+          this.approving.add(f.id);              // 동기 마킹(다음 요청이 즉시 봄)
+          try {
+            const p = await this.wikiDeps.proposals.get(f.id);
+            if (!p || p.status !== 'pending') return; // 없거나 이미 처리 — 조용히 무시
+            await this.wikiDeps.applier.apply(p);
+            this.broadcast({ t: 'wikiChanged' });
+            this.broadcast({ t: 'proposalsChanged' });
+          } finally {
+            this.approving.delete(f.id);
+          }
           return;
         }
         case 'proposalReject': {

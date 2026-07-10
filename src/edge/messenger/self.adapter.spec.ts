@@ -424,6 +424,13 @@ describe('SelfMessenger 위키·승인함', () => {
     expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
   });
 
+  it('같은 제안 동시 승인은 한 번만 반영(중복 방지)', async () => {
+    client.send(JSON.stringify({ t: 'proposalApprove', id: 'p1' }));
+    client.send(JSON.stringify({ t: 'proposalApprove', id: 'p1' }));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(applied).toEqual(['p1']); // 두 번이 아니라 한 번
+  });
+
   it('proposalReject → applier.reject + proposalsChanged', async () => {
     client.send(JSON.stringify({ t: 'proposalReject', id: 'p2' }));
     const f = await nextFrame(client);
@@ -438,5 +445,21 @@ describe('SelfMessenger 위키·승인함', () => {
     const f = await nextFrame(client);
     expect(f.t).toBe('wikiPages');
     expect(applied).toEqual([]);
+  });
+
+  it('wikiDeps 미주입 시 wikiList는 무시(no-op) — 뒤이은 channels만 응답', async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-nowiki-'));
+    const store2 = new ChatStore(dir2); store2.listChannels();
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store2, { logger: noLog });
+    await sm2.start();
+    const client2 = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
+    await once(client2, 'open');
+    client2.send(JSON.stringify({ t: 'wikiList' }));
+    client2.send(JSON.stringify({ t: 'channels' })); // 뒤에 온 프레임이 처리되면 앞은 무시된 것
+    const f = await nextFrame(client2);
+    expect(f.t).toBe('channels');
+    client2.terminate();
+    await sm2.stop();
+    fs.rmSync(dir2, { recursive: true, force: true });
   });
 });

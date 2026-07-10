@@ -34,9 +34,9 @@ describe('WikiArea', () => {
     // 승인함 하위탭으로 전환
     fireEvent.click(screen.getByText(/inbox|승인함/i));
     expect(screen.getByText('because')).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/approve|승인/i));
+    fireEvent.click(screen.getByRole('button', { name: /approve|승인/i }));
     expect(approved).toEqual(['p1']);
-    fireEvent.click(screen.getByText(/reject|거부/i));
+    fireEvent.click(screen.getByRole('button', { name: /reject|거부/i }));
     expect(rejected).toEqual(['p1']);
   });
 });
