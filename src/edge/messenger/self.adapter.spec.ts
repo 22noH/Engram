@@ -416,11 +416,12 @@ describe('SelfMessenger 위키·승인함', () => {
   });
 
   it('proposalApprove → applier.apply + wikiChanged·proposalsChanged 브로드캐스트', async () => {
+    const got: string[] = [];
+    client.on('message', (d) => got.push(JSON.parse(String(d)).t));
     client.send(JSON.stringify({ t: 'proposalApprove', id: 'p1' }));
-    const f1 = await nextFrame(client);
-    const f2 = await nextFrame(client);
+    await new Promise((r) => setTimeout(r, 50)); // 두 프레임 도착 대기(실시간, 결정적)
     expect(applied).toEqual(['p1']);
-    expect([f1.t, f2.t].sort()).toEqual(['proposalsChanged', 'wikiChanged']);
+    expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
   });
 
   it('proposalReject → applier.reject + proposalsChanged', async () => {

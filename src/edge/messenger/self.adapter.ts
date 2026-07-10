@@ -187,10 +187,6 @@ export class SelfMessenger implements MessengerPort {
           if (!p || p.status !== 'pending') return; // 없거나 이미 처리 — 조용히 무시
           await this.wikiDeps.applier.apply(p);
           this.broadcast({ t: 'wikiChanged' });
-          // 두 브로드캐스트를 같은 동기 구간에서 보내면 ws 수신측이 한 소켓 read에서 두 프레임을
-          // 동시에 파싱·emit해 순차 리스너(once 패턴)가 두 번째 프레임을 놓칠 수 있다.
-          // 실제 이벤트 루프 틱을 끼워 넣어 각 프레임이 별도로 전달·소비되게 한다.
-          await new Promise<void>((resolve) => setTimeout(resolve, 10));
           this.broadcast({ t: 'proposalsChanged' });
           return;
         }
