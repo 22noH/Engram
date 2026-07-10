@@ -25,6 +25,22 @@ export interface Message {
   actions?: Action[];
 }
 
+export interface WikiPageMeta { slug: string; title: string; category: string; status: 'draft' | 'published'; updated: string }
+export interface WikiPageDto extends WikiPageMeta { body: string }
+export interface ProposalDto {
+  id: string;
+  op: 'create' | 'append' | 'supersede';
+  targetSlug: string;
+  title: string;
+  category: string;
+  payload: string;
+  sources: string[];
+  importance: number;
+  confidence: number;
+  reason: string;
+  conflictSlugs?: string[];
+}
+
 // 클라 → 서버
 export type ClientFrame =
   | { t: 'auth'; token: string }
@@ -34,7 +50,12 @@ export type ClientFrame =
   | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team' }
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }
-  | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' };
+  | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
+  | { t: 'wikiList' }
+  | { t: 'wikiGet'; slug: string }
+  | { t: 'proposalsList' }
+  | { t: 'proposalApprove'; id: string }
+  | { t: 'proposalReject'; id: string };
 
 // 서버 → 클라
 export type ServerFrame =
@@ -42,4 +63,9 @@ export type ServerFrame =
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
   | { t: 'authErr' }
-  | { t: 'error'; text: string };
+  | { t: 'error'; text: string }
+  | { t: 'wikiPages'; list: WikiPageMeta[] }
+  | { t: 'wikiPage'; page: WikiPageDto }
+  | { t: 'proposals'; list: ProposalDto[] }
+  | { t: 'wikiChanged' }
+  | { t: 'proposalsChanged' };

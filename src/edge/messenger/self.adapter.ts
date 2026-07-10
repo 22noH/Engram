@@ -4,6 +4,24 @@ import type { ServerFrame, Action } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
 import { ChatConfig } from './chat.config';
+import { DEFAULT_USER } from '../../pal/path-resolver';
+import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
+import type { WikiPage } from '../../knowledge-core/wiki/page.types';
+import type { ProposalStore, Proposal } from '../../knowledge-core/proposal-store';
+import type { ProposalApplier } from '../proposal-applier';
+import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
+
+interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
+
+function toPageMeta(p: WikiPage): WikiPageMeta {
+  return { slug: p.slug, title: p.frontmatter.title, category: p.frontmatter.category, status: p.frontmatter.status, updated: p.frontmatter.updated };
+}
+function toPageDto(p: WikiPage): WikiPageDto {
+  return { ...toPageMeta(p), body: p.body };
+}
+function toProposalDto(p: Proposal): ProposalDto {
+  return { id: p.id, op: p.op, targetSlug: p.targetSlug, title: p.title, category: p.category, payload: p.payload, sources: p.sources, importance: p.importance, confidence: p.verdict.confidence, reason: p.verdict.reason, ...(p.verdict.conflictSlugs ? { conflictSlugs: p.verdict.conflictSlugs } : {}) };
+}
 
 // 자체 메신저 어댑터(Phase 9, 스펙 §4.1). http(헬스 프로브)+ws 서버 내장.
 // 생성자는 비연결 — 리슨은 start()에서(Discord 어댑터 관례).
@@ -36,6 +54,7 @@ export class SelfMessenger implements MessengerPort {
       engramName?: string;
       logger: { warn(msg: string, ctx?: string): void };
     },
+    private readonly wikiDeps?: WikiDeps,
   ) {}
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
@@ -143,6 +162,46 @@ export class SelfMessenger implements MessengerPort {
           }
           this.broadcast({ t: 'channels', list: this.store.listChannels() });
           return;
+        case 'wikiList': {
+          if (!this.wikiDeps) return;
+          const list = (await this.wikiDeps.wiki.listPages()).map(toPageMeta);
+          this.sendTo(ws, { t: 'wikiPages', list });
+          return;
+        }
+        case 'wikiGet': {
+          if (!this.wikiDeps || typeof f.slug !== 'string') return;
+          const page = await this.wikiDeps.wiki.getPage(f.slug);
+          if (!page) { this.sendTo(ws, { t: 'error', text: 'unknown page' }); return; }
+          this.sendTo(ws, { t: 'wikiPage', page: toPageDto(page) });
+          return;
+        }
+        case 'proposalsList': {
+          if (!this.wikiDeps) return;
+          const list = (await this.wikiDeps.proposals.listPending(DEFAULT_USER)).map(toProposalDto);
+          this.sendTo(ws, { t: 'proposals', list });
+          return;
+        }
+        case 'proposalApprove': {
+          if (!this.wikiDeps || typeof f.id !== 'string') return;
+          const p = await this.wikiDeps.proposals.get(f.id);
+          if (!p || p.status !== 'pending') return; // 없거나 이미 처리 — 조용히 무시
+          await this.wikiDeps.applier.apply(p);
+          this.broadcast({ t: 'wikiChanged' });
+          // 두 브로드캐스트를 같은 동기 구간에서 보내면 ws 수신측이 한 소켓 read에서 두 프레임을
+          // 동시에 파싱·emit해 순차 리스너(once 패턴)가 두 번째 프레임을 놓칠 수 있다.
+          // 실제 이벤트 루프 틱을 끼워 넣어 각 프레임이 별도로 전달·소비되게 한다.
+          await new Promise<void>((resolve) => setTimeout(resolve, 10));
+          this.broadcast({ t: 'proposalsChanged' });
+          return;
+        }
+        case 'proposalReject': {
+          if (!this.wikiDeps || typeof f.id !== 'string') return;
+          const p = await this.wikiDeps.proposals.get(f.id);
+          if (!p || p.status !== 'pending') return;
+          await this.wikiDeps.applier.reject(p);
+          this.broadcast({ t: 'proposalsChanged' });
+          return;
+        }
         default: return; // 미지 타입 무시(스펙 §6)
       }
     } catch (err) {

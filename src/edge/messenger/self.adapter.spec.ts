@@ -5,6 +5,8 @@ import WebSocket from 'ws';
 import { SelfMessenger, SelfTarget, hasEngramMention, stripEngramMention } from './self.adapter';
 import { ChatStore } from './chat-store';
 import { MentionEvent } from './messenger.port';
+import type { WikiPage } from '../../knowledge-core/wiki/page.types';
+import type { Proposal } from '../../knowledge-core/proposal-store';
 
 const noLog = { warn: () => {} };
 
@@ -345,4 +347,95 @@ describe('SelfMessenger 인증(토큰)', () => {
     await closePromise;
     c.terminate();
   }, 8000);
+});
+
+function fakePage(slug: string, status: 'draft' | 'published' = 'published'): WikiPage {
+  return { slug, frontmatter: { title: `T-${slug}`, category: 'cat', status, sources: [], created: '2026-01-01T00:00:00Z', updated: '2026-01-02T00:00:00Z' }, body: `body-${slug}` };
+}
+function fakeProposal(id: string, status: Proposal['status'] = 'pending'): Proposal {
+  return { id, userId: 'default', createdTs: '2026-01-01T00:00:00Z', op: 'create', targetSlug: `s-${id}`, title: `t-${id}`, category: 'cat', payload: `payload-${id}`, sources: ['src1'], importance: 3, verdict: { confidence: 0.8, reason: `why-${id}` }, status };
+}
+
+describe('SelfMessenger 위키·승인함', () => {
+  let dir: string; let store: ChatStore; let sm: SelfMessenger; let client: WebSocket;
+  let pages: WikiPage[]; let proposals: Proposal[]; let applied: string[]; let rejected: string[];
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-wiki-'));
+    store = new ChatStore(dir); store.listChannels();
+    pages = [fakePage('alpha'), fakePage('beta', 'draft')];
+    proposals = [fakeProposal('p1'), fakeProposal('p2')];
+    applied = []; rejected = [];
+    const wikiDeps = {
+      wiki: {
+        listPages: async () => pages,
+        getPage: async (slug: string) => pages.find((p) => p.slug === slug) ?? null,
+      },
+      proposals: {
+        listPending: async () => proposals.filter((p) => p.status === 'pending'),
+        get: async (id: string) => proposals.find((p) => p.id === id) ?? null,
+      },
+      applier: {
+        apply: async (p: Proposal) => { applied.push(p.id); },
+        reject: async (p: Proposal) => { rejected.push(p.id); },
+      },
+    };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, wikiDeps as any);
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+  });
+  afterEach(async () => { client.terminate(); await sm.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('wikiList → 페이지 메타 목록', async () => {
+    client.send(JSON.stringify({ t: 'wikiList' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiPages');
+    expect(f.list).toEqual([
+      { slug: 'alpha', title: 'T-alpha', category: 'cat', status: 'published', updated: '2026-01-02T00:00:00Z' },
+      { slug: 'beta', title: 'T-beta', category: 'cat', status: 'draft', updated: '2026-01-02T00:00:00Z' },
+    ]);
+  });
+
+  it('wikiGet → 페이지 전체(body 포함), 없으면 error', async () => {
+    client.send(JSON.stringify({ t: 'wikiGet', slug: 'alpha' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiPage');
+    expect(f.page).toMatchObject({ slug: 'alpha', body: 'body-alpha', status: 'published' });
+    client.send(JSON.stringify({ t: 'wikiGet', slug: 'nope' }));
+    const e = await nextFrame(client);
+    expect(e.t).toBe('error');
+  });
+
+  it('proposalsList → pending 제안 DTO', async () => {
+    client.send(JSON.stringify({ t: 'proposalsList' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('proposals');
+    expect(f.list).toHaveLength(2);
+    expect(f.list[0]).toMatchObject({ id: 'p1', op: 'create', targetSlug: 's-p1', payload: 'payload-p1', confidence: 0.8, reason: 'why-p1', importance: 3 });
+  });
+
+  it('proposalApprove → applier.apply + wikiChanged·proposalsChanged 브로드캐스트', async () => {
+    client.send(JSON.stringify({ t: 'proposalApprove', id: 'p1' }));
+    const f1 = await nextFrame(client);
+    const f2 = await nextFrame(client);
+    expect(applied).toEqual(['p1']);
+    expect([f1.t, f2.t].sort()).toEqual(['proposalsChanged', 'wikiChanged']);
+  });
+
+  it('proposalReject → applier.reject + proposalsChanged', async () => {
+    client.send(JSON.stringify({ t: 'proposalReject', id: 'p2' }));
+    const f = await nextFrame(client);
+    expect(rejected).toEqual(['p2']);
+    expect(f.t).toBe('proposalsChanged');
+  });
+
+  it('없는/처리된 제안 승인은 조용히 무시(applier 미호출)', async () => {
+    proposals.push(fakeProposal('done', 'approved'));
+    client.send(JSON.stringify({ t: 'proposalApprove', id: 'done' }));
+    client.send(JSON.stringify({ t: 'wikiList' })); // 뒤에 온 프레임이 처리되면 앞은 무시된 것
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiPages');
+    expect(applied).toEqual([]);
+  });
 });

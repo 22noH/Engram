@@ -14,6 +14,8 @@ import { ScheduleService } from './edge/schedule-service';
 import { loadChannelPolicy } from './agent-layer/channel-policy';
 import { AmbientService } from './edge/ambient-service';
 import { ProposalStore } from './knowledge-core/proposal-store';
+import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
+import { ProposalApplier } from './edge/proposal-applier';
 import * as path from 'path';
 import { loadChatConfig } from './edge/messenger/chat.config';
 import { ChatStore } from './edge/messenger/chat-store';
@@ -39,7 +41,11 @@ async function bootstrap(): Promise<void> {
   const chatCfg = loadChatConfig(paths.getConfigDir());
   if (chatCfg.enabled) {
     chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'));
-    self = new SelfMessenger(chatCfg, chatStore, { logger });
+    self = new SelfMessenger(chatCfg, chatStore, { logger }, {
+      wiki: app.get(WikiEngine),
+      proposals: app.get(ProposalStore),
+      applier: app.get(ProposalApplier),
+    });
   }
 
   // Discord(Phase 6a): messenger.json에 있으면 병행.
