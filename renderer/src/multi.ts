@@ -57,13 +57,13 @@ export function mergeThreads(msgsByConnForName: Array<{ connId: string; messages
 // team 모드는 기본 연결(그 서버) 하나로 스코프 — 다중연결 머지/라우팅 대상에서 제외.
 // (Ask/Code는 원본 그대로 반환 → 기존 다중연결 경로 무변경.)
 export function scopedConnections<C extends { id: string }>(
-  connections: C[], mode: 'chat' | 'code' | 'team', defaultConnId: string,
+  connections: C[], mode: 'chat' | 'code' | 'team' | 'wiki', defaultConnId: string,
 ): C[] {
   return mode === 'team' ? connections.filter((c) => c.id === defaultConnId) : connections;
 }
 
 export function scopedChannels(
-  channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team', defaultConnId: string,
+  channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki', defaultConnId: string,
 ): Record<string, Channel[]> {
   return mode === 'team' ? { [defaultConnId]: channelsByConn[defaultConnId] ?? [] } : channelsByConn;
 }

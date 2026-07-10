@@ -16,6 +16,7 @@ export const T = {
   tabAsk: ko ? '챗봇' : 'Ask',
   tabTeam: ko ? '채팅' : 'Team',
   tabCode: ko ? '코드' : 'Code',
+  tabWiki: ko ? '위키' : 'Wiki',
   pickFolder: ko ? '먼저 작업할 폴더를 선택하세요 📁' : 'First choose a folder to work in 📁',
   pickFolderBtn: ko ? '폴더 선택' : 'Choose folder',
   pickFolderPath: ko ? '폴더 경로 입력…' : 'Folder path…',

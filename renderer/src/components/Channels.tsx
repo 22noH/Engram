@@ -8,10 +8,10 @@ import { areaTabs } from '../areas';
 export function Channels(props: {
   channels: Channel[];
   current: string | null;
-  mode: 'chat' | 'code' | 'team';
+  mode: 'chat' | 'code' | 'team' | 'wiki';
   onSelect: (id: string) => void;
-  onSetMode: (m: 'chat' | 'code' | 'team') => void;
-  onCreate: (name: string, mode: 'chat' | 'code' | 'team') => void;
+  onSetMode: (m: 'chat' | 'code' | 'team' | 'wiki') => void;
+  onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki') => void;
   onDelete: (id: string) => void;
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
 }) {
@@ -22,7 +22,7 @@ export function Channels(props: {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
   const popRef = useRef<HTMLDivElement>(null);
   const visible = channels.filter((c) => (c.mode || 'chat') === mode);
-  const label: Record<'chat' | 'code' | 'team', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode };
+  const label: Record<'chat' | 'code' | 'team' | 'wiki', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode, wiki: T.tabWiki };
   const tabs = areaTabs(TEAM_CHAT);
 
   // 바깥 클릭·Esc로 닫힘(chat.html document click/keydown 리스너 이전).
@@ -61,14 +61,16 @@ export function Channels(props: {
           </div>
         ))}
       </div>
-      <div id="channels">
-        {visible.map((c) => (
-          <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
-            <span>{'# ' + c.name}</span>
-            <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>
-          </div>
-        ))}
-      </div>
+      {mode !== 'wiki' && (
+        <div id="channels">
+          {visible.map((c) => (
+            <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
+              <span>{'# ' + c.name}</span>
+              <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>
+            </div>
+          ))}
+        </div>
+      )}
       {menu && (() => {
         const c = channels.find((x) => x.id === menu.id);
         if (!c) return null;
@@ -83,23 +85,25 @@ export function Channels(props: {
           </div>
         );
       })()}
-      <div id="newch">
-        {creating ? (
-          <input
-            autoFocus
-            type="text"
-            placeholder={mode === 'code' ? T.newCodeChannelPrompt : T.newChannelPrompt}
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value;
-              if (e.key === 'Enter' && v.trim()) { props.onCreate(v, mode); setCreating(false); }
-              else if (e.key === 'Escape') setCreating(false);
-            }}
-            onBlur={() => setCreating(false)}
-          />
-        ) : (
-          <span onClick={() => setCreating(true)}>{T.newChannel}</span>
-        )}
-      </div>
+      {mode !== 'wiki' && (
+        <div id="newch">
+          {creating ? (
+            <input
+              autoFocus
+              type="text"
+              placeholder={mode === 'code' ? T.newCodeChannelPrompt : T.newChannelPrompt}
+              onKeyDown={(e) => {
+                const v = (e.target as HTMLInputElement).value;
+                if (e.key === 'Enter' && v.trim()) { props.onCreate(v, mode); setCreating(false); }
+                else if (e.key === 'Escape') setCreating(false);
+              }}
+              onBlur={() => setCreating(false)}
+            />
+          ) : (
+            <span onClick={() => setCreating(true)}>{T.newChannel}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

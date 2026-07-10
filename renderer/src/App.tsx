@@ -305,8 +305,8 @@ export default function App() {
       <div id="app">
         <Channels
           channels={sidebarChannels} current={currentName} mode={mode}
-          onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
-          onCreate={(name, m) => send(connState.defaultConnId, { t: 'createChannel', name, mode: m })}
+          onSelect={(name) => setCurrentName(name)} onSetMode={(m) => { if (m !== 'wiki') setMode(m); }}
+          onCreate={(name, m) => { if (m !== 'wiki') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
         />
