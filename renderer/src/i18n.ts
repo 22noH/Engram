@@ -36,4 +36,11 @@ export const T = {
   close: ko ? '닫기' : 'Close',
   notConnected: (name: string) => (ko ? `'${name}' 연결이 없어요` : `'${name}' isn't connected`),
   displayNamePh: ko ? '닉네임 (팀채팅 표시용)' : 'Your name (for team chat)',
+  // Phase 15a — 위키(페이지 읽기 + 승인함)
+  wikiPages: ko ? '페이지' : 'Pages',
+  wikiInbox: ko ? '승인함' : 'Inbox',
+  wikiInboxEmpty: ko ? '대기 중인 제안이 없습니다' : 'No pending proposals',
+  wikiFilterPh: ko ? '필터…' : 'Filter…',
+  wikiApprove: ko ? '승인' : 'Approve',
+  wikiReject: ko ? '거부' : 'Reject',
 };
