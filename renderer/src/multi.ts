@@ -12,7 +12,9 @@ export function routeTarget(text: string, defaultConnId: string, connections: Co
 }
 
 // 논리 채널: 그 mode인 채널 이름들의 합집합(정렬·중복 제거).
-export function logicalChannels(channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team'): string[] {
+// mode에 'wiki'도 받는다(App의 mode state가 위키까지 포함하도록 넓어졌기 때문 — 위키는 채널 개념이
+// 없어 실제로 c.mode==='wiki'인 채널은 존재하지 않으므로 그 경우 항상 빈 배열을 반환한다).
+export function logicalChannels(channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki'): string[] {
   const names = new Set<string>();
   for (const list of Object.values(channelsByConn)) {
     for (const c of list) {

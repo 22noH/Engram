@@ -345,3 +345,30 @@ it('team 모드에서 채널을 삭제하면 스코프된 연결(home)에만 del
   // work는 동명(팀) team 채널을 갖고 있지만 스코프 밖 — deleteChannel이 나가면 안 된다.
   expect(workWS.sent.some((s) => s.includes('"deleteChannel"'))).toBe(false);
 });
+
+// Phase 15a Task 4: 위키 배선 — Wiki 탭 진입 시 기본 연결로 wikiList/proposalsList 요청, 승인 시 proposalApprove 전송.
+it('Wiki 탭 진입 시 기본 연결로 wikiList·proposalsList 요청', async () => {
+  seedTwoConnections();
+  render(<App />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  fireEvent.click(screen.getByText(T.tabWiki));
+  await waitFor(() => {
+    expect(homeWS.sent.some((s) => s.includes('"wikiList"'))).toBe(true);
+    expect(homeWS.sent.some((s) => s.includes('"proposalsList"'))).toBe(true);
+  });
+});
+
+it('승인함 제안 승인 시 proposalApprove 전송', async () => {
+  seedTwoConnections();
+  render(<App />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  fireEvent.click(screen.getByText(T.tabWiki));
+  act(() => {
+    homeWS.msg({ t: 'proposals', list: [{ id: 'p1', op: 'create', targetSlug: 's1', title: 'P1', category: 'c', payload: 'body', sources: [], importance: 2, confidence: 0.5, reason: 'r' }] });
+  });
+  fireEvent.click(screen.getByText(/inbox|승인함/i));
+  fireEvent.click(screen.getByText(/approve|승인/i));
+  await waitFor(() => expect(homeWS.sent.some((s) => s.includes('"proposalApprove"') && s.includes('"id":"p1"'))).toBe(true));
+});

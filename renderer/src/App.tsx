@@ -11,6 +11,8 @@ import { FolderEmpty } from './components/FolderEmpty';
 import { EngramSelector } from './components/EngramSelector';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
+import { WikiArea } from './components/WikiArea';
+import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../shared/protocol';
 import { T } from './i18n';
 
 // 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
@@ -28,7 +30,7 @@ export default function App() {
   const [chanIdByConnName, setChanIdByConnName] = useState<Map<string, string>>(new Map());
   const [msgsByConnCh, setMsgsByConnCh] = useState<Map<string, Msg[]>>(new Map());
   const [currentName, setCurrentName] = useState<string | null>(null);
-  const [mode, setMode] = useState<'chat' | 'code' | 'team'>('chat');
+  const [mode, setMode] = useState<'chat' | 'code' | 'team' | 'wiki'>('chat');
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set()); // 키=논리 채널 이름
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
@@ -39,6 +41,9 @@ export default function App() {
   const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [displayName, setDisplayName] = useState(loadDisplayName());
+  const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
+  const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
+  const [proposals, setProposals] = useState<ProposalDto[]>([]);
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +100,16 @@ export default function App() {
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
       setErrText((prev) => ({ ...prev, [connId]: f.text }));
+    } else if (connId === connState.defaultConnId) {
+      // 위키/제안 프레임 — 위키는 기본 연결(그 서버)로만 스코프된다(팀 채널과 동일한 원칙).
+      if (f.t === 'wikiPages') setWikiPages(f.list);
+      else if (f.t === 'wikiPage') setWikiOpen(f.page);
+      else if (f.t === 'proposals') setProposals(f.list);
+      else if (f.t === 'wikiChanged') {
+        send(connState.defaultConnId, { t: 'wikiList' });
+        setWikiOpen((cur) => { if (cur) send(connState.defaultConnId, { t: 'wikiGet', slug: cur.slug }); return cur; });
+      }
+      else if (f.t === 'proposalsChanged') send(connState.defaultConnId, { t: 'proposalsList' });
     }
   }
 
@@ -131,6 +146,16 @@ export default function App() {
     () => scopedChannels(channelsByConn, mode, connState.defaultConnId),
     [channelsByConn, mode, connState.defaultConnId],
   );
+
+  // wiki 모드 진입 시 기본 연결로 목록·제안함을 요청(위키는 채널 개념이 없어 history 패턴 대신 직접 요청).
+  useEffect(() => {
+    if (mode !== 'wiki') return;
+    const id = connState.defaultConnId;
+    if (!statusById[id]) return;
+    send(id, { t: 'wikiList' });
+    send(id, { t: 'proposalsList' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, connState.defaultConnId, statusById[connState.defaultConnId]]);
 
   // 연결이 제거되면 그 connId분 채널/메시지 캐시를 지운다 — 안 지우면 사이드바에 고스트 채널이 남는다.
   const connIds = connState.connections.map((c) => c.id).join(',');
@@ -207,7 +232,8 @@ export default function App() {
   }, [currentName, mergedMsgs, awaiting]);
 
   // 사이드바용 논리 채널 목록(기존 Channels 컴포넌트는 id 기반 — 여기선 id=name으로 합성).
-  const sidebarChannels: Channel[] = logicalChannels(viewChannelsByConn, mode).map((name) => {
+  // wiki 모드엔 채널 개념이 없다(실제 c.mode==='wiki'인 채널은 존재하지 않음) — 그때는 빈 목록.
+  const sidebarChannels: Channel[] = mode === 'wiki' ? [] : logicalChannels(viewChannelsByConn, mode).map((name) => {
     const fromDefault = viewChannelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     const any = fromDefault ?? Object.values(viewChannelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     return { id: name, name, respondMode: any?.respondMode ?? 'all', mode };
@@ -244,7 +270,9 @@ export default function App() {
   // 대상 연결에 그 이름 채널이 아직 없으면(지연 생성) createChannel 먼저 보내고 1건 버퍼링,
   // 그 연결의 channels 프레임이 그 이름으로 돌아오면 onFrame이 flush한다.
   const sendText = (text: string, threadId?: string) => {
-    if (!text.trim() || !currentName) return;
+    // wiki엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
+    // (mode 가드는 타입 좁히기 겸 방어용).
+    if (!text.trim() || !currentName || mode === 'wiki') return;
     if (mode === 'team' && !displayName.trim()) return; // 닉네임 없으면 team 전송 차단
     const targetConnId = threadId
       ? (anchorConn.get(threadId) ?? connState.defaultConnId)
@@ -305,21 +333,32 @@ export default function App() {
       <div id="app">
         <Channels
           channels={sidebarChannels} current={currentName} mode={mode}
-          onSelect={(name) => setCurrentName(name)} onSetMode={(m) => { if (m !== 'wiki') setMode(m); }}
+          onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
           onCreate={(name, m) => { if (m !== 'wiki') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
         />
         <div id="main">
-          {currentName && mode === 'code' && defaultChan?.repoPath && (
-            <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
-              {'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}
-            </div>
-          )}
-          {currentName && mode === 'code' && !defaultChan?.repoPath ? (
-            <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
+          {mode === 'wiki' ? (
+            <WikiArea
+              pages={wikiPages}
+              openPage={wikiOpen}
+              proposals={proposals}
+              onOpenPage={(slug) => send(connState.defaultConnId, { t: 'wikiGet', slug })}
+              onApprove={(id) => send(connState.defaultConnId, { t: 'proposalApprove', id })}
+              onReject={(id) => send(connState.defaultConnId, { t: 'proposalReject', id })}
+            />
           ) : (
             <>
+              {currentName && mode === 'code' && defaultChan?.repoPath && (
+                <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
+                  {'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}
+                </div>
+              )}
+              {currentName && mode === 'code' && !defaultChan?.repoPath ? (
+                <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
+              ) : (
+                <>
               {mode === 'team' && (
                 <div id="teamName">
                   <input type="text" placeholder={T.displayNamePh} value={displayName}
@@ -392,6 +431,8 @@ export default function App() {
                 />
                 <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; setInputText(''); }}>{T.send}</button>
               </div>
+                </>
+              )}
             </>
           )}
         </div>
