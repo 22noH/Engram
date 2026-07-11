@@ -82,19 +82,25 @@ export class WikiGit {
     }
     // 로컬 브랜치명을 branch로 정렬(init 기본 브랜치명 차이 흡수).
     await this.git.raw(['branch', '-M', branch]).catch(() => {});
+    let mergeThrew = false;
     try {
       // --allow-unrelated-histories: 각 두뇌가 따로 git init해 커밋한 뒤 합류하면(마이그레이션)
       // 공통 조상이 없어 기본 merge가 거부된다. 다른 파일이면 자동 병합, 같은 파일이면 충돌(아래 abort).
       await this.git.raw(['merge', `origin/${branch}`, '--allow-unrelated-histories']);
     } catch {
-      // merge가 non-zero exit으로 예외를 던지는 환경도 있다 — 아래 상태 확인으로 충돌 여부를 최종 판정한다.
+      // 내용 충돌은 stdout에 찍혀 던지지 않지만, dirty working tree 등 다른 거부는 stderr로 던진다.
+      mergeThrew = true;
     }
-    // simple-git의 raw()는 exitCode!=0이어도 stderr가 비어 있으면(git merge 충돌 메시지는 stdout에 찍힘)
-    // 예외를 던지지 않는다(확인됨). 그래서 예외 유무가 아니라 실제 충돌 파일 존재로 판정한다.
     const status = await this.git.status();
     if (status.conflicted.length > 0) {
       await this.git.raw(['merge', '--abort']).catch(() => {});
-      return { ok: true, conflict: true }; // 충돌 → 로컬 유지
+      return { ok: true, conflict: true }; // 내용 충돌 → 로컬 유지
+    }
+    if (mergeThrew) {
+      // 병합이 실제로는 완료되지 않았다(예: 같은 파일의 미커밋 변경으로 git이 거부).
+      // status.conflicted가 비어 있어도 성공을 주장하면 안 된다 — 다음 주기에 재시도.
+      await this.git.raw(['merge', '--abort']).catch(() => {});
+      return { ok: false, conflict: false };
     }
     return { ok: true, conflict: false };
   }

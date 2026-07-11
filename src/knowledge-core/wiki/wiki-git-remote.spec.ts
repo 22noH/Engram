@@ -69,4 +69,20 @@ describe('WikiGit 원격', () => {
     expect(pr.conflict).toBe(true);
     expect(readPage(dirB, 'alpha')).toBe('B-version'); // 로컬 유지(손상 없음)
   });
+
+  it('미커밋 로컬 변경 중 pull(원격이 같은 파일 갱신) → 성공 주장 안 함·로컬 손상 없음', async () => {
+    // 공통 base 확보
+    await writePage(dirA, 'alpha', 'base'); await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+    await gitB.ensureRemote(remote); await gitB.pull('main');
+    // A가 원격의 alpha를 갱신
+    await writePage(dirA, 'alpha', 'A-remote'); await gitA.commitAll('a-remote'); await gitA.push('main');
+    // B가 alpha를 미커밋으로 더럽힌 채 pull
+    await writePage(dirB, 'alpha', 'B-uncommitted-dirty');
+    const pr = await gitB.pull('main');
+    expect(pr.ok).toBe(false);            // 병합 안 됐으니 성공 주장 금지
+    expect(pr.conflict).toBe(false);      // 내용충돌(UU)은 아님
+    const body = readPage(dirB, 'alpha');
+    expect(body).toBe('B-uncommitted-dirty'); // 로컬 유지
+    expect(body).not.toContain('<<<<<<<');     // 충돌 마커 없음(손상 없음)
+  });
 });
