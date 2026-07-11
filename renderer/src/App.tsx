@@ -4,6 +4,7 @@ import { loadConnections, saveConnections, setDefault, addConnection, removeConn
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadDisplayName, saveDisplayName } from './display-name';
+import { loadSessions } from './sessions';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
@@ -137,7 +138,8 @@ export default function App() {
     }
   }
 
-  const { send, statusById } = useConnections(connState.connections, onFrame, onOpen);
+  const [sessions] = useState<Record<string, string>>(() => loadSessions());
+  const { send, statusById } = useConnections(connState.connections, sessions, onFrame, onOpen);
 
   // team은 기본 연결(그 서버) 하나로 스코프. Ask/Code는 원본 그대로(무변경).
   const viewConns = useMemo(

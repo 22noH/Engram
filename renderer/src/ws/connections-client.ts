@@ -10,33 +10,35 @@ interface Slot {
   closed: boolean;
   timer: ReturnType<typeof setTimeout> | null;
   authFailed: boolean;   // authErr 받으면 true → 재연결 중단
-  token?: string;        // 이 소켓이 붙을 때 쓴 토큰(변경 감지용)
+  session?: string;      // 이 소켓이 붙을 때 쓴 세션 토큰(변경 감지용)
 }
 
 // 연결마다 소켓 하나. connections 배열이 바뀌면(추가/삭제) 그에 맞춰 소켓을 열고/닫는다.
 // 프레임은 onFrame(connId, frame)으로 로컬 태깅되어 올라간다(와이어에는 connId 없음).
 export function useConnections(
   connections: Connection[],
+  sessions: Record<string, string>,
   onFrame: (connId: string, f: ServerFrame) => void,
   onOpen?: (connId: string) => void,
 ) {
   const [statusById, setStatusById] = useState<Record<string, boolean>>({});
   const slotsRef = useRef<Map<string, Slot>>(new Map());
-  // 최신 콜백/연결목록을 ref로 잡아 재연결 루프가 stale 클로저를 안 쓰게(client.ts 패턴).
+  // 최신 콜백/연결목록/세션을 ref로 잡아 재연결 루프가 stale 클로저를 안 쓰게(client.ts 패턴).
   const onFrameRef = useRef(onFrame); onFrameRef.current = onFrame;
   const onOpenRef = useRef(onOpen); onOpenRef.current = onOpen;
   const connectionsRef = useRef(connections); connectionsRef.current = connections;
+  const sessionsRef = useRef(sessions); sessionsRef.current = sessions;
 
-  const ids = connections.map((c) => `${c.id}:${c.token ?? ''}`).join(',');
+  const ids = connections.map((c) => `${c.id}:${sessions[c.id] ?? ''}`).join(',');
 
   useEffect(() => {
     const slots = slotsRef.current;
     const wanted = new Map(connections.map((c) => [c.id, c]));
 
-    // 사라졌거나 토큰이 바뀐 슬롯은 닫는다(토큰 변경=재접속 필요).
+    // 사라졌거나 세션이 바뀐 슬롯은 닫는다(세션 변경=재접속 필요).
     for (const [id, slot] of slots) {
       const w = wanted.get(id);
-      if (w && w.token === slot.token) continue;
+      if (w && (sessions[id] ?? '') === (slot.session ?? '')) continue;
       slot.closed = true;
       if (slot.timer) clearTimeout(slot.timer);
       slot.ws?.close();
@@ -53,7 +55,7 @@ export function useConnections(
     for (const conn of connections) {
       if (slots.has(conn.id)) continue;
       const connId = conn.id;
-      const slot: Slot = { ws: null, attempt: 0, closed: false, timer: null, authFailed: false, token: conn.token };
+      const slot: Slot = { ws: null, attempt: 0, closed: false, timer: null, authFailed: false, session: sessions[conn.id] };
       slots.set(connId, slot);
 
       const connect = () => {
@@ -63,7 +65,7 @@ export function useConnections(
         slot.ws = ws;
         ws.onopen = () => {
           slot.attempt = 0;
-          const tok = connectionsRef.current.find((c) => c.id === connId)?.token;
+          const tok = sessionsRef.current[connId];
           if (tok) ws.send(JSON.stringify({ t: 'auth', token: tok }));
           setStatusById((s) => ({ ...s, [connId]: true }));
           onOpenRef.current?.(connId);

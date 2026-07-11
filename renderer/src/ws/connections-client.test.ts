@@ -30,7 +30,7 @@ it('opens one socket per connection and tags frames by connId', () => {
     { id: 'a', name: 'A', endpoint: 'ws://a' },
     { id: 'b', name: 'B', endpoint: 'ws://b' },
   ];
-  renderHook(() => useConnections(conns, (id, f) => frames.push([id, f])));
+  renderHook(() => useConnections(conns, {}, (id, f) => frames.push([id, f])));
   expect(FakeWS.instances).toHaveLength(2);
   expect(FakeWS.instances[0].url).toBe('ws://a');
   expect(FakeWS.instances[1].url).toBe('ws://b');
@@ -52,7 +52,7 @@ it('opens one socket per connection and tags frames by connId', () => {
 it('onOpen(connId) fires and status flips true on open, false on close', () => {
   const opened: string[] = [];
   const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
-  const { result } = renderHook(() => useConnections(conns, () => {}, (id) => opened.push(id)));
+  const { result } = renderHook(() => useConnections(conns, {}, () => {}, (id) => opened.push(id)));
 
   act(() => { FakeWS.instances[0].open(); });
   expect(opened).toEqual(['a']);
@@ -67,7 +67,7 @@ it('send(connId, frame) only sends on that connection when OPEN', () => {
     { id: 'a', name: 'A', endpoint: 'ws://a' },
     { id: 'b', name: 'B', endpoint: 'ws://b' },
   ];
-  const { result } = renderHook(() => useConnections(conns, () => {}));
+  const { result } = renderHook(() => useConnections(conns, {}, () => {}));
 
   // a가 아직 OPEN이 아니므로 전송되지 않는다.
   act(() => { result.current.send('a', { t: 'channels' }); });
@@ -83,7 +83,7 @@ it('send(connId, frame) only sends on that connection when OPEN', () => {
 it('reconnects with backoff after close (1s → new socket)', () => {
   vi.useFakeTimers();
   const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
-  renderHook(() => useConnections(conns, () => {}));
+  renderHook(() => useConnections(conns, {}, () => {}));
   expect(FakeWS.instances).toHaveLength(1);
 
   act(() => {
@@ -114,7 +114,7 @@ it('opens new sockets and closes removed ones when connections array changes', (
     { id: 'b', name: 'B', endpoint: 'ws://b' },
   ];
   const { result, rerender } = renderHook(
-    ({ connections }) => useConnections(connections, () => {}),
+    ({ connections }) => useConnections(connections, {}, () => {}),
     { initialProps: { connections: conns } },
   );
   expect(FakeWS.instances).toHaveLength(2);
@@ -134,24 +134,24 @@ it('opens new sockets and closes removed ones when connections array changes', (
   expect(result.current.statusById.a).toBe(true); // a는 유지된 채 그대로
 });
 
-it('토큰이 있으면 open 시 auth 프레임을 가장 먼저 보낸다', () => {
-  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 'sekret' }];
-  renderHook(() => useConnections(conns, () => {}));
+it('세션 있으면 open 직후 auth 프레임 선전송', () => {
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
+  renderHook(() => useConnections(conns, { a: 'sess1' }, () => {}));
   act(() => { FakeWS.instances[0].open(); });
-  expect(FakeWS.instances[0].sent[0]).toBe(JSON.stringify({ t: 'auth', token: 'sekret' }));
+  expect(FakeWS.instances[0].sent[0]).toBe(JSON.stringify({ t: 'auth', token: 'sess1' }));
 });
 
-it('토큰이 없으면 auth 프레임을 보내지 않는다', () => {
+it('세션 없으면 auth 미전송(무인증 서버 대응)', () => {
   const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
-  renderHook(() => useConnections(conns, () => {}));
+  renderHook(() => useConnections(conns, {}, () => {}));
   act(() => { FakeWS.instances[0].open(); });
   expect(FakeWS.instances[0].sent).toHaveLength(0);
 });
 
 it('authErr 수신 시 재연결하지 않는다', () => {
   vi.useFakeTimers();
-  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 'wrong' }];
-  renderHook(() => useConnections(conns, () => {}));
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
+  renderHook(() => useConnections(conns, { a: 'wrong' }, () => {}));
   act(() => {
     FakeWS.instances[0].open();
     FakeWS.instances[0].msg({ t: 'authErr' });
@@ -162,16 +162,30 @@ it('authErr 수신 시 재연결하지 않는다', () => {
   vi.useRealTimers();
 });
 
-it('토큰을 바꾸면 소켓을 새 토큰으로 재접속한다', () => {
+it('세션 변경 시 그 연결만 재접속', () => {
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
   const { rerender } = renderHook(
-    ({ connections }) => useConnections(connections, () => {}),
-    { initialProps: { connections: [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 't1' }] } },
+    ({ sessions }) => useConnections(conns, sessions, () => {}),
+    { initialProps: { sessions: { a: 't1' } as Record<string, string> } },
   );
   act(() => { FakeWS.instances[0].open(); });
   expect(FakeWS.instances).toHaveLength(1);
-  act(() => { rerender({ connections: [{ id: 'a', name: 'A', endpoint: 'ws://a', token: 't2' }] }); });
+  act(() => { rerender({ sessions: { a: 't2' } }); });
   expect(FakeWS.instances).toHaveLength(2);          // 재생성
   expect(FakeWS.instances[0].readyState).toBe(3);    // 옛 소켓 닫힘
   act(() => { FakeWS.instances[1].open(); });
   expect(FakeWS.instances[1].sent[0]).toBe(JSON.stringify({ t: 'auth', token: 't2' }));
+});
+
+it('세션 로그아웃(값 제거) 시에도 그 연결만 재접속하고 auth 미전송', () => {
+  const conns = [{ id: 'a', name: 'A', endpoint: 'ws://a' }];
+  const { rerender } = renderHook(
+    ({ sessions }) => useConnections(conns, sessions, () => {}),
+    { initialProps: { sessions: { a: 't1' } as Record<string, string> } },
+  );
+  act(() => { FakeWS.instances[0].open(); });
+  act(() => { rerender({ sessions: {} }); });
+  expect(FakeWS.instances).toHaveLength(2);
+  act(() => { FakeWS.instances[1].open(); });
+  expect(FakeWS.instances[1].sent).toHaveLength(0);
 });
