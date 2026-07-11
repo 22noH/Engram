@@ -20,15 +20,25 @@ export function toUserDto(a: Account): AuthUserDto {
 
 function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (v: Record<string, unknown>) => { if (!settled) { settled = true; resolve(v); } };
     let data = '';
-    req.on('data', (c) => { data += String(c); if (data.length > 64 * 1024) req.destroy(); });
+    let oversize = false;
+    req.on('data', (c) => {
+      if (oversize) return; // 이미 정착 — 소켓은 파괴하지 않고 흘려보내기만(응답 왕복 유지)
+      data += String(c);
+      if (data.length > 64 * 1024) { oversize = true; settle({}); } // 과대 본문: destroy() 없이 즉시 정착(소켓 파괴 시 응답 자체가 불가능해짐)
+    });
     req.on('end', () => {
+      if (oversize) return; // 이미 위에서 정착
       try {
         const j = JSON.parse(data) as unknown;
-        resolve(j && typeof j === 'object' && !Array.isArray(j) ? j as Record<string, unknown> : {});
-      } catch { resolve({}); }
+        settle(j && typeof j === 'object' && !Array.isArray(j) ? j as Record<string, unknown> : {});
+      } catch { settle({}); }
     });
-    req.on('error', () => resolve({}));
+    req.on('error', () => settle({}));
+    req.on('close', () => settle({})); // destroy()/중단 시 'end'가 안 옴 — 정착 보장
+    req.on('aborted', () => settle({}));
   });
 }
 

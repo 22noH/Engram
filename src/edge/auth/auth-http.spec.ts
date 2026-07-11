@@ -94,4 +94,11 @@ describe('AuthHttp(비밀번호 경로)', () => {
     expect((await post('/auth/logout', { token: s.token })).status).toBe(204);
     expect(sessions.resolve(s.token)).toBeNull();
   });
+
+  it('login: 64KB 초과 본문 → 응답 완료(멈추지 않음), 4xx', async () => {
+    const r = await fetch(base + '/auth/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(200 * 1024),
+    });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+  }, 5000);
 });
