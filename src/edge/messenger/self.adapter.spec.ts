@@ -7,10 +7,11 @@ import { ChatStore } from './chat-store';
 import { MentionEvent } from './messenger.port';
 import type { WikiPage } from '../../knowledge-core/wiki/page.types';
 import type { Proposal } from '../../knowledge-core/proposal-store';
-import { AccountStore } from '../auth/account-store';
+import { AccountStore, Account } from '../auth/account-store';
 import { SessionStore } from '../auth/session-store';
 import { AuthHttp } from '../auth/auth-http';
 import type { AuthDeps } from './self.adapter';
+import type { AdminSettings } from '../../../shared/protocol';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -416,6 +417,149 @@ describe('세션 인증(Phase 16a)', () => {
     expect(f.t).toBe('authErr');
     await closePromise;
   }, 8000);
+});
+
+describe('admin 프레임(Phase 16a)', () => {
+  let dir: string;
+  let sm: SelfMessenger | undefined;
+  let clients: WebSocket[];
+  let deps: AuthDeps;
+  let owner: Account;
+  let member: Account;
+  let ownerWs: WebSocket;
+  let memberWs: WebSocket;
+  let memberToken: string;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-admin-'));
+    clients = [];
+    deps = makeAuthDeps(dir);
+    owner = deps.accounts.createPassword('owner', 'pw', 'Owner', { role: 'owner', status: 'active' });
+    member = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    ownerWs = await connect();
+    memberWs = await connect();
+    const ownerToken = deps.sessions.issue(owner.id).token;
+    memberToken = deps.sessions.issue(member.id).token;
+    ownerWs.send(JSON.stringify({ t: 'auth', token: ownerToken }));
+    await nextFrame(ownerWs);
+    memberWs.send(JSON.stringify({ t: 'auth', token: memberToken }));
+    await nextFrame(memberWs);
+  });
+  afterEach(async () => {
+    for (const c of clients) c.terminate();
+    clients = [];
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function connect(): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm!.addressPort()}`);
+    await once(c, 'open');
+    clients.push(c);
+    return c;
+  }
+  async function noFrameWithin(ws: WebSocket, ms = 150): Promise<'frame' | 'timeout'> {
+    return Promise.race([
+      nextFrame(ws).then(() => 'frame' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms)),
+    ]);
+  }
+
+  it('owner: adminUsers → 전체 목록(AdminUserDto)', async () => {
+    ownerWs.send(JSON.stringify({ t: 'adminUsers' }));
+    const f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    const ids = f.list.map((u: { id: string }) => u.id);
+    expect(ids).toEqual(expect.arrayContaining([owner.id, member.id]));
+    const memberDto = f.list.find((u: { id: string }) => u.id === member.id);
+    expect(memberDto).toMatchObject({
+      loginId: 'mem', displayName: 'Mem', role: 'member', status: 'active', sso: false,
+    });
+    expect(typeof memberDto.createdAt).toBe('string');
+  });
+
+  it('member의 admin 프레임은 무시(응답 없음)', async () => {
+    memberWs.send(JSON.stringify({ t: 'adminUsers' }));
+    expect(await noFrameWithin(memberWs)).toBe('timeout');
+  });
+
+  it('authDeps 미주입 시 admin 프레임도 무시', async () => {
+    const store2 = new ChatStore(path.join(dir, 'chat-noauth'));
+    store2.listChannels();
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store2, { logger: noLog });
+    await sm2.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'adminUsers' }));
+    expect(await noFrameWithin(c)).toBe('timeout');
+    c.terminate();
+    await sm2.stop();
+  });
+
+  it('adminApprove: pending→active + 목록 재전송', async () => {
+    const pending = deps.accounts.createPassword('pend', 'pw', 'Pend'); // 기본 status=pending
+    ownerWs.send(JSON.stringify({ t: 'adminApprove', id: pending.id }));
+    const f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    expect(f.list.find((u: { id: string }) => u.id === pending.id).status).toBe('active');
+  });
+
+  it('adminSuspend: active→suspended + 그 사용자 소켓 끊김 + 세션 무효', async () => {
+    const closePromise = once(memberWs, 'close');
+    ownerWs.send(JSON.stringify({ t: 'adminSuspend', id: member.id }));
+    const f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    expect(f.list.find((u: { id: string }) => u.id === member.id).status).toBe('suspended');
+    await closePromise;
+    expect(deps.sessions.resolve(memberToken)).toBeNull();
+  });
+
+  it('adminSuspend: owner 대상은 무시(자기 잠금 방지)', async () => {
+    ownerWs.send(JSON.stringify({ t: 'adminSuspend', id: owner.id }));
+    const f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    expect(f.list.find((u: { id: string }) => u.id === owner.id).status).toBe('active');
+  });
+
+  it('adminRestore·adminResetPassword·adminForceLogout 동작', async () => {
+    deps.accounts.setStatus(member.id, 'suspended');
+    ownerWs.send(JSON.stringify({ t: 'adminRestore', id: member.id }));
+    let f = await nextFrame(ownerWs);
+    expect(f.list.find((u: { id: string }) => u.id === member.id).status).toBe('active');
+
+    ownerWs.send(JSON.stringify({ t: 'adminResetPassword', id: member.id, password: 'newpw' }));
+    f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    expect(deps.accounts.verifyPassword('mem', 'newpw')).not.toBeNull();
+
+    const closePromise = once(memberWs, 'close');
+    ownerWs.send(JSON.stringify({ t: 'adminForceLogout', id: member.id }));
+    f = await nextFrame(ownerWs);
+    expect(f.t).toBe('adminUsers');
+    await closePromise;
+    expect(deps.sessions.resolve(memberToken)).toBeNull();
+  });
+
+  it('adminGetSettings/adminSetSettings: settings.load/save 위임', async () => {
+    let current: AdminSettings = { serverName: 'orig' };
+    const saveSpy = jest.fn((s: AdminSettings) => { current = s; });
+    deps.settings = { load: () => current, save: saveSpy };
+
+    ownerWs.send(JSON.stringify({ t: 'adminGetSettings' }));
+    let f = await nextFrame(ownerWs);
+    expect(f).toEqual({ t: 'adminSettings', settings: { serverName: 'orig' } });
+
+    const next: AdminSettings = { serverName: 'new' };
+    ownerWs.send(JSON.stringify({ t: 'adminSetSettings', settings: next }));
+    f = await nextFrame(ownerWs);
+    expect(saveSpy).toHaveBeenCalledWith(next);
+    expect(f).toEqual({ t: 'adminSettings', settings: next });
+  });
 });
 
 function fakePage(slug: string, status: 'draft' | 'published' = 'published'): WikiPage {

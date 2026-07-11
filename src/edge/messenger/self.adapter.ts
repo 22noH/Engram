@@ -9,7 +9,7 @@ import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
 import type { WikiPage } from '../../knowledge-core/wiki/page.types';
 import type { ProposalStore, Proposal } from '../../knowledge-core/proposal-store';
 import type { ProposalApplier } from '../proposal-applier';
-import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings } from '../../../shared/protocol';
 import type { AccountStore, Account } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
@@ -141,6 +141,26 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
+  // Phase 16a: owner 전용 관리 프레임 집합. 비owner 소켓(또는 authDeps 미주입)의 admin 프레임은
+  // 조용히 무시 — 응답도 로그도 없다(존재 유출 방지).
+  private static readonly ADMIN_FRAMES = new Set([
+    'adminUsers', 'adminApprove', 'adminSuspend', 'adminRestore',
+    'adminResetPassword', 'adminForceLogout', 'adminGetSettings', 'adminSetSettings',
+  ]);
+  private adminGate(ws: WebSocket): boolean {
+    const me = this.users.get(ws);
+    return !!this.authDeps && me?.role === 'owner';
+  }
+  private adminList(): AdminUserDto[] {
+    return this.authDeps!.accounts.list().map((a) => ({
+      id: a.id, displayName: a.displayName, role: a.role,
+      loginId: a.loginId, status: a.status, createdAt: a.createdAt, sso: !!a.oidc,
+    }));
+  }
+  private sendAdminList(ws: WebSocket): void {
+    this.sendTo(ws, { t: 'adminUsers', list: this.adminList() });
+  }
+
   private async handleFrame(ws: WebSocket, raw: string): Promise<void> {
     let f: Record<string, unknown>;
     try { f = JSON.parse(raw) as Record<string, unknown>; } catch { return; } // 손상 무시
@@ -157,6 +177,7 @@ export class SelfMessenger implements MessengerPort {
       }
       return;
     }
+    if (typeof f?.t === 'string' && SelfMessenger.ADMIN_FRAMES.has(f.t) && !this.adminGate(ws)) return;
     try {
       switch (f?.t) {
         case 'send': return await this.onSend(ws, f);
@@ -229,6 +250,61 @@ export class SelfMessenger implements MessengerPort {
           this.broadcast({ t: 'proposalsChanged' });
           return;
         }
+        case 'adminUsers':
+          this.sendAdminList(ws);
+          return;
+        case 'adminApprove': {
+          if (typeof f.id === 'string') {
+            const t = this.authDeps!.accounts.get(f.id);
+            if (t?.status === 'pending') this.authDeps!.accounts.setStatus(f.id, 'active');
+          }
+          this.sendAdminList(ws);
+          return;
+        }
+        case 'adminSuspend': {
+          if (typeof f.id === 'string') {
+            const t = this.authDeps!.accounts.get(f.id);
+            if (t && t.role !== 'owner') {
+              this.authDeps!.accounts.setStatus(f.id, 'suspended');
+              this.authDeps!.sessions.revokeAllFor(f.id);
+              this.kickUser(f.id);
+            }
+          }
+          this.sendAdminList(ws);
+          return;
+        }
+        case 'adminRestore': {
+          if (typeof f.id === 'string') {
+            const t = this.authDeps!.accounts.get(f.id);
+            if (t?.status === 'suspended') this.authDeps!.accounts.setStatus(f.id, 'active');
+          }
+          this.sendAdminList(ws);
+          return;
+        }
+        case 'adminResetPassword': {
+          if (typeof f.id === 'string' && typeof f.password === 'string' && f.password) {
+            this.authDeps!.accounts.setPassword(f.id, f.password);
+          }
+          this.sendAdminList(ws);
+          return;
+        }
+        case 'adminForceLogout': {
+          if (typeof f.id === 'string') {
+            this.authDeps!.sessions.revokeAllFor(f.id);
+            this.kickUser(f.id);
+          }
+          this.sendAdminList(ws);
+          return;
+        }
+        case 'adminGetSettings':
+          this.sendTo(ws, { t: 'adminSettings', settings: this.authDeps!.settings.load() });
+          return;
+        case 'adminSetSettings':
+          if (f.settings && typeof f.settings === 'object') {
+            this.authDeps!.settings.save(f.settings as AdminSettings);
+          }
+          this.sendTo(ws, { t: 'adminSettings', settings: this.authDeps!.settings.load() });
+          return;
         default: return; // 미지 타입 무시(스펙 §6)
       }
     } catch (err) {

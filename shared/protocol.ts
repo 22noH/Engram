@@ -60,7 +60,15 @@ export type ClientFrame =
   | { t: 'wikiGet'; slug: string }
   | { t: 'proposalsList' }
   | { t: 'proposalApprove'; id: string }
-  | { t: 'proposalReject'; id: string };
+  | { t: 'proposalReject'; id: string }
+  | { t: 'adminUsers' }
+  | { t: 'adminApprove'; id: string }
+  | { t: 'adminSuspend'; id: string }
+  | { t: 'adminRestore'; id: string }
+  | { t: 'adminResetPassword'; id: string; password: string }
+  | { t: 'adminForceLogout'; id: string }
+  | { t: 'adminGetSettings' }
+  | { t: 'adminSetSettings'; settings: AdminSettings };
 
 // 서버 → 클라
 export type ServerFrame =
@@ -74,4 +82,6 @@ export type ServerFrame =
   | { t: 'wikiPage'; page: WikiPageDto }
   | { t: 'proposals'; list: ProposalDto[] }
   | { t: 'wikiChanged' }
-  | { t: 'proposalsChanged' };
+  | { t: 'proposalsChanged' }
+  | { t: 'adminUsers'; list: AdminUserDto[] }
+  | { t: 'adminSettings'; settings: AdminSettings };
