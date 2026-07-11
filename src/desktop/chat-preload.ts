@@ -4,4 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // 브라우저(폰)엔 이 객체가 없으므로 chat.html이 텍스트 입력으로 폴백한다.
 contextBridge.exposeInMainWorld('engramDesktop', {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('engram:pick-folder'),
+  setupCode: (): Promise<string | null> => ipcRenderer.invoke('engram:setup-code'),
+  addLocalBrain: (name: string): Promise<{ endpoint: string; name: string } | null> =>
+    ipcRenderer.invoke('engram:add-local-brain', name),
 });

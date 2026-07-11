@@ -9,3 +9,9 @@ const langParam = new URLSearchParams(window.location.search).get('lang');
 export const LANG = (langParam && langParam.trim()) || navigator.language.slice(0, 2).toLowerCase();
 // UI 언어: 설정 언어(LANG)가 한국어면 한국어(두뇌 T 사전과 동일 판정).
 export const ko = LANG === 'ko';
+
+// 배포 프리셋(Phase 16a Task 15): Electron이 configDir/preset.json이 있으면 ?presetName=&presetEndpoint=를 주입.
+// 없으면 null — connections.ts seed()가 기존 local-only로 폴백.
+const presetName = new URLSearchParams(window.location.search).get('presetName');
+const presetEndpoint = new URLSearchParams(window.location.search).get('presetEndpoint');
+export const PRESET = presetEndpoint ? { name: presetName || 'Server', endpoint: presetEndpoint } : null;

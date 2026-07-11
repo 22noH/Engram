@@ -47,6 +47,13 @@ export function ManageEngrams(props: {
           <input type="text" placeholder={T.engramNamePh} value={name} onChange={(e) => setName(e.target.value)} />
           <input type="text" placeholder={T.engramEndpointPh} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
           <button type="button" onClick={submit}>{T.addEngram}</button>
+          {window.engramDesktop?.addLocalBrain && (
+            <button type="button" onClick={() => {
+              void window.engramDesktop!.addLocalBrain!(name.trim() || 'Local brain').then((r) => {
+                if (r) { onAdd(r.name, r.endpoint); setName(''); }
+              });
+            }}>{T.addLocalBrain}</button>
+          )}
         </div>
         <button type="button" id="manageClose" onClick={onClose}>{T.close}</button>
       </div>

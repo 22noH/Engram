@@ -4,6 +4,7 @@ declare global {
     engramDesktop?: {
       pickFolder: () => Promise<string | null>;
       setupCode?: () => Promise<string | null>; // Task 15
+      addLocalBrain?: (name: string) => Promise<{ endpoint: string; name: string } | null>; // Task 15
     };
   }
 }

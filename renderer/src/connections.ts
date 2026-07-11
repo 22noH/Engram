@@ -1,4 +1,4 @@
-import { WS_URL } from './config';
+import { WS_URL, PRESET } from './config';
 
 export interface Connection { id: string; name: string; endpoint: string }
 interface State { connections: Connection[]; defaultConnId: string }
@@ -7,8 +7,13 @@ const KEY = 'engram.connections';
 
 export function defaultEndpoint(): string { return WS_URL; }
 
+// 배포 프리셋(Task 15)이 있으면 그 서버를 기본 연결로 시드(로컬 두뇌도 그대로 유지).
 function seed(): State {
-  return { connections: [{ id: 'local', name: 'Local', endpoint: defaultEndpoint() }], defaultConnId: 'local' };
+  const local: Connection = { id: 'local', name: 'Local', endpoint: defaultEndpoint() };
+  if (PRESET) {
+    return { connections: [{ id: 'preset', name: PRESET.name, endpoint: PRESET.endpoint }, local], defaultConnId: 'preset' };
+  }
+  return { connections: [local], defaultConnId: 'local' };
 }
 
 export function loadConnections(): State {

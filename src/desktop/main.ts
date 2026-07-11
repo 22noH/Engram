@@ -11,6 +11,8 @@ import { addOllamaProfile, detectOllama } from './ollama';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
 import { resolveLanguage } from '../agent-layer/language';
+import { loadLocalBrains, addLocalBrain } from './local-brains';
+import { readSetupCode } from '../edge/auth/setup-code';
 import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
@@ -68,6 +70,22 @@ function restartChild(): void {
     c.kill();
   }
   startChild();
+}
+
+// ---- 로컬 두뇌(+, 스펙 §2.1/§2.5) fork ----
+// brain 모드: 계정/team/위키승인 미탑재, 127.0.0.1 고정(chat.config). ponytail: 죽어도 재시작 안 함
+// — 감독을 상주 child만큼 복잡하게 만들 필요가 없다. 재시작하려면 앱을 재부팅하면 된다(다음 boot에서 다시 fork).
+const brainProcs: UtilityProcess[] = [];
+function startLocalBrain(b: { port: number; dataDir: string }): void {
+  const entry = path.join(app.getAppPath(), 'dist', 'src', 'main.js');
+  brainProcs.push(utilityProcess.fork(entry, [], {
+    env: {
+      ...childEnv,
+      ENGRAM_DATA_DIR: b.dataDir, ENGRAM_MODEL_CACHE_DIR: path.join(dataDir, 'models'), // 모델 캐시는 메인과 공유(재다운로드 방지)
+      ENGRAM_CHAT_ROLE: 'brain', ENGRAM_CHAT_PORT: String(b.port),
+    },
+    stdio: 'ignore', serviceName: 'engram-brain',
+  }));
 }
 
 // ---- 트레이 ----
@@ -159,12 +177,19 @@ function openChat(): void {
     '@media(prefers-color-scheme:dark){body{background:#0b0e13;color:#8b95a3}}</style>' +
     `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div>`,
   );
+  // 배포 프리셋(configDir/preset.json — `{name,endpoint}`): 있으면 렌더러 URL에 주입해
+  // connections.ts seed()가 그 서버를 기본 연결로 시드하게 한다. 없으면 기존 local-only 그대로.
+  let preset = '';
+  try {
+    const p = JSON.parse(fs.readFileSync(path.join(configDir, 'preset.json'), 'utf8')) as { name?: string; endpoint?: string };
+    if (p.endpoint) preset = `&presetName=${encodeURIComponent(p.name ?? 'Server')}&presetEndpoint=${encodeURIComponent(p.endpoint)}`;
+  } catch { /* 프리셋 없음 */ }
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     nodeHttp.get(healthUrl, (res) => {
       res.resume();
       const lang = resolveLanguage(cfg.language, app.getLocale());
-      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}` }); // 헬스 200 → 클라 로드(포트·언어 주입)
+      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 200 → 클라 로드(포트·언어·프리셋 주입)
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.
@@ -227,6 +252,13 @@ function registerIpc(): void {
       : await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
   });
+  ipcMain.handle('engram:setup-code', () => readSetupCode(path.join(dataDir, 'state')));
+  ipcMain.handle('engram:add-local-brain', (_e, name: string) => {
+    const cfg = loadChatConfig(configDir, childEnv);
+    const b = addLocalBrain(configDir, dataDir, name, [cfg.port]);
+    startLocalBrain(b);
+    return { endpoint: `ws://127.0.0.1:${b.port}`, name: b.name };
+  });
 }
 
 // ---- 부팅 ----
@@ -238,6 +270,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     quitting = true;
     child?.kill();
+    brainProcs.forEach((p) => p.kill());
   });
   // 창을 다 닫아도 트레이 상주 유지(기본 quit 동작 차단).
   app.on('window-all-closed', () => {});
@@ -256,5 +289,6 @@ if (!gotLock) {
     registerIpc();
     createTray();
     startChild();
+    for (const b of loadLocalBrains(configDir)) startLocalBrain(b); // + 로컬 두뇌 재기동(재시작 감독 없음 — ponytail)
   });
 }

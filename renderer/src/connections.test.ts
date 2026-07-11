@@ -23,4 +23,16 @@ describe('connections store', () => {
     expect(a.connections).toHaveLength(1);
     expect(b.connections).toHaveLength(2);
   });
+  it('프리셋이 있으면 preset이 기본 연결', async () => {
+    vi.resetModules();
+    vi.doMock('./config', () => ({ WS_URL: 'ws://127.0.0.1:47800', PRESET: { name: 'Team Server', endpoint: 'ws://10.0.0.5:47800' } }));
+    const mod = await import('./connections');
+    const s = mod.loadConnections();
+    expect(s.connections.map((c) => c.id)).toEqual(['preset', 'local']);
+    expect(s.connections[0].name).toBe('Team Server');
+    expect(s.connections[0].endpoint).toBe('ws://10.0.0.5:47800');
+    expect(s.defaultConnId).toBe('preset');
+    vi.doUnmock('./config');
+    vi.resetModules();
+  });
 });
