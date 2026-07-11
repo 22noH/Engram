@@ -89,11 +89,32 @@ interface PollEntry { exp: number; done?: { token: string; user: AuthUserDto } }
 
 export class PollStore {
   private readonly map = new Map<string, PollEntry>();
-  private readonly ttlMs = 10 * 60 * 1000;
+  private readonly ttlMs: number;
+  private readonly maxSize: number;
+
+  constructor(ttlMs?: number, maxSize?: number) {
+    this.ttlMs = ttlMs ?? 10 * 60 * 1000;
+    this.maxSize = maxSize ?? 10000;
+  }
 
   create(): string {
+    const now = Date.now();
+
+    // Prune expired entries
+    for (const [code, entry] of this.map.entries()) {
+      if (entry.exp <= now) {
+        this.map.delete(code);
+      }
+    }
+
+    // Evict oldest entries if at or over max size
+    while (this.map.size >= this.maxSize) {
+      const oldest = this.map.keys().next().value;
+      if (oldest) this.map.delete(oldest);
+    }
+
     const code = randomBytes(16).toString('hex');
-    this.map.set(code, { exp: Date.now() + this.ttlMs });
+    this.map.set(code, { exp: now + this.ttlMs });
     return code;
   }
   private live(code: string): PollEntry | null {

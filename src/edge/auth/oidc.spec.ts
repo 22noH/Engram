@@ -84,4 +84,25 @@ describe('PollStore', () => {
     expect(p.take('없음')).toBeNull();
     expect(p.complete('없음', { token: 't', user: { id: 'u', displayName: 'U', role: 'member' } })).toBe(false);
   });
+
+  it('maxSize 초과 시 가장 오래된 항목 제거(하드 캡)', () => {
+    const p = new PollStore(10 * 60 * 1000, 3); // MAX=3
+    const codes = [p.create(), p.create(), p.create()]; // now: [c1, c2, c3]
+    expect(p.take(codes[0])).toEqual({ status: 'pending' }); // c1 exist
+    const c4 = p.create(); // should evict c1 (oldest), keep [c2, c3, c4]
+    expect(p.take(codes[0])).toBeNull(); // c1 evicted
+    expect(p.take(codes[1])).toEqual({ status: 'pending' }); // c2 still there
+    expect(p.take(codes[2])).toEqual({ status: 'pending' }); // c3 still there
+    expect(p.take(c4)).toEqual({ status: 'pending' }); // c4 new
+  });
+
+  it('만료된 항목 정리(create 시 프룬)', async () => {
+    const p = new PollStore(100, 10); // TTL=100ms, MAX=10
+    const old = p.create();
+    // Wait past TTL
+    await new Promise(r => setTimeout(r, 150));
+    const fresh = p.create(); // Should prune expired 'old'
+    expect(p.take(old)).toBeNull(); // old expired and pruned
+    expect(p.take(fresh)).toEqual({ status: 'pending' }); // fresh is there
+  });
 });
