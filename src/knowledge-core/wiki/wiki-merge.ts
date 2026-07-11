@@ -9,7 +9,9 @@ export function makeBrainBodyMerger(
   promptTemplate: string,
 ): (oursBody: string, theirsBody: string) => Promise<string | null> {
   return async (oursBody, theirsBody) => {
-    const prompt = promptTemplate.replace('{{OURS}}', oursBody).replace('{{THEIRS}}', theirsBody);
+    const prompt = promptTemplate
+      .replace('{{OURS}}', () => oursBody)
+      .replace('{{THEIRS}}', () => theirsBody);
     const r = await brain.complete(prompt);
     const t = r.isError ? '' : r.text.trim();
     return t ? t : null; // 실패/빈 출력 → null → 호출자가 union 폴백

@@ -19,4 +19,11 @@ describe('makeBrainBodyMerger', () => {
     const brain = { complete: async () => ({ text: '   ', isError: false }) };
     expect(await makeBrainBodyMerger(brain, tmpl)('a', 'b')).toBeNull();
   });
+  it('본문의 $ 패턴을 그대로 보존(특수 치환 방지)', async () => {
+    let seen = '';
+    const brain = { complete: async (p: string) => { seen = p; return { text: 'ok', isError: false }; } };
+    await makeBrainBodyMerger(brain, tmpl)('has $& and $$ and $1', 'other $` text');
+    expect(seen).toContain('has $& and $$ and $1'); // 원문 그대로
+    expect(seen).toContain('other $` text');
+  });
 });
