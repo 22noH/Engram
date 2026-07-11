@@ -29,6 +29,12 @@ import { BRAIN } from './brain/brain.port';
 import type { BrainProvider } from './brain/brain.port';
 import { makeBrainBodyMerger } from './knowledge-core/wiki/wiki-merge';
 import { loadPrompt } from './agent-layer/prompt-store';
+import { AccountStore } from './edge/auth/account-store';
+import { SessionStore } from './edge/auth/session-store';
+import { AuthHttp } from './edge/auth/auth-http';
+import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
+import { ensureSetupCode } from './edge/auth/setup-code';
+import type { AuthDeps } from './edge/messenger/self.adapter';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
 // prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
@@ -73,12 +79,25 @@ async function bootstrap(): Promise<void> {
   let chatStore: ChatStore | null = null;
   const chatCfg = loadChatConfig(paths.getConfigDir());
   if (chatCfg.enabled) {
+    const isServer = chatCfg.role !== 'brain'; // brain=계정·team·위키승인 미탑재, 127.0.0.1 고정(Phase 16a)
     chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'));
-    self = new SelfMessenger(chatCfg, chatStore, { logger }, {
-      wiki: app.get(WikiEngine),
-      proposals: app.get(ProposalStore),
-      applier: app.get(ProposalApplier),
-    });
+    let authDeps: AuthDeps | undefined;
+    if (isServer) {
+      const accounts = new AccountStore(paths.getStateDir());
+      const sessions = new SessionStore(paths.getStateDir());
+      const settings = {
+        load: () => loadAuthSettings(paths.getConfigDir()),
+        save: (s: ReturnType<typeof loadAuthSettings>) => saveAuthSettings(paths.getConfigDir(), s),
+      };
+      const authHttp = new AuthHttp({ accounts, sessions, stateDir: paths.getStateDir(), settings });
+      authDeps = { accounts, sessions, http: authHttp, settings };
+      if (accounts.count() === 0) {
+        logger.log(`서버 미설정 — 초기 설정 코드: ${ensureSetupCode(paths.getStateDir())}`, 'Auth');
+      }
+    }
+    self = new SelfMessenger(chatCfg, chatStore, { logger },
+      isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
+      authDeps);
   }
 
   // Discord(Phase 6a): messenger.json에 있으면 병행.

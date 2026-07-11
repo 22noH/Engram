@@ -40,7 +40,7 @@ describe('SelfMessenger 코어', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-self-'));
     store = new ChatStore(dir);
     store.listChannels(); // general 생성
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
     await sm.start();
     client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
     await once(client, 'open');
@@ -140,10 +140,10 @@ it('포트가 이미 점유돼도 상주를 죽이지 않는다(두 번째 start
   const store = new ChatStore(dir);
   const logs: string[] = [];
   const log = { warn: (m: string) => logs.push(m) };
-  const a = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: log });
+  const a = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: log });
   await a.start();
   const port = a.addressPort();
-  const b = new SelfMessenger({ enabled: true, port, bind: '127.0.0.1' }, store, { logger: log });
+  const b = new SelfMessenger({ enabled: true, port, bind: '127.0.0.1', role: 'server' }, store, { logger: log });
   // 두 번째는 EADDRINUSE로 reject 되어야 하고, uncaught로 프로세스를 죽이면 안 된다.
   await expect(b.start()).rejects.toBeDefined();
   await a.stop();
@@ -161,7 +161,7 @@ describe('SelfMessenger 프로토콜 확장', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-self2-'));
     store = new ChatStore(dir);
     store.listChannels();
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
     await sm.start();
     client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
     await once(client, 'open');
@@ -266,6 +266,26 @@ describe('SelfMessenger 프로토콜 확장', () => {
   });
 });
 
+describe('brain 모드(Phase 16a)', () => {
+  it('brain 모드: team 채널 생성 무시', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brain-'));
+    const store = new ChatStore(dir);
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'brain' } as any, store, { logger: noLog });
+    await sm.start();
+    const client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+    client.send(JSON.stringify({ t: 'createChannel', name: 'people', mode: 'team' }));
+    client.send(JSON.stringify({ t: 'channels' })); // 뒤에 온 프레임이 처리되면 team 요청은 무시된 것
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { name: string }) => c.name === 'people')).toBeUndefined();
+    client.terminate();
+    await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('세션 인증(Phase 16a)', () => {
   let dir: string;
   let sm: SelfMessenger | undefined;
@@ -286,7 +306,7 @@ describe('세션 인증(Phase 16a)', () => {
   async function makeServer(deps: AuthDeps | undefined): Promise<ChatStore> {
     const store = new ChatStore(path.join(dir, 'chat'));
     store.listChannels(); // general 생성
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, undefined, deps);
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
     await sm.start();
     return store;
   }
@@ -438,7 +458,7 @@ describe('admin 프레임(Phase 16a)', () => {
     member = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
     const store = new ChatStore(path.join(dir, 'chat'));
     store.listChannels();
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, undefined, deps);
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
     await sm.start();
     ownerWs = await connect();
     memberWs = await connect();
@@ -491,7 +511,7 @@ describe('admin 프레임(Phase 16a)', () => {
   it('authDeps 미주입 시 admin 프레임도 무시', async () => {
     const store2 = new ChatStore(path.join(dir, 'chat-noauth'));
     store2.listChannels();
-    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store2, { logger: noLog });
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store2, { logger: noLog });
     await sm2.start();
     const c = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
     await once(c, 'open');
@@ -593,7 +613,7 @@ describe('SelfMessenger 위키·승인함', () => {
         reject: async (p: Proposal) => { rejected.push(p.id); },
       },
     };
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, wikiDeps as any);
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any);
     await sm.start();
     client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
     await once(client, 'open');
@@ -663,7 +683,7 @@ describe('SelfMessenger 위키·승인함', () => {
   it('wikiDeps 미주입 시 wikiList는 무시(no-op) — 뒤이은 channels만 응답', async () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-nowiki-'));
     const store2 = new ChatStore(dir2); store2.listChannels();
-    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store2, { logger: noLog });
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store2, { logger: noLog });
     await sm2.start();
     const client2 = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
     await once(client2, 'open');

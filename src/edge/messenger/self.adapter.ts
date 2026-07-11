@@ -191,6 +191,7 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
           return;
         case 'createChannel':
+          if (this.cfg.role === 'brain' && f.mode === 'team') return; // brain=개인 연산용, 팀 방 없음
           if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat');
           this.broadcast({ t: 'channels', list: this.store.listChannels() });
           return;

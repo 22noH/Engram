@@ -9,12 +9,12 @@ describe('loadChatConfig', () => {
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('파일 없으면 기본값이 간다', () => {
-    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 47800, bind: '127.0.0.1' });
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 47800, bind: '127.0.0.1', role: 'server' });
   });
 
   it('chat.json 값을 쓴다', () => {
     fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ enabled: false, port: 5000, bind: '0.0.0.0' }));
-    expect(loadChatConfig(dir, {})).toEqual({ enabled: false, port: 5000, bind: '0.0.0.0' });
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: false, port: 5000, bind: '0.0.0.0', role: 'server' });
   });
 
   it('env가 파일보다 우선한다', () => {
@@ -37,9 +37,18 @@ describe('loadChatConfig', () => {
 
   it('유효하지만 객체가 아닌 JSON(null 등)도 기본값(크래시 없음)', () => {
     fs.writeFileSync(path.join(dir, 'chat.json'), 'null');
-    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 47800, bind: '127.0.0.1' });
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 47800, bind: '127.0.0.1', role: 'server' });
     fs.writeFileSync(path.join(dir, 'chat.json'), '123');
     expect(loadChatConfig(dir, {}).port).toBe(47800);
+  });
+
+  it('role: 기본 server, env/파일 brain, brain은 bind 강제 127.0.0.1', () => {
+    expect(loadChatConfig(dir).role).toBe('server');
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ role: 'brain', bind: '0.0.0.0' }));
+    const c = loadChatConfig(dir);
+    expect(c.role).toBe('brain');
+    expect(c.bind).toBe('127.0.0.1'); // brain은 원격 노출 불가
+    expect(loadChatConfig(dir, { ENGRAM_CHAT_ROLE: 'brain' } as NodeJS.ProcessEnv).role).toBe('brain');
   });
 
   it('소수 port는 무시하고 기본값', () => {

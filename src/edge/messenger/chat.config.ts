@@ -9,7 +9,8 @@ export interface ChatConfig {
   port: number;
   bind: string;
   language?: string; // BCP-47 코드(예 'ko'/'en'). 미설정=OS 로케일 폴백(main.ts).
-  token?: string;    // 설정 시 모든 ws 연결이 auth 프레임으로 제시해야 함. 미설정=무인증(현행).
+  token?: string;    // 설정 시 모든 ws 연결이 auth 프레임으로 제시해야 함. 미설정=무인증(현행). Task 14에서 제거.
+  role: 'server' | 'brain'; // brain=계정·team·위키승인 미탑재, 127.0.0.1 고정(Phase 16a 스펙 §2.1).
 }
 
 function validPort(v: unknown): number | null {
@@ -29,12 +30,15 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
   const port = (env.ENGRAM_CHAT_PORT ? validPort(env.ENGRAM_CHAT_PORT) : null)
     ?? validPort(raw.port)
     ?? 47800;
-  const bind = (typeof env.ENGRAM_CHAT_BIND === 'string' && env.ENGRAM_CHAT_BIND)
+  const role: 'server' | 'brain' = (env.ENGRAM_CHAT_ROLE === 'brain' || raw.role === 'brain') ? 'brain' : 'server';
+  const bind = role === 'brain' ? '127.0.0.1' : (
+    (typeof env.ENGRAM_CHAT_BIND === 'string' && env.ENGRAM_CHAT_BIND)
     || (typeof raw.bind === 'string' && raw.bind)
-    || '127.0.0.1';
+    || '127.0.0.1'
+  );
   const language = typeof raw.language === 'string' && raw.language.trim() ? raw.language.trim() : undefined;
   const token = (typeof env.ENGRAM_CHAT_TOKEN === 'string' && env.ENGRAM_CHAT_TOKEN.trim())
     || (typeof raw.token === 'string' && raw.token.trim())
     || undefined;
-  return { enabled: raw.enabled !== false, port, bind, language, token };
+  return { enabled: raw.enabled !== false, port, bind, language, token, role };
 }
