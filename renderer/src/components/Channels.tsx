@@ -8,12 +8,13 @@ import { areaTabs } from '../areas';
 export function Channels(props: {
   channels: Channel[];
   current: string | null;
-  mode: 'chat' | 'code' | 'team' | 'wiki';
+  mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin';
   onSelect: (id: string) => void;
-  onSetMode: (m: 'chat' | 'code' | 'team' | 'wiki') => void;
-  onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki') => void;
+  onSetMode: (m: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
+  onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
   onDelete: (id: string) => void;
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
+  showAdmin?: boolean;
 }) {
   const { channels, current, mode } = props;
   const [creating, setCreating] = useState(false);
@@ -22,8 +23,8 @@ export function Channels(props: {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
   const popRef = useRef<HTMLDivElement>(null);
   const visible = channels.filter((c) => (c.mode || 'chat') === mode);
-  const label: Record<'chat' | 'code' | 'team' | 'wiki', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode, wiki: T.tabWiki };
-  const tabs = areaTabs(TEAM_CHAT);
+  const label: Record<'chat' | 'code' | 'team' | 'wiki' | 'admin', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode, wiki: T.tabWiki, admin: T.tabAdmin };
+  const tabs = areaTabs(TEAM_CHAT, props.showAdmin);
 
   // 바깥 클릭·Esc로 닫힘(chat.html document click/keydown 리스너 이전).
   useEffect(() => {
@@ -61,7 +62,7 @@ export function Channels(props: {
           </div>
         ))}
       </div>
-      {mode !== 'wiki' && (
+      {mode !== 'wiki' && mode !== 'admin' && (
         <div id="channels">
           {visible.map((c) => (
             <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
@@ -85,7 +86,7 @@ export function Channels(props: {
           </div>
         );
       })()}
-      {mode !== 'wiki' && (
+      {mode !== 'wiki' && mode !== 'admin' && (
         <div id="newch">
           {creating ? (
             <input

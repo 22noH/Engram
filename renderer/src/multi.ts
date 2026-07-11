@@ -12,9 +12,9 @@ export function routeTarget(text: string, defaultConnId: string, connections: Co
 }
 
 // 논리 채널: 그 mode인 채널 이름들의 합집합(정렬·중복 제거).
-// mode에 'wiki'도 받는다(App의 mode state가 위키까지 포함하도록 넓어졌기 때문 — 위키는 채널 개념이
-// 없어 실제로 c.mode==='wiki'인 채널은 존재하지 않으므로 그 경우 항상 빈 배열을 반환한다).
-export function logicalChannels(channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki'): string[] {
+// mode에 'wiki'·'admin'도 받는다(App의 mode state가 그만큼 넓어졌기 때문 — 둘 다 채널 개념이
+// 없어 실제로 c.mode==='wiki'|'admin'인 채널은 존재하지 않으므로 그 경우 항상 빈 배열을 반환한다).
+export function logicalChannels(channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin'): string[] {
   const names = new Set<string>();
   for (const list of Object.values(channelsByConn)) {
     for (const c of list) {
@@ -59,13 +59,13 @@ export function mergeThreads(msgsByConnForName: Array<{ connId: string; messages
 // team 모드는 기본 연결(그 서버) 하나로 스코프 — 다중연결 머지/라우팅 대상에서 제외.
 // (Ask/Code는 원본 그대로 반환 → 기존 다중연결 경로 무변경.)
 export function scopedConnections<C extends { id: string }>(
-  connections: C[], mode: 'chat' | 'code' | 'team' | 'wiki', defaultConnId: string,
+  connections: C[], mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin', defaultConnId: string,
 ): C[] {
   return mode === 'team' ? connections.filter((c) => c.id === defaultConnId) : connections;
 }
 
 export function scopedChannels(
-  channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki', defaultConnId: string,
+  channelsByConn: Record<string, Channel[]>, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin', defaultConnId: string,
 ): Record<string, Channel[]> {
   return mode === 'team' ? { [defaultConnId]: channelsByConn[defaultConnId] ?? [] } : channelsByConn;
 }

@@ -246,32 +246,31 @@ it('지연 생성 flush는 이름뿐 아니라 모드도 맞아야 한다(동명
   expect(workWS.sent.some((s) => s.includes('"send"') && s.includes('"channelId":"w-code"'))).toBe(false);
 });
 
-// Phase 14: team 탭 전송 배선(리뷰 지적 — 자동화 가드 없음) 커버리지.
-it('team 모드에서 닉네임을 설정하고 보내면 authorId가 담긴 send 프레임이 나간다', async () => {
+// Phase 16a: team 탭 전송 배선 — 자가선언 닉네임 대신 계정 인증(authOk) 기준.
+it('team 모드에서 로그인된 사용자가 보내면 authorId 없이 send 프레임이 나간다(서버가 스탬프)', async () => {
   seedTwoConnections();
   render(<App />);
   const [homeWS] = FakeWS.instances;
   act(() => { homeWS.open(); });
   act(() => {
     homeWS.msg({ t: 'channels', list: [{ id: 't1', name: '팀', respondMode: 'all', mode: 'team' }] });
+    homeWS.msg({ t: 'authOk', user: { id: 'u-alice', displayName: 'Alice', role: 'member' } });
   });
 
   fireEvent.click(screen.getByText(T.tabTeam));
   await waitFor(() => expect(screen.getByText('# 팀')).toBeInTheDocument());
-
-  const nameInput = document.querySelector('#teamName input') as HTMLInputElement;
-  act(() => { fireEvent.change(nameInput, { target: { value: 'Alice' } }); });
 
   const input = document.getElementById('input') as HTMLInputElement;
   act(() => { fireEvent.change(input, { target: { value: 'hi team' } }); });
   act(() => { fireEvent.keyDown(input, { key: 'Enter' }); });
 
   await waitFor(() => {
-    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"authorId":"Alice"'))).toBe(true);
+    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('hi team'))).toBe(true);
   });
+  expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"authorId"'))).toBe(false);
 });
 
-it('team 모드에서 닉네임이 없으면 전송이 나가지 않는다(send 프레임 없음)', async () => {
+it('team 모드에서 로그인 안 된 상태면 전송이 나가지 않는다(send 프레임 없음)', async () => {
   seedTwoConnections();
   render(<App />);
   const [homeWS] = FakeWS.instances;
@@ -283,7 +282,7 @@ it('team 모드에서 닉네임이 없으면 전송이 나가지 않는다(send 
   fireEvent.click(screen.getByText(T.tabTeam));
   await waitFor(() => expect(screen.getByText('# 팀')).toBeInTheDocument());
 
-  // 닉네임 입력을 하지 않는다(기본값 '').
+  // 로그인(authOk)이 온 적 없다 — meByConn에 이 연결 엔트리가 없는 상태.
   const input = document.getElementById('input') as HTMLInputElement;
   act(() => { fireEvent.change(input, { target: { value: 'hi team' } }); });
   act(() => { fireEvent.keyDown(input, { key: 'Enter' }); });

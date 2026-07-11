@@ -3,7 +3,6 @@ import type { Channel, ClientFrame, Message as Msg, ServerFrame, UserDto } from 
 import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
-import { loadDisplayName, saveDisplayName } from './display-name';
 import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
 import { fetchStatus, apiLogin, apiRegister, apiSetup, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
 import { Channels } from './components/Channels';
@@ -14,8 +13,9 @@ import { EngramSelector } from './components/EngramSelector';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
 import { WikiArea } from './components/WikiArea';
+import { AdminArea } from './components/AdminArea';
 import { LoginGate } from './components/LoginGate';
-import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings } from '../../shared/protocol';
 import { T } from './i18n';
 
 // 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
@@ -33,7 +33,7 @@ export default function App() {
   const [chanIdByConnName, setChanIdByConnName] = useState<Map<string, string>>(new Map());
   const [msgsByConnCh, setMsgsByConnCh] = useState<Map<string, Msg[]>>(new Map());
   const [currentName, setCurrentName] = useState<string | null>(null);
-  const [mode, setMode] = useState<'chat' | 'code' | 'team' | 'wiki'>('chat');
+  const [mode, setMode] = useState<'chat' | 'code' | 'team' | 'wiki' | 'admin'>('chat');
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set()); // 키=논리 채널 이름
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
@@ -43,10 +43,11 @@ export default function App() {
   const [showManage, setShowManage] = useState(false);              // Manage Engrams 모달
   const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [displayName, setDisplayName] = useState(loadDisplayName());
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUserDto[]>([]);
+  const [adminSettings, setAdminSettings] = useState<AdminSettings | null>(null);
   // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
   // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
   const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
@@ -69,7 +70,7 @@ export default function App() {
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
   // (모드를 안 보면 동명·타모드 채널로 잘못 flush될 수 있다 — Minor #4).
-  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string; authorId?: string }>>(new Map());
+  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string }>>(new Map());
 
   function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
@@ -85,7 +86,7 @@ export default function App() {
       if (pending) {
         const chan = f.list.find((c) => c.name === pending.name && (c.mode ?? 'chat') === pending.mode);
         if (chan) {
-          send(connId, { t: 'send', channelId: chan.id, text: pending.text, ...(pending.authorId ? { authorId: pending.authorId } : {}) });
+          send(connId, { t: 'send', channelId: chan.id, text: pending.text });
           pendingSendRef.current.delete(connId);
         }
       }
@@ -125,6 +126,8 @@ export default function App() {
         if (open) send(connState.defaultConnId, { t: 'wikiGet', slug: open.slug });
       }
       else if (f.t === 'proposalsChanged') send(connState.defaultConnId, { t: 'proposalsList' });
+      else if (f.t === 'adminUsers') setAdminUsers(f.list);
+      else if (f.t === 'adminSettings') setAdminSettings(f.settings);
     }
   }
 
@@ -170,6 +173,16 @@ export default function App() {
     if (!statusById[id]) return;
     send(id, { t: 'wikiList' });
     send(id, { t: 'proposalsList' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, connState.defaultConnId, statusById[connState.defaultConnId]]);
+
+  // admin 모드 진입 시 기본 연결로 멤버 목록·설정을 요청(wiki useEffect와 동형).
+  useEffect(() => {
+    if (mode !== 'admin') return;
+    const id = connState.defaultConnId;
+    if (!statusById[id]) return;
+    send(id, { t: 'adminUsers' });
+    send(id, { t: 'adminGetSettings' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, connState.defaultConnId, statusById[connState.defaultConnId]]);
 
@@ -249,7 +262,7 @@ export default function App() {
 
   // 사이드바용 논리 채널 목록(기존 Channels 컴포넌트는 id 기반 — 여기선 id=name으로 합성).
   // wiki 모드엔 채널 개념이 없다(실제 c.mode==='wiki'인 채널은 존재하지 않음) — 그때는 빈 목록.
-  const sidebarChannels: Channel[] = mode === 'wiki' ? [] : logicalChannels(viewChannelsByConn, mode).map((name) => {
+  const sidebarChannels: Channel[] = mode === 'wiki' || mode === 'admin' ? [] : logicalChannels(viewChannelsByConn, mode).map((name) => {
     const fromDefault = viewChannelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     const any = fromDefault ?? Object.values(viewChannelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     return { id: name, name, respondMode: any?.respondMode ?? 'all', mode };
@@ -286,10 +299,10 @@ export default function App() {
   // 대상 연결에 그 이름 채널이 아직 없으면(지연 생성) createChannel 먼저 보내고 1건 버퍼링,
   // 그 연결의 channels 프레임이 그 이름으로 돌아오면 onFrame이 flush한다.
   const sendText = (text: string, threadId?: string) => {
-    // wiki엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
+    // wiki·admin엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
     // (mode 가드는 타입 좁히기 겸 방어용).
-    if (!text.trim() || !currentName || mode === 'wiki') return;
-    if (mode === 'team' && !displayName.trim()) return; // 닉네임 없으면 team 전송 차단
+    if (!text.trim() || !currentName || mode === 'wiki' || mode === 'admin') return;
+    if (mode === 'team' && !meByConn[connState.defaultConnId]) return; // 미인증 team 전송 차단
     const targetConnId = threadId
       ? (anchorConn.get(threadId) ?? connState.defaultConnId)
       : mode === 'team'
@@ -302,12 +315,12 @@ export default function App() {
       setErrText((prev) => ({ ...prev, [targetConnId]: T.notConnected(targetName) }));
       return;
     }
-    const authorId = mode === 'team' && displayName.trim() ? displayName.trim() : undefined;
+    // authorId는 더 이상 클라가 첨부하지 않는다 — 서버가 인증된 소켓 기준으로 스탬프한다.
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
-      send(targetConnId, { t: 'send', channelId, text, threadId, ...(authorId ? { authorId } : {}) });
+      send(targetConnId, { t: 'send', channelId, text, threadId });
     } else if (!threadId) {
-      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text, authorId });
+      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
     }
     expectReply(currentName, text, targetConnId);
@@ -408,12 +421,24 @@ export default function App() {
         <Channels
           channels={sidebarChannels} current={currentName} mode={mode}
           onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
-          onCreate={(name, m) => { if (m !== 'wiki') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
+          onCreate={(name, m) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
+          showAdmin={meByConn[connState.defaultConnId]?.role === 'owner'}
         />
         <div id="main">
-          {mode === 'wiki' ? (
+          {mode === 'admin' ? (
+            <AdminArea
+              users={adminUsers}
+              settings={adminSettings}
+              onApprove={(id) => send(connState.defaultConnId, { t: 'adminApprove', id })}
+              onSuspend={(id) => send(connState.defaultConnId, { t: 'adminSuspend', id })}
+              onRestore={(id) => send(connState.defaultConnId, { t: 'adminRestore', id })}
+              onResetPassword={(id, password) => send(connState.defaultConnId, { t: 'adminResetPassword', id, password })}
+              onForceLogout={(id) => send(connState.defaultConnId, { t: 'adminForceLogout', id })}
+              onSaveSettings={(s) => send(connState.defaultConnId, { t: 'adminSetSettings', settings: s })}
+            />
+          ) : mode === 'wiki' ? (
             <WikiArea
               pages={wikiPages}
               openPage={wikiOpen}
@@ -433,12 +458,6 @@ export default function App() {
                 <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
               ) : (
                 <>
-              {mode === 'team' && (
-                <div id="teamName">
-                  <input type="text" placeholder={T.displayNamePh} value={displayName}
-                    onChange={(e) => { setDisplayName(e.target.value); saveDisplayName(e.target.value); }} />
-                </div>
-              )}
               <div id="msgs" ref={msgsRef}>
                 {(() => {
                   const byAnchor = new Map<string, Msg[]>();
@@ -452,7 +471,7 @@ export default function App() {
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
-                      myName={mode === 'team' ? displayName.trim() : undefined}
+                      myName={mode === 'team' ? meByConn[connState.defaultConnId]?.id : undefined}
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}

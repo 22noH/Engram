@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { Message } from './Message';
 
 it('engram 번호목록은 클릭 대상이 아니라 그냥 텍스트다(선택은 actions 버튼)', () => {
@@ -33,5 +33,11 @@ describe('Message 작성자 렌더', () => {
   it('myName 미지정(Ask/Code): 비-engram은 me(기존 동작)', () => {
     const r = render(<Message m={msg('owner', '4')} />);
     expect(r.container.querySelector('.msg')?.className).toContain('me');
+  });
+
+  it('authorName 우선 렌더, myId 비교로 나/남 구분', () => {
+    const m = { id: '1', authorId: 'uid-2', authorName: 'Lee', text: 'hi', ts: new Date().toISOString() };
+    render(<Message m={m} myName="uid-1" />);
+    expect(screen.getByText(/Lee/)).toBeTruthy(); // 남 → 이름 표시
   });
 });
