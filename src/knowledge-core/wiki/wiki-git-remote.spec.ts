@@ -183,5 +183,20 @@ describe('WikiGit 원격', () => {
       expect(body).toContain('AAA');
       expect(body).toContain('BBB');
     });
+
+    it('공통 base 없는 add/add(양쪽이 같은 slug 새로 생성) → union 병합(둘 다 보존)', async () => {
+      // A와 B가 원격을 공유하되, 같은 slug 'x'를 서로 독립적으로 새로 만든다(공통 조상 없음).
+      await gitA.ensureRemote(remote);
+      await gitB.ensureRemote(remote);
+      await writeFullPage(dirA, 'x', { body: 'ADDED-BY-A', updated: '2026-01-02T00:00:00.000Z' });
+      await gitA.commitAll('a-add'); await gitA.push('main');
+      await writeFullPage(dirB, 'x', { body: 'ADDED-BY-B', updated: '2026-01-03T00:00:00.000Z' });
+      await gitB.commitAll('b-add');
+      const pr = await gitB.pull('main'); // B가 pull → add/add 충돌 → 자동 병합
+      expect(pr.conflict).toBe(false);
+      const body = readBody(dirB, 'x');
+      expect(body).toContain('ADDED-BY-A');
+      expect(body).toContain('ADDED-BY-B'); // 손실 0
+    });
   });
 });

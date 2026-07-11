@@ -219,6 +219,8 @@ export class WikiGit {
       // git merge-file -p -q <ours> <base> <theirs> → stdout. 충돌 시 마커 포함(또는 non-zero exit로 throw).
       let merged: string | null = null;
       try { merged = await this.git.raw(['merge-file', '-p', '-q', o, b, t]); } catch { merged = null; }
+      // '<<<<<<<'를 포함하면 충돌로 간주(두뇌/union). 본문이 리터럴 '<<<<<<<'를 담은 극히 드문
+      // 경우 오분류될 수 있으나 union이 양쪽을 보존하므로 손실은 없다.
       if (merged != null && !merged.includes('<<<<<<<')) return merged; // 깨끗
       // 진짜 겹침 → 두뇌 병합 시도 → 실패/미주입 시 union
       if (this.bodyMerger) {
