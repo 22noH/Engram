@@ -411,7 +411,7 @@ export default function App() {
         <ManageEngrams
           connections={connState.connections}
           defaultConnId={connState.defaultConnId}
-          onAdd={(name, endpoint, token) => setConnState((s) => addConnection(s, name, endpoint, token))}
+          onAdd={(name, endpoint) => setConnState((s) => addConnection(s, name, endpoint))}
           onRemove={(id) => setConnState((s) => removeConnection(s, id))}
           onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
           onClose={() => setShowManage(false)}

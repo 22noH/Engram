@@ -90,8 +90,8 @@ Phase 16("다중 사용자/계정 — 동시 사용·격리·권한")을 세 조
   전용 오류("승인 대기 중"). 실패 응답은 균일 지연(무차별 대입 완화, 단순 고정 500ms).
 - `POST /auth/register` — 가입 신청 → `pending` 계정 생성. `loginId` 중복은 오류.
 - `POST /auth/logout` — 세션 무효화.
-- `GET /auth/oidc/start` — 시스템 브라우저로 열 IdP 인가 URL로 리다이렉트. `state`에
-  일회용 폴링 코드 연계.
+- `POST /auth/oidc/begin` — 구현은 리다이렉트 대신 JSON `{ authUrl, pollCode }`을 반환(데스크톱
+  앱이 시스템 브라우저를 직접 열고 폴링). `state`에 일회용 폴링 코드 연계.
 - `GET /auth/oidc/callback` — IdP가 돌아오는 곳. 코드 교환 → `issuer`+`sub`로 계정 조회,
   없으면 `pending` 계정 자동 생성(표시이름·이메일은 IdP 클레임에서) → 세션 발급 →
   브라우저에는 "앱으로 돌아가세요" 안내 페이지(이 응답 하나는 정적 텍스트 — UI 서빙이 아님).

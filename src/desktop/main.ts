@@ -164,8 +164,7 @@ function openChat(): void {
     nodeHttp.get(healthUrl, (res) => {
       res.resume();
       const lang = resolveLanguage(cfg.language, app.getLocale());
-      const auth = cfg.token ? `&token=${encodeURIComponent(cfg.token)}` : '';
-      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${auth}` }); // 헬스 200 → 클라 로드(포트·언어·토큰 주입)
+      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}` }); // 헬스 200 → 클라 로드(포트·언어 주입)
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.

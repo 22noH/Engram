@@ -8,7 +8,7 @@ import { T } from '../i18n';
 export function ManageEngrams(props: {
   connections: Connection[];
   defaultConnId: string;
-  onAdd: (name: string, endpoint: string, token?: string) => void;
+  onAdd: (name: string, endpoint: string) => void;
   onRemove: (id: string) => void;
   onSetDefault: (id: string) => void;
   onClose: () => void;
@@ -16,12 +16,11 @@ export function ManageEngrams(props: {
   const { connections, defaultConnId, onAdd, onRemove, onSetDefault, onClose } = props;
   const [name, setName] = useState('');
   const [endpoint, setEndpoint] = useState('');
-  const [token, setToken] = useState('');
 
   const submit = () => {
     if (!name.trim() || !endpoint.trim()) return;
-    onAdd(name.trim(), endpoint.trim(), token.trim() || undefined);
-    setName(''); setEndpoint(''); setToken('');
+    onAdd(name.trim(), endpoint.trim());
+    setName(''); setEndpoint('');
   };
 
   return (
@@ -47,7 +46,6 @@ export function ManageEngrams(props: {
         <div id="addEngram">
           <input type="text" placeholder={T.engramNamePh} value={name} onChange={(e) => setName(e.target.value)} />
           <input type="text" placeholder={T.engramEndpointPh} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
-          <input type="password" placeholder={T.tokenPh} value={token} onChange={(e) => setToken(e.target.value)} />
           <button type="button" onClick={submit}>{T.addEngram}</button>
         </div>
         <button type="button" id="manageClose" onClick={onClose}>{T.close}</button>

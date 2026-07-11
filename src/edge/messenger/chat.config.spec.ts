@@ -68,24 +68,3 @@ it('loadChatConfig reads optional language field', () => {
   expect(loadChatConfig(dir, {} as any).language).toBe('ko');
   expect(loadChatConfig(fs.mkdtempSync(path.join(os.tmpdir(), 'cfg2-')), {} as any).language).toBeUndefined();
 });
-
-describe('chat.config 토큰', () => {
-  let dir: string;
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-cfgtok-')); });
-  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
-
-  it('chat.json token 값을 수용한다', () => {
-    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ token: 'sekret' }));
-    expect(loadChatConfig(dir, {}).token).toBe('sekret');
-  });
-  it('env ENGRAM_CHAT_TOKEN이 파일보다 우선한다', () => {
-    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ token: 'file' }));
-    expect(loadChatConfig(dir, { ENGRAM_CHAT_TOKEN: 'env' }).token).toBe('env');
-  });
-  it('빈/공백 토큰은 undefined(무인증)', () => {
-    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ token: '   ' }));
-    expect(loadChatConfig(dir, {}).token).toBeUndefined();
-    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({}));
-    expect(loadChatConfig(dir, {}).token).toBeUndefined();
-  });
-});

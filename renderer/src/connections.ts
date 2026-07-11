@@ -1,6 +1,6 @@
-import { WS_URL, LOCAL_TOKEN } from './config';
+import { WS_URL } from './config';
 
-export interface Connection { id: string; name: string; endpoint: string; token?: string }
+export interface Connection { id: string; name: string; endpoint: string }
 interface State { connections: Connection[]; defaultConnId: string }
 
 const KEY = 'engram.connections';
@@ -11,7 +11,7 @@ function seed(): State {
   return { connections: [{ id: 'local', name: 'Local', endpoint: defaultEndpoint() }], defaultConnId: 'local' };
 }
 
-export function loadConnections(localToken: string | undefined = LOCAL_TOKEN): State {
+export function loadConnections(): State {
   let s: State;
   try {
     const raw = localStorage.getItem(KEY);
@@ -25,12 +25,6 @@ export function loadConnections(localToken: string | undefined = LOCAL_TOKEN): S
       }
     }
   } catch { s = seed(); }
-  // 로컬 연결 토큰은 main(chat.json)이 진실원 — 부팅 주입값으로 맞춘다.
-  // ponytail: localToken 있을 때만 패치. 서버 토큰 해제 후 stale 토큰이 남아도 무인증 서버는 무시하므로 무해.
-  if (localToken) {
-    const local = s.connections.find((c) => c.id === 'local');
-    if (local) local.token = localToken;
-  }
   return s;
 }
 
@@ -43,8 +37,8 @@ function newId(state: State, name: string): string {
   return g ?? `${name}-${state.connections.length}-${state.connections.length}`;
 }
 
-export function addConnection(state: State, name: string, endpoint: string, token?: string): State {
-  const conn: Connection = { id: newId(state, name), name, endpoint, ...(token ? { token } : {}) };
+export function addConnection(state: State, name: string, endpoint: string): State {
+  const conn: Connection = { id: newId(state, name), name, endpoint };
   return { connections: [...state.connections, conn], defaultConnId: state.defaultConnId };
 }
 
