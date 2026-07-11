@@ -18,6 +18,29 @@ function readPage(dataDir: string, slug: string): string {
   return fs.readFileSync(path.join(dataDir, 'wiki', 'pages', 'default', `${slug}.md`), 'utf8');
 }
 
+// frontmatter + 본문을 gray-matter 포맷으로 직접 쓴다(WikiEngine 없이).
+async function writeFullPage(dataDir: string, slug: string, opts: { title?: string; updated?: string; sources?: string[]; body: string }): Promise<void> {
+  const pagesDir = path.join(dataDir, 'wiki', 'pages', 'default');
+  await fs.promises.mkdir(pagesDir, { recursive: true });
+  const fmYaml = [
+    '---',
+    `title: ${opts.title ?? 'T'}`,
+    'category: C',
+    'status: published',
+    `sources:${opts.sources && opts.sources.length ? '\n' + opts.sources.map((s) => `  - ${s}`).join('\n') : ' []'}`,
+    'created: 2026-01-01T00:00:00.000Z',
+    `updated: ${opts.updated ?? '2026-01-01T00:00:00.000Z'}`,
+    '---',
+    opts.body,
+    '',
+  ].join('\n');
+  await fs.promises.writeFile(path.join(pagesDir, `${slug}.md`), fmYaml);
+}
+function readBody(dataDir: string, slug: string): string {
+  const raw = fs.readFileSync(path.join(dataDir, 'wiki', 'pages', 'default', `${slug}.md`), 'utf8');
+  return raw.split('---').slice(2).join('---').trim(); // frontmatter 뒤 본문
+}
+
 describe('WikiGit 원격', () => {
   let remote: string; let dirA: string; let dirB: string;
   let gitA: WikiGit; let gitB: WikiGit;
@@ -61,16 +84,21 @@ describe('WikiGit 원격', () => {
     expect(readPage(dirA, 'beta')).toBe('B1');
   });
 
-  it('같은 페이지 다른 편집 동시 → pull 충돌 시 abort+로컬 유지', async () => {
-    await writePage(dirA, 'alpha', 'base'); await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+  it('같은 페이지 다른 편집 동시 → pull 충돌 시 자동 병합(15c, conflict:false·양쪽 보존)', async () => {
+    await writeFullPage(dirA, 'alpha', { body: 'base', updated: '2026-01-01T00:00:00.000Z' });
+    await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
     await gitB.ensureRemote(remote); await gitB.pull('main'); // B도 base 확보
     // A가 alpha를 A로 바꿔 push
-    await writePage(dirA, 'alpha', 'A-version'); await gitA.commitAll('a-edit'); await gitA.push('main');
-    // B가 같은 alpha를 B로 바꿔 커밋 후 pull → 충돌 → abort, 로컬(B) 유지
-    await writePage(dirB, 'alpha', 'B-version'); await gitB.commitAll('b-edit');
+    await writeFullPage(dirA, 'alpha', { body: 'A-version', updated: '2026-01-02T00:00:00.000Z' });
+    await gitA.commitAll('a-edit'); await gitA.push('main');
+    // B가 같은 alpha를 B로 바꿔 커밋 후 pull → 충돌 → 15c 자동 병합(abort 아님), 양쪽 보존
+    await writeFullPage(dirB, 'alpha', { body: 'B-version', updated: '2026-01-03T00:00:00.000Z' });
+    await gitB.commitAll('b-edit');
     const pr = await gitB.pull('main');
-    expect(pr.conflict).toBe(true);
-    expect(readPage(dirB, 'alpha')).toBe('B-version'); // 로컬 유지(손상 없음)
+    expect(pr).toEqual({ ok: true, conflict: false });
+    const body = readBody(dirB, 'alpha');
+    expect(body).toContain('A-version');
+    expect(body).toContain('B-version'); // 양쪽 다 보존(손실 0)
   });
 
   it('미커밋 로컬 변경 중 pull(원격이 같은 파일 갱신) → 성공 주장 안 함·로컬 손상 없음', async () => {
@@ -87,5 +115,73 @@ describe('WikiGit 원격', () => {
     const body = readPage(dirB, 'alpha');
     expect(body).toBe('B-uncommitted-dirty'); // 로컬 유지
     expect(body).not.toContain('<<<<<<<');     // 충돌 마커 없음(손상 없음)
+  });
+
+  describe('WikiGit 동시 편집 자동 병합', () => {
+    // (상위 describe의 beforeEach가 remote/dirA/dirB/gitA/gitB를 준비한다)
+    it('본문 다른 줄 편집 + frontmatter 다름 → 깨끗 병합(양쪽 다 있음, conflict:false)', async () => {
+      // base: 5줄
+      await writeFullPage(dirA, 'p', { body: 'L1\nL2\nL3\nL4\nL5', updated: '2026-01-01T00:00:00.000Z', sources: ['s0'] });
+      await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+      await gitB.ensureRemote(remote); await gitB.pull('main');
+      // A는 L1, B는 L5 편집 + 각자 다른 source/updated
+      await writeFullPage(dirA, 'p', { body: 'A1\nL2\nL3\nL4\nL5', updated: '2026-01-02T00:00:00.000Z', sources: ['s0', 'sA'] });
+      await gitA.commitAll('a'); await gitA.push('main');
+      await writeFullPage(dirB, 'p', { body: 'L1\nL2\nL3\nL4\nB5', updated: '2026-01-03T00:00:00.000Z', sources: ['s0', 'sB'] });
+      await gitB.commitAll('b');
+      const pr = await gitB.pull('main');
+      expect(pr).toEqual({ ok: true, conflict: false });
+      const body = readBody(dirB, 'p');
+      expect(body).toContain('A1'); // A의 편집
+      expect(body).toContain('B5'); // B의 편집 — 둘 다 보존
+      // push까지 되어 A도 pull하면 동일
+      await gitB.push('main');
+      await gitA.pull('main');
+      expect(readBody(dirA, 'p')).toContain('A1');
+      expect(readBody(dirA, 'p')).toContain('B5');
+    });
+
+    it('같은 줄 겹침 + bodyMerger 미주입 → union(양쪽 다 보존, conflict:false)', async () => {
+      await writeFullPage(dirA, 'p', { body: 'base-line', updated: '2026-01-01T00:00:00.000Z' });
+      await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+      await gitB.ensureRemote(remote); await gitB.pull('main');
+      await writeFullPage(dirA, 'p', { body: 'AAA-line', updated: '2026-01-02T00:00:00.000Z' });
+      await gitA.commitAll('a'); await gitA.push('main');
+      await writeFullPage(dirB, 'p', { body: 'BBB-line', updated: '2026-01-03T00:00:00.000Z' });
+      await gitB.commitAll('b');
+      const pr = await gitB.pull('main');
+      expect(pr.conflict).toBe(false);
+      const body = readBody(dirB, 'p');
+      expect(body).toContain('AAA-line');
+      expect(body).toContain('BBB-line'); // union — 손실 0
+    });
+
+    it('같은 줄 겹침 + bodyMerger 주입 → 그 출력이 병합 결과', async () => {
+      gitB.setBodyMerger(async () => 'MERGED-BY-BRAIN');
+      await writeFullPage(dirA, 'p', { body: 'base', updated: '2026-01-01T00:00:00.000Z' });
+      await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+      await gitB.ensureRemote(remote); await gitB.pull('main');
+      await writeFullPage(dirA, 'p', { body: 'AAA', updated: '2026-01-02T00:00:00.000Z' });
+      await gitA.commitAll('a'); await gitA.push('main');
+      await writeFullPage(dirB, 'p', { body: 'BBB', updated: '2026-01-03T00:00:00.000Z' });
+      await gitB.commitAll('b');
+      await gitB.pull('main');
+      expect(readBody(dirB, 'p')).toContain('MERGED-BY-BRAIN');
+    });
+
+    it('bodyMerger가 null 반환(두뇌 실패 모사) → union 폴백', async () => {
+      gitB.setBodyMerger(async () => null);
+      await writeFullPage(dirA, 'p', { body: 'base', updated: '2026-01-01T00:00:00.000Z' });
+      await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+      await gitB.ensureRemote(remote); await gitB.pull('main');
+      await writeFullPage(dirA, 'p', { body: 'AAA', updated: '2026-01-02T00:00:00.000Z' });
+      await gitA.commitAll('a'); await gitA.push('main');
+      await writeFullPage(dirB, 'p', { body: 'BBB', updated: '2026-01-03T00:00:00.000Z' });
+      await gitB.commitAll('b');
+      await gitB.pull('main');
+      const body = readBody(dirB, 'p');
+      expect(body).toContain('AAA');
+      expect(body).toContain('BBB');
+    });
   });
 });

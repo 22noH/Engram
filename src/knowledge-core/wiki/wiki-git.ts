@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import simpleGit, { SimpleGit } from 'simple-git';
 import { PathResolver } from '../../pal/path-resolver';
+import { parsePage, serializePage } from './page-serializer';
+import { reconcileFrontmatter, unionBodies } from './page-merge';
 
 // 위키 데이터 디렉토리의 git 이력 관리(설계 §5.1).
 // 모든 변경을 커밋으로 남겨 감사·되돌리기를 가능케 한다.
@@ -12,6 +16,12 @@ export class WikiGit {
 
   constructor(private readonly paths: PathResolver) {
     this.git = simpleGit();
+  }
+
+  private bodyMerger?: (oursBody: string, theirsBody: string) => Promise<string | null>;
+  // 진짜 본문 겹침일 때 쓸 두뇌 병합기 주입(옵셔널 — 미주입 시 union 폴백).
+  setBodyMerger(fn: (oursBody: string, theirsBody: string) => Promise<string | null>): void {
+    this.bodyMerger = fn;
   }
 
   // 저장소 전역 직렬화: commitAll/pull/push/ensureRemote가 서로·동시 쓰기와 인터리브하지 않게(손상 차단).
@@ -112,8 +122,7 @@ export class WikiGit {
       }
       const status = await this.git.status();
       if (status.conflicted.length > 0) {
-        await this.git.raw(['merge', '--abort']).catch(() => {});
-        return { ok: true, conflict: true }; // 내용 충돌 → 로컬 유지
+        return await this.resolveConflicts(); // 15c: abort 대신 자동 병합
       }
       if (mergeThrew) {
         // 병합이 실제로는 완료되지 않았다(예: 같은 파일의 미커밋 변경으로 git이 거부).
@@ -154,6 +163,71 @@ export class WikiGit {
       }
     } catch {
       return { ok: false, conflict: false };
+    }
+  }
+
+  // 충돌한 위키 페이지들을 자동 병합(15c). frontmatter 규칙 + 본문 3-way(겹침→두뇌/union).
+  // 실패 시 abort로 되돌려(15b) 안전 유지 — sync 루프 불사.
+  // 주의: commitAll(serialize 래핑)을 부르지 않고 git.add/commit을 직접 호출(이미 pullInner=뮤텍스 내부).
+  private async resolveConflicts(): Promise<{ ok: boolean; conflict: boolean }> {
+    try {
+      const status = await this.git.status();
+      for (const rel of status.conflicted) {
+        if (!rel.endsWith('.md')) continue; // 위키 페이지만
+        await this.resolveOnePage(rel);
+      }
+      const after = await this.git.status();
+      if (after.conflicted.length > 0) { // .md 아닌 충돌이 남음 → 안전 abort
+        await this.git.raw(['merge', '--abort']).catch(() => {});
+        return { ok: true, conflict: true };
+      }
+      await this.git.commit('merge: reconcile concurrent wiki edits');
+      return { ok: true, conflict: false };
+    } catch {
+      await this.git.raw(['merge', '--abort']).catch(() => {}); // 해결 실패 → 15b 폴백
+      return { ok: true, conflict: true };
+    }
+  }
+
+  private async resolveOnePage(rel: string): Promise<void> {
+    const slug = path.basename(rel, '.md');
+    const oursRaw = await this.showStage(2, rel);
+    const theirsRaw = await this.showStage(3, rel);
+    if (oursRaw == null || theirsRaw == null) throw new Error(`stage 없음: ${rel}`); // → 상위 catch가 abort
+    const ours = parsePage(slug, oursRaw);
+    const theirs = parsePage(slug, theirsRaw);
+    const frontmatter = reconcileFrontmatter(ours.frontmatter, theirs.frontmatter);
+    const baseRaw = await this.showStage(1, rel); // 없을 수 있음(add/add)
+    const baseBody = baseRaw != null ? parsePage(slug, baseRaw).body : '';
+    const body = await this.mergeBody(baseBody, ours.body, theirs.body);
+    const merged = serializePage({ slug, frontmatter, body });
+    await fs.writeFile(path.join(this.paths.getWikiDir(), rel), merged, 'utf8');
+    await this.git.add(rel);
+  }
+
+  // 인덱스 스테이지(1=base,2=ours,3=theirs)의 파일 내용. 없으면 null.
+  private async showStage(stage: 1 | 2 | 3, rel: string): Promise<string | null> {
+    return this.git.raw(['show', `:${stage}:${rel}`]).then((s) => s).catch(() => null);
+  }
+
+  // 본문 3-way. 깨끗하면 병합본문, 진짜 겹침이면 bodyMerger→union.
+  private async mergeBody(baseBody: string, oursBody: string, theirsBody: string): Promise<string> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-bodymerge-'));
+    try {
+      const o = path.join(tmp, 'o'), b = path.join(tmp, 'b'), t = path.join(tmp, 't');
+      await fs.writeFile(o, oursBody); await fs.writeFile(b, baseBody); await fs.writeFile(t, theirsBody);
+      // git merge-file -p -q <ours> <base> <theirs> → stdout. 충돌 시 마커 포함(또는 non-zero exit로 throw).
+      let merged: string | null = null;
+      try { merged = await this.git.raw(['merge-file', '-p', '-q', o, b, t]); } catch { merged = null; }
+      if (merged != null && !merged.includes('<<<<<<<')) return merged; // 깨끗
+      // 진짜 겹침 → 두뇌 병합 시도 → 실패/미주입 시 union
+      if (this.bodyMerger) {
+        const m = await this.bodyMerger(oursBody, theirsBody).catch(() => null);
+        if (m && m.trim()) return m;
+      }
+      return unionBodies(oursBody, theirsBody);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
     }
   }
 }
