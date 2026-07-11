@@ -40,7 +40,7 @@ export class AccountStore {
   get(id: string): Account | null { return this.load().find((a) => a.id === id) ?? null; }
   getByLoginId(loginId: string): Account | null {
     const k = loginId.trim().toLowerCase();
-    return this.load().find((a) => a.loginId.toLowerCase() === k) ?? null;
+    return this.load().find((a) => a.loginId?.toLowerCase() === k) ?? null;
   }
   getByOidc(issuer: string, sub: string): Account | null {
     return this.load().find((a) => a.oidc?.issuer === issuer && a.oidc?.sub === sub) ?? null;
@@ -72,6 +72,7 @@ export class AccountStore {
     // loginId는 이메일(없으면 issuer의 sub) — 로그인용이 아니라 식별 표시용. 충돌 시 sub를 붙여 유일화.
     let loginId = (o.email ?? `${o.sub}`).trim() || o.sub;
     if (this.getByLoginId(loginId)) loginId = `${loginId}#${o.sub}`;
+    if (loginId.trim().toLowerCase() === RESERVED) loginId = `${loginId}#${o.sub}`;
     const name = o.displayName.trim().toLowerCase() === RESERVED ? loginId : o.displayName;
     const a: Account = {
       id: randomUUID(), loginId, displayName: name.trim() || loginId,

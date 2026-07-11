@@ -58,4 +58,11 @@ describe('AccountStore', () => {
     fs.writeFileSync(path.join(dir, 'accounts.json'), '{broken');
     expect(new AccountStore(dir).count()).toBe(0);
   });
+
+  it('createOidc: sub이 예약어 engram이면 disambiguate', () => {
+    const s = new AccountStore(dir);
+    const a = s.createOidc({ issuer: 'https://idp', sub: 'engram', displayName: 'X' });
+    expect(a.loginId.toLowerCase()).not.toBe('engram');
+    expect(a.loginId).toContain('#engram');
+  });
 });
