@@ -18,12 +18,17 @@ export interface Channel {
 
 export interface Message {
   id: string;
-  authorId: string; // 'engram' | 'owner' | ...
+  authorId: string; // 'engram' | 계정 id | 'owner'(무인증 모드)
+  authorName?: string; // 작성 시점 표시이름(서버 스탬프) — 렌더용
   text: string;
   ts: string;
   threadId?: string;
   actions?: Action[];
 }
+
+export interface UserDto { id: string; displayName: string; role: 'owner' | 'member' }
+export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean }
+export interface AdminSettings { serverName?: string; oidc?: { issuer: string; clientId: string; clientSecret: string } }
 
 export interface WikiPageMeta { slug: string; title: string; category: string; status: 'draft' | 'published'; updated: string }
 export interface WikiPageDto extends WikiPageMeta { body: string }
@@ -62,6 +67,7 @@ export type ServerFrame =
   | { t: 'channels'; list: Channel[] }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
+  | { t: 'authOk'; user: UserDto }
   | { t: 'authErr' }
   | { t: 'error'; text: string }
   | { t: 'wikiPages'; list: WikiPageMeta[] }

@@ -10,6 +10,7 @@ import type { Action } from '../../../shared/protocol';
 export interface ChatMessage {
   id: string;
   authorId: string;
+  authorName?: string;
   text: string;
   threadId?: string;
   actions?: Action[];
@@ -113,13 +114,14 @@ export class ChatStore {
 
   appendMessage(
     channelId: string,
-    input: { authorId: string; text: string; threadId?: string; actions?: Action[] },
+    input: { authorId: string; authorName?: string; text: string; threadId?: string; actions?: Action[] },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
     const msg: ChatMessage = {
       id: randomUUID(),
       authorId: input.authorId,
       text: input.text,
+      ...(input.authorName ? { authorName: input.authorName } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.actions ? { actions: input.actions } : {}),
       ts: new Date().toISOString(),

@@ -42,6 +42,14 @@ describe('ChatStore', () => {
     expect(h[0]).toMatchObject({ authorId: 'owner', text: '안녕' });
   });
 
+  it('authorName이 넘어오면 저장되고, 없으면 필드 자체가 없다', () => {
+    store.listChannels();
+    const m = store.appendMessage('general', { authorId: 'u1', authorName: 'Kim', text: 'hi' })!;
+    expect(m.authorName).toBe('Kim');
+    const m2 = store.appendMessage('general', { authorId: 'owner', text: 'hi2' })!;
+    expect('authorName' in m2).toBe(false);
+  });
+
   it('threadId가 보존된다', () => {
     store.listChannels();
     const anchor = store.appendMessage('general', { authorId: 'owner', text: 'q' })!;

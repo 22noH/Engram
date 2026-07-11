@@ -7,6 +7,17 @@ import { ChatStore } from './chat-store';
 import { MentionEvent } from './messenger.port';
 import type { WikiPage } from '../../knowledge-core/wiki/page.types';
 import type { Proposal } from '../../knowledge-core/proposal-store';
+import { AccountStore } from '../auth/account-store';
+import { SessionStore } from '../auth/session-store';
+import { AuthHttp } from '../auth/auth-http';
+import type { AuthDeps } from './self.adapter';
+
+function makeAuthDeps(dir: string): AuthDeps {
+  const accounts = new AccountStore(dir);
+  const sessions = new SessionStore(dir);
+  const http = new AuthHttp({ accounts, sessions, stateDir: dir, settings: { load: () => ({}) }, delayMs: 0 });
+  return { accounts, sessions, http, settings: { load: () => ({}), save: () => {} } };
+}
 
 const noLog = { warn: () => {} };
 
@@ -97,22 +108,12 @@ describe('SelfMessenger 코어', () => {
     expect(frame.t).toBe('error');
   });
 
-  it('클라가 authorId를 보내면 그 이름으로 저장한다(자가선언)', async () => {
-    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: 'alice' }));
-    const f = await nextFrame(client);
-    expect(f.message.authorId).toBe('alice');
-  });
-
-  it('클라가 authorId=engram으로 사칭하면 owner로 강등한다', async () => {
-    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: 'Engram' }));
-    const f = await nextFrame(client);
-    expect(f.message.authorId).toBe('owner');
-  });
-
-  it('공백 낀 engram 사칭도 강등한다', async () => {
-    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: '  Engram  ' }));
-    const f = await nextFrame(client);
-    expect(f.message.authorId).toBe('owner');
+  it('무인증 모드는 클라 authorId 주장을 무시하고 owner로 고정한다(Phase16a: Phase14 자가선언 폐기)', async () => {
+    for (const claimed of ['alice', 'Engram', '  Engram  ']) {
+      client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: claimed }));
+      const f = await nextFrame(client);
+      expect(f.message.authorId).toBe('owner');
+    }
   });
 
   it('손상 프레임·빈 text는 무시(서버 불사)', async () => {
@@ -264,73 +265,118 @@ describe('SelfMessenger 프로토콜 확장', () => {
   });
 });
 
-describe('SelfMessenger 인증(토큰)', () => {
+describe('세션 인증(Phase 16a)', () => {
   let dir: string;
-  let store: ChatStore;
-  let sm: SelfMessenger;
+  let sm: SelfMessenger | undefined;
+  let clients: WebSocket[];
 
-  beforeEach(async () => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-auth-'));
-    store = new ChatStore(dir);
-    store.listChannels(); // general 생성
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', token: 'sekret' }, store, { logger: noLog });
-    await sm.start();
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-'));
+    clients = [];
   });
   afterEach(async () => {
-    await sm.stop();
+    for (const c of clients) c.terminate();
+    clients = [];
+    if (sm) await sm.stop();
+    sm = undefined;
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('올바른 auth 후 channels 프레임이 처리된다', async () => {
-    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+  async function makeServer(deps: AuthDeps | undefined): Promise<ChatStore> {
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels(); // general 생성
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    return store;
+  }
+  async function connect(): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm!.addressPort()}`);
     await once(c, 'open');
-    c.send(JSON.stringify({ t: 'auth', token: 'sekret' }));
-    c.send(JSON.stringify({ t: 'channels' }));
+    clients.push(c);
+    return c;
+  }
+
+  it('유효 세션 auth → authOk(user) + 정상 처리', async () => {
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    const sess = deps.sessions.issue(acc.id);
+    await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
     const f = await nextFrame(c);
-    expect(f.t).toBe('channels');
-    c.terminate();
+    expect(f).toEqual({ t: 'authOk', user: { id: acc.id, displayName: 'Kim', role: 'member' } });
+    c.send(JSON.stringify({ t: 'channels' }));
+    const f2 = await nextFrame(c);
+    expect(f2.t).toBe('channels');
   });
 
-  it('틀린 토큰 → authErr 후 서버가 소켓을 닫는다', async () => {
-    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
-    await once(c, 'open');
+  it('무효/만료 세션 → authErr + 종료', async () => {
+    const deps = makeAuthDeps(dir);
+    await makeServer(deps);
+    const c = await connect();
     c.send(JSON.stringify({ t: 'auth', token: 'wrong' }));
     const f = await nextFrame(c);
     expect(f.t).toBe('authErr');
     await once(c, 'close');
-    c.terminate();
   });
 
-  it('auth 없이 바로 channels → authErr(미처리)', async () => {
-    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
-    await once(c, 'open');
-    c.send(JSON.stringify({ t: 'channels' }));
+  it('suspended 계정 세션 → authErr', async () => {
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    const sess = deps.sessions.issue(acc.id);
+    deps.accounts.setStatus(acc.id, 'suspended');
+    await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
     const f = await nextFrame(c);
     expect(f.t).toBe('authErr');
-    c.terminate();
   });
 
-  it('인증된 소켓의 브로드캐스트는 미인증 소켓에 격리된다', async () => {
-    const authed = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
-    await once(authed, 'open');
-    authed.send(JSON.stringify({ t: 'auth', token: 'sekret' }));
+  it('send의 작성자는 서버가 세션에서 스탬프(클라 authorId 주장 무시)', async () => {
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    const sess = deps.sessions.issue(acc.id);
+    await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: '사칭engram' }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('msg');
+    expect(f.message.authorId).toBe(acc.id);
+    expect(f.message.authorName).toBe('Kim');
+  });
 
-    const silent = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
-    await once(silent, 'open');
-    const silentMsgs: unknown[] = [];
-    silent.on('message', (d) => silentMsgs.push(JSON.parse(String(d))));
+  it('/auth/ http는 AuthHttp로 위임(status 200), 헬스 프로브는 기존대로', async () => {
+    const deps = makeAuthDeps(dir);
+    await makeServer(deps);
+    const res = await fetch(`http://127.0.0.1:${sm!.addressPort()}/auth/status`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ configured: false, oidc: false });
+    const res2 = await fetch(`http://127.0.0.1:${sm!.addressPort()}/`);
+    expect(res2.status).toBe(200);
+    expect(await res2.json()).toEqual({ ok: true });
+  });
 
-    authed.send(JSON.stringify({ t: 'createChannel', name: 'iso-test' }));
-    const f = await nextFrame(authed);
-    expect(f.t).toBe('channels');
-    expect(f.list.map((c: { name: string }) => c.name)).toContain('iso-test');
+  it('kickUser: 그 사용자 소켓 즉시 종료', async () => {
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    const sess = deps.sessions.issue(acc.id);
+    await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    const closePromise = once(c, 'close');
+    sm!.kickUser(acc.id);
+    await closePromise;
+  });
 
-    // 짧은 대기 후에도 미인증 소켓은 브로드캐스트를 하나도 못 받았어야 한다.
-    await new Promise((r) => setTimeout(r, 50));
-    expect(silentMsgs).toEqual([]);
-
-    authed.terminate();
-    silent.terminate();
+  it('authDeps 미주입 = 무인증 통과(현행) + authorId owner 고정', async () => {
+    await makeServer(undefined);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi', authorId: 'x' }));
+    const f = await nextFrame(c);
+    expect(f.message.authorId).toBe('owner');
   });
 
   // jest 가짜 타이머(useFakeTimers)로 서버측 setTimeout만 전진시켜봤으나, 콜백은 즉시(≈25ms) 실행돼도
@@ -338,14 +384,14 @@ describe('SelfMessenger 인증(토큰)', () => {
   // 알 수 없는 상호작용 — 속도 이득이 없어 fake로 얻는 게 없다). 그래서 실시간 대기로 단순화 —
   // 결정적이며(5초 타임아웃은 서버 상수) 매직도 없다. 테스트 자체 timeout만 여유있게 늘린다.
   it('5초간 침묵하면 auth 타임아웃 → authErr 전송 후 소켓을 닫는다', async () => {
-    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
-    await once(c, 'open');
+    const deps = makeAuthDeps(dir);
+    await makeServer(deps);
+    const c = await connect();
     const framePromise = nextFrame(c);
     const closePromise = once(c, 'close');
     const f = await framePromise;
     expect(f.t).toBe('authErr');
     await closePromise;
-    c.terminate();
   }, 8000);
 });
 
