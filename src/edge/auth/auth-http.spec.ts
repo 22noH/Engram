@@ -6,6 +6,7 @@ import { AccountStore } from './account-store';
 import { SessionStore } from './session-store';
 import { ensureSetupCode, readSetupCode } from './setup-code';
 import { AuthHttp } from './auth-http';
+import { OidcService, PollStore } from './oidc';
 
 describe('AuthHttp(비밀번호 경로)', () => {
   let dir: string; let server: http.Server; let base: string;
@@ -101,4 +102,77 @@ describe('AuthHttp(비밀번호 경로)', () => {
     });
     expect(r.status).toBeGreaterThanOrEqual(400);
   }, 5000);
+});
+
+describe('AuthHttp(OIDC 경로)', () => {
+  let dir: string; let server: http.Server; let base: string;
+  let accounts: AccountStore; let sessions: SessionStore;
+  const fakeOidc = {
+    authUrl: async (_r: string, state: string) => `https://idp/authz?state=${state}`,
+    exchange: async () => ({ issuer: 'https://idp', sub: 'u9', email: 'x@y.z', name: 'Nine' }),
+  } as unknown as OidcService;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-'));
+    accounts = new AccountStore(dir);
+    sessions = new SessionStore(dir);
+    const ah = new AuthHttp({
+      accounts, sessions, stateDir: dir, delayMs: 0,
+      settings: { load: () => ({ oidc: { issuer: 'https://idp', clientId: 'c', clientSecret: 's' } }) },
+      makeOidc: () => fakeOidc, polls: new PollStore(),
+    });
+    server = http.createServer((req, res) => { void ah.handle(req, res); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const a = server.address();
+    base = `http://127.0.0.1:${typeof a === 'object' && a ? a.port : 0}`;
+  });
+  afterEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('begin → authUrl+pollCode, 미설정이면 503', async () => {
+    const r = await fetch(base + '/auth/oidc/begin', { method: 'POST' });
+    expect(r.status).toBe(200);
+    const j = await r.json() as { authUrl: string; pollCode: string };
+    expect(j.authUrl).toContain('https://idp/authz?state=');
+    expect(j.pollCode).toMatch(/^[0-9a-f]{32}$/);
+
+    const ah2 = new AuthHttp({ accounts, sessions, stateDir: dir, delayMs: 0, settings: { load: () => ({}) } });
+    const s2 = http.createServer((req, res) => { void ah2.handle(req, res); });
+    await new Promise<void>((r2) => s2.listen(0, '127.0.0.1', r2));
+    const a2 = s2.address();
+    const r2 = await fetch(`http://127.0.0.1:${typeof a2 === 'object' && a2 ? a2.port : 0}/auth/oidc/begin`, { method: 'POST' });
+    expect(r2.status).toBe(503);
+    await new Promise<void>((r3) => s2.close(() => r3()));
+  });
+
+  it('첫 SSO 로그인: callback → pending 계정 생성, poll은 403 pending', async () => {
+    const { pollCode, authUrl } = await (await fetch(base + '/auth/oidc/begin', { method: 'POST' })).json() as { authUrl: string; pollCode: string };
+    const state = new URL(authUrl).searchParams.get('state')!;
+    const cb = await fetch(base + `/auth/oidc/callback?code=abc&state=${state}`);
+    expect(cb.status).toBe(200);
+    expect(accounts.getByOidc('https://idp', 'u9')?.status).toBe('pending');
+    const p = await fetch(base + `/auth/oidc/poll?code=${pollCode}`);
+    expect(p.status).toBe(403); // pending — 승인 대기
+    expect(await p.json()).toEqual({ error: 'pending' });
+  });
+
+  it('승인된 SSO 계정: callback→poll로 세션 수령, poll 1회용', async () => {
+    const acc = accounts.createOidc({ issuer: 'https://idp', sub: 'u9', displayName: 'Nine' });
+    accounts.setStatus(acc.id, 'active');
+    const { pollCode, authUrl } = await (await fetch(base + '/auth/oidc/begin', { method: 'POST' })).json() as { authUrl: string; pollCode: string };
+    const state = new URL(authUrl).searchParams.get('state')!;
+    await fetch(base + `/auth/oidc/callback?code=abc&state=${state}`);
+    const p = await fetch(base + `/auth/oidc/poll?code=${pollCode}`);
+    expect(p.status).toBe(200);
+    const j = await p.json() as { token: string; user: { id: string } };
+    expect(j.user.id).toBe(acc.id);
+    expect(sessions.resolve(j.token)?.userId).toBe(acc.id);
+    expect((await fetch(base + `/auth/oidc/poll?code=${pollCode}`)).status).toBe(404);
+  });
+
+  it('state 불일치 콜백은 400', async () => {
+    expect((await fetch(base + '/auth/oidc/callback?code=abc&state=forged')).status).toBe(400);
+  });
 });
