@@ -175,4 +175,13 @@ describe('AuthHttp(OIDC 경로)', () => {
   it('state 불일치 콜백은 400', async () => {
     expect((await fetch(base + '/auth/oidc/callback?code=abc&state=forged')).status).toBe(400);
   });
+
+  it('code 누락 콜백은 유효 state를 소비(엄격 1회용) — 재사용 불가', async () => {
+    const { authUrl } = await (await fetch(base + '/auth/oidc/begin', { method: 'POST' })).json() as { authUrl: string; pollCode: string };
+    const state = new URL(authUrl).searchParams.get('state')!;
+    // code 없이 콜백 → 400(bad state). 픽스 전에는 state가 소비되지 않아 아래 재사용이 성공했다.
+    expect((await fetch(base + `/auth/oidc/callback?state=${state}`)).status).toBe(400);
+    // 같은 state를 code와 함께 재사용 → 이미 소비됐으므로 400.
+    expect((await fetch(base + `/auth/oidc/callback?code=abc&state=${state}`)).status).toBe(400);
+  });
 });

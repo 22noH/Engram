@@ -46,13 +46,27 @@ function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
+const STATE_TTL_MS = 10 * 60 * 1000; // OIDC state 생존시간(PollStore와 동일).
+const STATE_CAP = 10000;             // states 맵 하드 캡 — begin 남용/미완료 콜백의 무한 증가 차단.
+
 export class AuthHttp {
   private readonly polls: PollStore;
-  // state → pollCode 매핑(CSRF 검증 — 우리가 만든 state만 콜백 수용). 메모리 상주.
-  private readonly states = new Map<string, string>();
+  // state → pollCode 매핑(CSRF 검증 — 우리가 만든 state만 콜백 수용). 메모리 상주 — TTL+캡으로 유계.
+  private readonly states = new Map<string, { pollCode: string; exp: number }>();
 
   constructor(private readonly deps: AuthHttpDeps) {
     this.polls = deps.polls ?? new PollStore();
+  }
+
+  // 만료 정리 + 하드 캡(오래된 것부터 축출). 타이머 없이 begin 시점에 동기 실행(누출 이력 회피).
+  private pruneStates(): void {
+    const now = Date.now();
+    for (const [k, v] of this.states) if (v.exp <= now) this.states.delete(k);
+    while (this.states.size >= STATE_CAP) {
+      const oldest = this.states.keys().next().value;
+      if (oldest === undefined) break;
+      this.states.delete(oldest);
+    }
   }
 
   private json(res: http.ServerResponse, status: number, body?: unknown): void {
@@ -133,7 +147,8 @@ export class AuthHttp {
       const svc = (this.deps.makeOidc ?? ((c: OidcSettings) => new OidcService(c)))(o);
       const pollCode = this.polls.create();
       const state = randomBytes(16).toString('hex');
-      this.states.set(state, pollCode);
+      this.pruneStates();
+      this.states.set(state, { pollCode, exp: Date.now() + STATE_TTL_MS });
       const proto = String(req.headers['x-forwarded-proto'] ?? 'http');
       const redirectUri = `${proto}://${String(req.headers.host)}/auth/oidc/callback`;
       try {
@@ -145,9 +160,10 @@ export class AuthHttp {
     if (req.method === 'GET' && url === '/auth/oidc/callback') {
       const q = new URL(req.url ?? '', 'http://x').searchParams;
       const state = q.get('state') ?? ''; const code = q.get('code') ?? '';
-      const pollCode = this.states.get(state);
+      const entry = this.states.get(state);
+      if (entry) this.states.delete(state); // 찾은 state는 모든 종료 경로에서 소비(코드 누락 400 포함) — 엄격 1회용.
+      const pollCode = entry?.pollCode;
       if (!pollCode || !code) { this.json(res, 400, { error: 'bad state' }); return true; }
-      this.states.delete(state); // 1회용
       const o = this.deps.settings.load().oidc;
       if (!o) { this.json(res, 503, { error: 'oidc not configured' }); return true; }
       const svc = (this.deps.makeOidc ?? ((c: OidcSettings) => new OidcService(c)))(o);

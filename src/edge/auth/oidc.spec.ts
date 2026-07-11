@@ -105,4 +105,13 @@ describe('PollStore', () => {
     expect(p.take(old)).toBeNull(); // old expired and pruned
     expect(p.take(fresh)).toEqual({ status: 'pending' }); // fresh is there
   });
+
+  it('maxSize<=0로 생성해도 무한 루프 없이 하한 1로 동작', () => {
+    // 클램프 전에는 eviction 루프(size >= 0)가 무한 스핀했다.
+    const p = new PollStore(10 * 60 * 1000, 0);
+    const c1 = p.create();
+    const c2 = p.create(); // maxSize=1이므로 c1 축출
+    expect(p.take(c1)).toBeNull();
+    expect(p.take(c2)).toEqual({ status: 'pending' });
+  }, 2000); // 무한 루프 회귀면 타임아웃으로 실패(무한 hang 아님)
 });

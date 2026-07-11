@@ -94,7 +94,7 @@ export class PollStore {
 
   constructor(ttlMs?: number, maxSize?: number) {
     this.ttlMs = ttlMs ?? 10 * 60 * 1000;
-    this.maxSize = maxSize ?? 10000;
+    this.maxSize = Math.max(1, maxSize ?? 10000); // <1이면 eviction 루프가 무한 스핀 — 하한 1로 클램프.
   }
 
   create(): string {
