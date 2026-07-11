@@ -371,6 +371,29 @@ describe('세션 인증(Phase 16a)', () => {
     await closePromise;
   });
 
+  it('kickUser: authed WeakSet에서도 제거 — kick 이후 in-flight 프레임은 게이트에서 거부(오귀속 방지)', async () => {
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    const sess = deps.sessions.issue(acc.id);
+    const store = await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    // ws.close()는 비동기 그레이스풀 핸드셰이크라 이미 파싱됐지만 아직 처리되지 않은 'message'
+    // 이벤트를 즉시 막지 못한다 — 그 레이스를 서버측 소켓에 직접 재현: kickUser 이후에도
+    // handleFrame이 이 소켓을 여전히 인증된 것으로 보면 안 된다(authed에서도 제거돼야 함).
+    const serverWs = [...(sm as unknown as { wss: { clients: Set<WebSocket> } }).wss.clients][0];
+    const closePromise = once(c, 'close');
+    sm!.kickUser(acc.id);
+    await closePromise;
+    await (sm as unknown as { handleFrame(ws: WebSocket, raw: string): Promise<void> }).handleFrame(
+      serverWs,
+      JSON.stringify({ t: 'send', channelId: 'general', text: 'sneaky-after-kick' }),
+    );
+    // 게이트가 거부했다면 메시지가 저장/귀속되지 않는다(오너/유령 귀속 없음).
+    expect(store.history('general')).toHaveLength(0);
+  });
+
   it('authDeps 미주입 = 무인증 통과(현행) + authorId owner 고정', async () => {
     await makeServer(undefined);
     const c = await connect();

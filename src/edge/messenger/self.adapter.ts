@@ -112,7 +112,7 @@ export class SelfMessenger implements MessengerPort {
             try { ws.close(); } catch { /* 격리 */ }
           }
         }, 5000);
-        ws.once('close', () => { clearTimeout(timer); this.users.delete(ws); });
+        ws.once('close', () => { clearTimeout(timer); this.users.delete(ws); this.authed.delete(ws); });
       }
       ws.on('message', (raw) => { void this.handleFrame(ws, String(raw)); });
       ws.on('error', () => { /* 접속 단위 격리 */ });
@@ -290,6 +290,10 @@ export class SelfMessenger implements MessengerPort {
       if (acc.id === userId) {
         try { ws.close(); } catch { /* 격리 */ }
         this.users.delete(ws);
+        // authed에서도 함께 제거 — 안 그러면 close()의 비동기 핸드셰이크 동안 이미 파싱된
+        // in-flight 'message'가 게이트(handleFrame의 !authed.has(ws))를 통과해 users.get(ws)가
+        // undefined인 채로 처리되며 'owner'로 오귀속된다.
+        this.authed.delete(ws);
       }
     }
   }
