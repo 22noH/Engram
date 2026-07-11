@@ -25,6 +25,21 @@ import { ChannelPoster } from './edge/messenger/messenger.port';
 import { WikiGit } from './knowledge-core/wiki/wiki-git';
 import { loadWikiRemote } from './knowledge-core/wiki/wiki-remote.config';
 import { WikiSyncService } from './edge/wiki-sync.service';
+import { BRAIN } from './brain/brain.port';
+import type { BrainProvider } from './brain/brain.port';
+import { makeBrainBodyMerger } from './knowledge-core/wiki/wiki-merge';
+import { loadPrompt } from './agent-layer/prompt-store';
+
+// 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
+// prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
+const WIKI_MERGE_FALLBACK = `Below are two versions of one wiki page body (they conflict due to concurrent edits). Merge them into a single, consistent markdown body without dropping any fact. Clean up duplication but preserve all content. Output only the markdown body — no explanation.
+
+=== Version A ===
+{{OURS}}
+
+=== Version B ===
+{{THEIRS}}
+`;
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -41,7 +56,15 @@ async function bootstrap(): Promise<void> {
   // 위키 git 원격 동기화(Phase 15b): 원격이 설정됐을 때만 가동. 실패해도 상주 불사.
   const wikiRemote = loadWikiRemote(paths.getConfigDir());
   if (wikiRemote) {
-    const wikiSync = new WikiSyncService(app.get(WikiGit), wikiRemote, logger);
+    const wikiGit = app.get(WikiGit);
+    try {
+      const brain = app.get<BrainProvider>(BRAIN);
+      const mergePrompt = loadPrompt('wiki-merge', WIKI_MERGE_FALLBACK);
+      wikiGit.setBodyMerger(makeBrainBodyMerger(brain, mergePrompt));
+    } catch (e) {
+      logger.warn(`위키 병합 두뇌 배선 실패(union 폴백): ${String(e)}`, 'WikiSync');
+    }
+    const wikiSync = new WikiSyncService(wikiGit, wikiRemote, logger);
     void wikiSync.start().catch((e) => logger.warn(`위키 동기화 시작 실패: ${String(e)}`, 'WikiSync'));
   }
 
