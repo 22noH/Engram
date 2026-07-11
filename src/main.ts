@@ -22,6 +22,9 @@ import { ChatStore } from './edge/messenger/chat-store';
 import { SelfMessenger } from './edge/messenger/self.adapter';
 import { MessengerHub } from './edge/messenger/messenger-hub';
 import { ChannelPoster } from './edge/messenger/messenger.port';
+import { WikiGit } from './knowledge-core/wiki/wiki-git';
+import { loadWikiRemote } from './knowledge-core/wiki/wiki-remote.config';
+import { WikiSyncService } from './edge/wiki-sync.service';
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -34,6 +37,13 @@ async function bootstrap(): Promise<void> {
   const logger = app.get(PinoLogger);
   const orchestrator = app.get(Orchestrator);
   const policy = loadChannelPolicy(paths.getConfigDir());
+
+  // 위키 git 원격 동기화(Phase 15b): 원격이 설정됐을 때만 가동. 실패해도 상주 불사.
+  const wikiRemote = loadWikiRemote(paths.getConfigDir());
+  if (wikiRemote) {
+    const wikiSync = new WikiSyncService(app.get(WikiGit), wikiRemote, logger);
+    void wikiSync.start().catch((e) => logger.warn(`위키 동기화 시작 실패: ${String(e)}`, 'WikiSync'));
+  }
 
   // 자체 채팅(Phase 9): 기본 가동(chat.json enabled:false만 끔). 실패해도 상주 불사.
   let self: SelfMessenger | null = null;
