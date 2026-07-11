@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Channel, ClientFrame, Message as Msg, ServerFrame } from '../../shared/protocol';
+import type { Channel, ClientFrame, Message as Msg, ServerFrame, UserDto } from '../../shared/protocol';
 import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadDisplayName, saveDisplayName } from './display-name';
-import { loadSessions } from './sessions';
+import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
+import { fetchStatus, apiLogin, apiRegister, apiSetup, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
 import { Channels } from './components/Channels';
 import { Thread } from './components/Thread';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
@@ -13,6 +14,7 @@ import { EngramSelector } from './components/EngramSelector';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
 import { WikiArea } from './components/WikiArea';
+import { LoginGate } from './components/LoginGate';
 import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../shared/protocol';
 import { T } from './i18n';
 
@@ -45,6 +47,13 @@ export default function App() {
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
+  // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
+  // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
+  const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
+  const [gateStatus, setGateStatus] = useState<AuthStatus | null>(null);
+  const [gateError, setGateError] = useState<string | undefined>();
+  const [gateNotice, setGateNotice] = useState<string | undefined>();
+  const [localSetupCode, setLocalSetupCode] = useState<string | null>(null);
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
 
@@ -97,7 +106,10 @@ export default function App() {
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
         }
       }
+    } else if (f.t === 'authOk') {
+      setMeByConn((prev) => ({ ...prev, [connId]: f.user }));
     } else if (f.t === 'authErr') {
+      setSessions(clearSessionFor(connId)); // 만료/철회된 세션 → 지우고 게이트로 돌려보낸다
       setErrText((prev) => ({ ...prev, [connId]: T.authFailed }));
     } else if (f.t === 'error') {
       console.warn('server error:', f.text);
@@ -138,7 +150,7 @@ export default function App() {
     }
   }
 
-  const [sessions] = useState<Record<string, string>>(() => loadSessions());
+  const [sessions, setSessions] = useState<Record<string, string>>(() => loadSessions());
   const { send, statusById } = useConnections(connState.connections, sessions, onFrame, onOpen);
 
   // team은 기본 연결(그 서버) 하나로 스코프. Ask/Code는 원본 그대로(무변경).
@@ -318,11 +330,69 @@ export default function App() {
   };
   const mentionNames = connState.connections.map((c) => c.name);
 
+  // Phase 16a — 로그인 게이트. 기본 연결(defaultConnId)에 저장 세션이 없으면 그 연결의
+  // /auth/status를 물어 게이트 표시 여부를 정한다(null=무인증 서버·brain → 게이트 없음).
+  const defId = connState.defaultConnId;
+  const defConn = connState.connections.find((c) => c.id === defId);
+  useEffect(() => {
+    let alive = true;
+    setGateStatus(null); setGateError(undefined); setGateNotice(undefined);
+    if (!defConn || sessions[defId]) return; // 세션 있으면 게이트 없음(authErr가 오면 위에서 세션이 지워지고 재조회됨)
+    void fetchStatus(defConn.endpoint).then((s) => { if (alive) setGateStatus(s); });
+    void window.engramDesktop?.setupCode?.().then((c) => { if (alive) setLocalSetupCode(c ?? null); }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defId, defConn?.endpoint, sessions[defId]]);
+
+  const acceptSession = (token: string, user: UserDto) => {
+    setSessions(saveSessionFor(defId, token));
+    setMeByConn((prev) => ({ ...prev, [defId]: user }));
+    setGateStatus(null); setGateError(undefined);
+  };
+  const handleAuthResult = (r: { token: string; user: UserDto } | { error: string }) => {
+    if ('error' in r) setGateError(r.error); else acceptSession(r.token, r.user);
+  };
+  const startSso = async () => {
+    if (!defConn) return;
+    const b = await apiOidcBegin(defConn.endpoint);
+    if ('error' in b) { setGateError(b.error); return; }
+    window.open(b.authUrl, '_blank'); // 데스크톱은 main.ts 핸들러가 기본 브라우저로 연다
+    const tick = async (): Promise<void> => {
+      const p = await apiOidcPoll(defConn.endpoint, b.pollCode);
+      if ('pending' in p) { setTimeout(() => { void tick(); }, 2000); return; }
+      handleAuthResult(p);
+    };
+    void tick();
+  };
+
+  // 게이트가 뜨면 앱 본체 대신 게이트만 보여준다(타이틀바는 유지 — 창 드래그·연결 상태 표시는 그대로).
+  if (gateStatus && defConn && !sessions[defId]) {
+    return (
+      <>
+        <div id="titlebar"><span id="tbtitle">Engram Desktop</span></div>
+        <LoginGate
+          connName={defConn.name} status={gateStatus} setupCode={localSetupCode}
+          error={gateError} notice={gateNotice}
+          onLogin={(l, p) => { void apiLogin(defConn.endpoint, l, p).then(handleAuthResult); }}
+          onRegister={(l, p, d) => {
+            void apiRegister(defConn.endpoint, l, p, d).then((r) => {
+              if ('error' in r) setGateError(r.error);
+              else { setGateNotice(T.registered); setGateError(undefined); }
+            });
+          }}
+          onSetup={(c, l, p) => { void apiSetup(defConn.endpoint, c, l, p).then(handleAuthResult); }}
+          onSso={() => { void startSso(); }}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <div id="titlebar">
         <span id="dot" className={statusById[connState.defaultConnId] ? 'on' : ''} title={errText[connState.defaultConnId] ?? ''} />
         <span id="tbtitle">Engram Desktop</span>
+        {meByConn[connState.defaultConnId] && <span id="tbuser">{meByConn[connState.defaultConnId].displayName}</span>}
       </div>
       {showManage && (
         <ManageEngrams
