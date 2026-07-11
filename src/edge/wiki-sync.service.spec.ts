@@ -43,4 +43,20 @@ describe('WikiSyncService', () => {
     await svc.syncOnce();
     expect(warns.length).toBeGreaterThan(0);
   });
+
+  it('이전 syncOnce가 진행 중이면 겹치는 호출은 건너뛴다(재진입 가드)', async () => {
+    const g = fakeGit();
+    let resolvePull!: (v: { ok: boolean; conflict: boolean }) => void;
+    const pullGate = new Promise<{ ok: boolean; conflict: boolean }>((resolve) => { resolvePull = resolve; });
+    g.pull = async (b: string) => { g.calls.push(`pull:${b}`); return pullGate; };
+    const svc = new WikiSyncService(g, cfg, noLog);
+
+    const first = svc.syncOnce(); // pull에서 블록 — 아직 완료 안 됨
+    const second = svc.syncOnce(); // syncing=true라 즉시 반환(스킵)
+    await second;
+    expect(g.calls.filter((c) => c.startsWith('pull:')).length).toBe(1); // pull은 한 번만 호출됨
+
+    resolvePull({ ok: true, conflict: false });
+    await first;
+  });
 });

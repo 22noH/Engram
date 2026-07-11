@@ -5,6 +5,9 @@ import simpleGit from 'simple-git';
 import { WikiGit } from './wiki-git';
 import { PathResolver } from '../../pal/path-resolver';
 
+// 실제 git 서브프로세스를 테스트당 15~20회 실행 — 콜드 Windows 러너에서 기본 5000ms를 넘길 수 있다.
+jest.setTimeout(30000);
+
 // 한 두뇌의 위키 폴더에 페이지 파일을 쓰고 커밋하는 헬퍼(WikiEngine 없이 git만 검증).
 async function writePage(dataDir: string, slug: string, body: string): Promise<void> {
   const pagesDir = path.join(dataDir, 'wiki', 'pages', 'default');

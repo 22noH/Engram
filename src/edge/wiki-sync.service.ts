@@ -11,6 +11,7 @@ interface WikiSyncer {
 // 예외/충돌은 로그만(상주 불사). pull로 들어온 .md는 WikiWatcher가 재색인(자동).
 export class WikiSyncService {
   private timer?: ReturnType<typeof setInterval>;
+  private syncing = false;
 
   constructor(
     private readonly git: WikiSyncer,
@@ -34,6 +35,8 @@ export class WikiSyncService {
   }
 
   async syncOnce(): Promise<void> {
+    if (this.syncing) return; // 이전 동기화가 아직 진행 중 — 이번 tick 건너뜀(겹침 방지)
+    this.syncing = true;
     try {
       const pl = await this.git.pull(this.cfg.branch);
       if (pl.conflict) this.logger.warn('위키 pull 병합 충돌 — 로컬 유지(수동/15c 해결 필요)', 'WikiSync');
@@ -41,6 +44,8 @@ export class WikiSyncService {
       if (ps.conflict) this.logger.warn('위키 push 충돌 — 다음 주기 재시도', 'WikiSync');
     } catch (e) {
       this.logger.warn(`위키 동기화 오류: ${String(e)}`, 'WikiSync');
+    } finally {
+      this.syncing = false;
     }
   }
 }

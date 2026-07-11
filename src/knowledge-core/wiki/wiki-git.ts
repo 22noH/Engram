@@ -14,6 +14,14 @@ export class WikiGit {
     this.git = simpleGit();
   }
 
+  // 저장소 전역 직렬화: commitAll/pull/push/ensureRemote가 서로·동시 쓰기와 인터리브하지 않게(손상 차단).
+  private chain: Promise<unknown> = Promise.resolve();
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.chain.then(fn, fn); // 이전 결과와 무관하게 다음 실행
+    this.chain = next.catch(() => {});    // 체인은 reject 전파 안 함
+    return next;                          // 호출자는 실제 결과/예외를 받음
+  }
+
   // 위키 디렉토리를 git 저장소로 보장(최초 init 시 커밋 신원도 함께 설정한다).
   async ensureRepo(): Promise<void> {
     const dir = this.paths.getWikiDir();
@@ -31,11 +39,13 @@ export class WikiGit {
   // 위키 디렉토리의 변경을 커밋. relPath를 주면 그 경로만 스테이징(경로-스코프 — 동시 쓰기 혼입 방지,
   // 설계 §10.3/§11). relPath 미지정 시 전체(add('.')) — 하위호환. 스테이징된 변경이 없으면 커밋 생략.
   async commitAll(message: string, relPath?: string): Promise<void> {
-    this.git.cwd(this.paths.getWikiDir());
-    await this.git.add(relPath ?? '.');
-    const status = await this.git.status();
-    if (status.staged.length === 0) return; // 스테이징된 변경 없음 → 빈 커밋 방지
-    await this.git.commit(message);
+    return this.serialize(async () => {
+      this.git.cwd(this.paths.getWikiDir());
+      await this.git.add(relPath ?? '.');
+      const status = await this.git.status();
+      if (status.staged.length === 0) return; // 스테이징된 변경 없음 → 빈 커밋 방지
+      await this.git.commit(message);
+    });
   }
 
   // 최근 커밋 메시지(최신순). 테스트·감사용.
@@ -47,14 +57,16 @@ export class WikiGit {
 
   // 원격 origin 보장(Phase 15b). ensureRepo 후 origin 추가(URL 바뀌면 set-url).
   async ensureRemote(url: string): Promise<void> {
-    await this.ensureRepo();
-    this.git.cwd(this.paths.getWikiDir());
-    const remotes = await this.git.getRemotes(true);
-    const origin = remotes.find((r) => r.name === 'origin');
-    if (!origin) await this.git.addRemote('origin', url);
-    else if (origin.refs.fetch !== url && origin.refs.push !== url) {
-      await this.git.remote(['set-url', 'origin', url]);
-    }
+    return this.serialize(async () => {
+      await this.ensureRepo();
+      this.git.cwd(this.paths.getWikiDir());
+      const remotes = await this.git.getRemotes(true);
+      const origin = remotes.find((r) => r.name === 'origin');
+      if (!origin) await this.git.addRemote('origin', url);
+      else if (origin.refs.fetch !== url && origin.refs.push !== url) {
+        await this.git.remote(['set-url', 'origin', url]);
+      }
+    });
   }
 
   // HEAD 커밋 존재 여부(unborn 브랜치 판별).
@@ -64,64 +76,84 @@ export class WikiGit {
 
   // 원격에서 받아 병합. 충돌 시 abort + 로컬 유지. 네트워크/원격없음은 조용히 스킵.
   async pull(branch: string): Promise<{ ok: boolean; conflict: boolean }> {
+    return this.serialize(() => this.pullInner(branch));
+  }
+
+  // pull의 실제 로직(직렬화 미포함) — push의 내부 재시도가 이걸 직접 호출해 중첩 serialize를 피한다.
+  private async pullInner(branch: string): Promise<{ ok: boolean; conflict: boolean }> {
     this.git.cwd(this.paths.getWikiDir());
     try {
       await this.git.fetch('origin', branch);
     } catch {
       return { ok: false, conflict: false }; // 네트워크/원격 접근 실패 → 다음 주기
     }
-    const hasRemoteRef = await this.git
-      .raw(['rev-parse', '--verify', `origin/${branch}`])
-      .then(() => true)
-      .catch(() => false);
-    if (!hasRemoteRef) return { ok: true, conflict: false }; // 원격에 아직 그 브랜치 없음
-    // 로컬 커밋이 없으면 원격을 그대로 체크아웃(최초 클론 상황).
-    if (!(await this.hasHead())) {
-      await this.git.raw(['checkout', '-B', branch, `origin/${branch}`]);
-      return { ok: true, conflict: false };
-    }
-    // 로컬 브랜치명을 branch로 정렬(init 기본 브랜치명 차이 흡수).
-    await this.git.raw(['branch', '-M', branch]).catch(() => {});
-    let mergeThrew = false;
+    // fetch 이후 단계 전체에 안전망(Fix #3): 예기치 못한 throw도 never-throw 계약({ok,conflict})으로 흡수.
     try {
-      // --allow-unrelated-histories: 각 두뇌가 따로 git init해 커밋한 뒤 합류하면(마이그레이션)
-      // 공통 조상이 없어 기본 merge가 거부된다. 다른 파일이면 자동 병합, 같은 파일이면 충돌(아래 abort).
-      await this.git.raw(['merge', `origin/${branch}`, '--allow-unrelated-histories']);
+      const hasRemoteRef = await this.git
+        .raw(['rev-parse', '--verify', `origin/${branch}`])
+        .then(() => true)
+        .catch(() => false);
+      if (!hasRemoteRef) return { ok: true, conflict: false }; // 원격에 아직 그 브랜치 없음
+      // 로컬 커밋이 없으면 원격을 그대로 체크아웃(최초 클론 상황).
+      if (!(await this.hasHead())) {
+        await this.git.raw(['checkout', '-B', branch, `origin/${branch}`]);
+        return { ok: true, conflict: false };
+      }
+      // 로컬 브랜치명을 branch로 정렬(init 기본 브랜치명 차이 흡수).
+      await this.git.raw(['branch', '-M', branch]).catch(() => {});
+      let mergeThrew = false;
+      try {
+        // --allow-unrelated-histories: 각 두뇌가 따로 git init해 커밋한 뒤 합류하면(마이그레이션)
+        // 공통 조상이 없어 기본 merge가 거부된다. 다른 파일이면 자동 병합, 같은 파일이면 충돌(아래 abort).
+        await this.git.raw(['merge', `origin/${branch}`, '--allow-unrelated-histories']);
+      } catch {
+        // 내용 충돌은 stdout에 찍혀 던지지 않지만, dirty working tree 등 다른 거부는 stderr로 던진다.
+        mergeThrew = true;
+      }
+      const status = await this.git.status();
+      if (status.conflicted.length > 0) {
+        await this.git.raw(['merge', '--abort']).catch(() => {});
+        return { ok: true, conflict: true }; // 내용 충돌 → 로컬 유지
+      }
+      if (mergeThrew) {
+        // 병합이 실제로는 완료되지 않았다(예: 같은 파일의 미커밋 변경으로 git이 거부).
+        // status.conflicted가 비어 있어도 성공을 주장하면 안 된다 — 다음 주기에 재시도.
+        await this.git.raw(['merge', '--abort']).catch(() => {});
+        return { ok: false, conflict: false };
+      }
+      return { ok: true, conflict: false };
     } catch {
-      // 내용 충돌은 stdout에 찍혀 던지지 않지만, dirty working tree 등 다른 거부는 stderr로 던진다.
-      mergeThrew = true;
-    }
-    const status = await this.git.status();
-    if (status.conflicted.length > 0) {
-      await this.git.raw(['merge', '--abort']).catch(() => {});
-      return { ok: true, conflict: true }; // 내용 충돌 → 로컬 유지
-    }
-    if (mergeThrew) {
-      // 병합이 실제로는 완료되지 않았다(예: 같은 파일의 미커밋 변경으로 git이 거부).
-      // status.conflicted가 비어 있어도 성공을 주장하면 안 된다 — 다음 주기에 재시도.
-      await this.git.raw(['merge', '--abort']).catch(() => {});
       return { ok: false, conflict: false };
     }
-    return { ok: true, conflict: false };
   }
 
   // 로컬 커밋을 원격에 push. 거부(원격 앞섬) → pull 후 1회 재시도.
   async push(branch: string): Promise<{ ok: boolean; conflict: boolean }> {
-    this.git.cwd(this.paths.getWikiDir());
-    if (!(await this.hasHead())) return { ok: true, conflict: false }; // 보낼 커밋 없음
-    await this.git.raw(['branch', '-M', branch]).catch(() => {});
+    return this.serialize(() => this.pushInner(branch));
+  }
+
+  // push의 실제 로직(직렬화 미포함). 내부 재시도는 pullInner를 직접 호출(pull의 serialize 재진입 방지).
+  private async pushInner(branch: string): Promise<{ ok: boolean; conflict: boolean }> {
+    // 전체에 안전망(Fix #3): 예기치 못한 throw도 never-throw 계약으로 흡수.
     try {
-      await this.git.push('origin', branch);
-      return { ok: true, conflict: false };
-    } catch {
-      const p = await this.pull(branch);
-      if (p.conflict) return { ok: false, conflict: true };
+      this.git.cwd(this.paths.getWikiDir());
+      if (!(await this.hasHead())) return { ok: true, conflict: false }; // 보낼 커밋 없음
+      await this.git.raw(['branch', '-M', branch]).catch(() => {});
       try {
         await this.git.push('origin', branch);
         return { ok: true, conflict: false };
       } catch {
-        return { ok: false, conflict: false }; // 다음 주기 재시도
+        const p = await this.pullInner(branch);
+        if (p.conflict) return { ok: false, conflict: true };
+        try {
+          await this.git.push('origin', branch);
+          return { ok: true, conflict: false };
+        } catch {
+          return { ok: false, conflict: false }; // 다음 주기 재시도
+        }
       }
+    } catch {
+      return { ok: false, conflict: false };
     }
   }
 }
