@@ -15,6 +15,7 @@ import { MentionAutocomplete, mentionCandidates } from './components/MentionAuto
 import { WikiArea } from './components/WikiArea';
 import { AdminArea } from './components/AdminArea';
 import { LoginGate } from './components/LoginGate';
+import { allow } from './permissions';
 import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings } from '../../shared/protocol';
 import { T } from './i18n';
 
@@ -443,6 +444,7 @@ export default function App() {
               pages={wikiPages}
               openPage={wikiOpen}
               proposals={proposals}
+              canApprove={allow(meByConn[connState.defaultConnId], 'wiki.approve')}
               onOpenPage={(slug) => send(connState.defaultConnId, { t: 'wikiGet', slug })}
               onApprove={(id) => send(connState.defaultConnId, { t: 'proposalApprove', id })}
               onReject={(id) => send(connState.defaultConnId, { t: 'proposalReject', id })}

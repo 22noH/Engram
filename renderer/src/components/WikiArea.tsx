@@ -8,6 +8,7 @@ export function WikiArea(props: {
   pages: WikiPageMeta[];
   openPage: WikiPageDto | null;
   proposals: ProposalDto[];
+  canApprove: boolean;
   onOpenPage: (slug: string) => void;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
@@ -65,10 +66,12 @@ export function WikiArea(props: {
                 {p.conflictSlugs?.length ? ` · ⚠ ${p.conflictSlugs.join(', ')}` : ''}
               </div>
               <PropBody markdown={p.payload} />
-              <div className="propActions">
-                <button type="button" onClick={() => props.onApprove(p.id)}>{T.wikiApprove}</button>
-                <button type="button" className="danger" onClick={() => props.onReject(p.id)}>{T.wikiReject}</button>
-              </div>
+              {props.canApprove && (
+                <div className="propActions">
+                  <button type="button" onClick={() => props.onApprove(p.id)}>{T.wikiApprove}</button>
+                  <button type="button" className="danger" onClick={() => props.onReject(p.id)}>{T.wikiReject}</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
