@@ -266,7 +266,7 @@ export default function App() {
   const sidebarChannels: Channel[] = mode === 'wiki' || mode === 'admin' ? [] : logicalChannels(viewChannelsByConn, mode).map((name) => {
     const fromDefault = viewChannelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     const any = fromDefault ?? Object.values(viewChannelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
-    return { id: name, name, respondMode: any?.respondMode ?? 'all', mode };
+    return { id: name, name, respondMode: any?.respondMode ?? 'all', mode, ...(any?.creatorId ? { creatorId: any.creatorId } : {}) };
   });
   // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
   const defaultChan = currentName
@@ -421,6 +421,8 @@ export default function App() {
       <div id="app">
         <Channels
           channels={sidebarChannels} current={currentName} mode={mode}
+          canManageChannels={allow(meByConn[connState.defaultConnId], 'channels.manage')}
+          myId={meByConn[connState.defaultConnId]?.id}
           onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
           onCreate={(name, m) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}

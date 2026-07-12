@@ -3,7 +3,7 @@ import { Channels } from './Channels';
 
 const base = {
   channels: [{ id: 'a', name: 'ask1', respondMode: 'all', mode: 'chat' }],
-  current: 'a', onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {},
+  current: 'a', canManageChannels: true, onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {},
 } as any;
 
 it('Ask·Code·Team 탭 모두 렌더된다(Phase 14: TEAM_CHAT=true)', () => {
@@ -11,4 +11,25 @@ it('Ask·Code·Team 탭 모두 렌더된다(Phase 14: TEAM_CHAT=true)', () => {
   expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
   expect(screen.getByText(/Team|^채팅$/)).toBeInTheDocument();
+});
+
+it('남의 채널이고 canManageChannels=false면 ⋯메뉴 숨김', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'someone-else' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
+  expect(screen.queryByText('⋯')).toBeNull();
+});
+
+it('내 채널이면 권한 없어도 ⋯메뉴 표시', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
+  expect(screen.getByText('⋯')).toBeTruthy();
+});
+
+it('canManageChannels=true면 남 채널도 ⋯메뉴 표시', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'other' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={true} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
+  expect(screen.getByText('⋯')).toBeTruthy();
 });

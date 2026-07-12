@@ -9,6 +9,8 @@ export function Channels(props: {
   channels: Channel[];
   current: string | null;
   mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin';
+  canManageChannels: boolean;
+  myId?: string;
   onSelect: (id: string) => void;
   onSetMode: (m: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
   onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
@@ -23,6 +25,8 @@ export function Channels(props: {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
   const popRef = useRef<HTMLDivElement>(null);
   const visible = channels.filter((c) => (c.mode || 'chat') === mode);
+  // Phase 16b: ⋯메뉴(삭제·응답모드)는 channels.manage 권한 또는 채널 소유자(creatorId===myId)에게만.
+  const canManage = (c: Channel) => props.canManageChannels || (!!props.myId && c.creatorId === props.myId);
   const label: Record<'chat' | 'code' | 'team' | 'wiki' | 'admin', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode, wiki: T.tabWiki, admin: T.tabAdmin };
   const tabs = areaTabs(TEAM_CHAT, props.showAdmin);
 
@@ -67,7 +71,7 @@ export function Channels(props: {
           {visible.map((c) => (
             <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
               <span>{'# ' + c.name}</span>
-              <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>
+              {canManage(c) && <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>}
             </div>
           ))}
         </div>
