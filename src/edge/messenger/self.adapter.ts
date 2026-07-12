@@ -148,6 +148,7 @@ export class SelfMessenger implements MessengerPort {
   private static readonly ADMIN_FRAMES = new Set([
     'adminUsers', 'adminApprove', 'adminSuspend', 'adminRestore',
     'adminResetPassword', 'adminForceLogout', 'adminGetSettings', 'adminSetSettings',
+    'adminSetPermissions',
   ]);
   private adminGate(ws: WebSocket): boolean {
     const me = this.users.get(ws);
@@ -170,6 +171,7 @@ export class SelfMessenger implements MessengerPort {
     return this.authDeps!.accounts.list().map((a) => ({
       id: a.id, displayName: a.displayName, role: a.role,
       loginId: a.loginId, status: a.status, createdAt: a.createdAt, sso: !!a.oidc,
+      permissions: a.permissions ?? [],
     }));
   }
   private sendAdminList(ws: WebSocket): void {
@@ -337,6 +339,13 @@ export class SelfMessenger implements MessengerPort {
           }
           this.sendTo(ws, { t: 'adminSettings', settings: this.authDeps!.settings.load() });
           return;
+        case 'adminSetPermissions': {
+          if (typeof f.id === 'string' && Array.isArray(f.permissions)) {
+            this.authDeps!.accounts.setPermissions(f.id, f.permissions as Permission[]);
+          }
+          this.sendAdminList(ws);
+          return;
+        }
         default: return; // 미지 타입 무시(스펙 §6)
       }
     } catch (err) {

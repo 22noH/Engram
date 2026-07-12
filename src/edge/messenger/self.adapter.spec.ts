@@ -580,6 +580,29 @@ describe('admin 프레임(Phase 16a)', () => {
     expect(saveSpy).toHaveBeenCalledWith(next);
     expect(f).toEqual({ t: 'adminSettings', settings: next });
   });
+
+  describe('adminSetPermissions(Phase 16b)', () => {
+    it('owner: adminSetPermissions로 member 권한 설정 → adminUsers에 반영', async () => {
+      ownerWs.send(JSON.stringify({ t: 'adminSetPermissions', id: member.id, permissions: ['wiki.approve'] }));
+      const f = await nextFrame(ownerWs);
+      expect(f.t).toBe('adminUsers');
+      const memberDto = f.list.find((u: { id: string }) => u.id === member.id);
+      expect(memberDto.permissions).toEqual(['wiki.approve']);
+    });
+
+    it('member(비owner)의 adminSetPermissions는 무시(권한 미변경)', async () => {
+      memberWs.send(JSON.stringify({ t: 'adminSetPermissions', id: member.id, permissions: ['wiki.approve'] }));
+      expect(await noFrameWithin(memberWs)).toBe('timeout');
+      expect(deps.accounts.get(member.id)?.permissions ?? []).toEqual([]);
+    });
+
+    it('알 수 없는 키는 저장 시 필터', async () => {
+      ownerWs.send(JSON.stringify({ t: 'adminSetPermissions', id: member.id, permissions: ['wiki.approve', 'bogus'] }));
+      const f = await nextFrame(ownerWs);
+      const memberDto = f.list.find((u: { id: string }) => u.id === member.id);
+      expect(memberDto.permissions).toEqual(['wiki.approve']);
+    });
+  });
 });
 
 function fakePage(slug: string, status: 'draft' | 'published' = 'published'): WikiPage {

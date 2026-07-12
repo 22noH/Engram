@@ -28,7 +28,7 @@ export interface Message {
 }
 
 export interface UserDto { id: string; displayName: string; role: 'owner' | 'member'; permissions?: string[] }
-export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean }
+export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean; permissions: string[] }
 export interface AdminSettings { serverName?: string; oidc?: { issuer: string; clientId: string; clientSecret: string } }
 
 export interface WikiPageMeta { slug: string; title: string; category: string; status: 'draft' | 'published'; updated: string }
@@ -69,7 +69,8 @@ export type ClientFrame =
   | { t: 'adminResetPassword'; id: string; password: string }
   | { t: 'adminForceLogout'; id: string }
   | { t: 'adminGetSettings' }
-  | { t: 'adminSetSettings'; settings: AdminSettings };
+  | { t: 'adminSetSettings'; settings: AdminSettings }
+  | { t: 'adminSetPermissions'; id: string; permissions: string[] };
 
 // 서버 → 클라
 export type ServerFrame =
