@@ -114,7 +114,11 @@ export class ChatStore {
     const list = this.listChannels();
     const ch = list.find((c) => c.id === id);
     if (!ch) return false;
-    ch.visibility = visibility;
+    if (visibility === 'private') {
+      ch.visibility = 'private';
+    } else {
+      delete ch.visibility;
+    }
     this.save(list);
     return true;
   }

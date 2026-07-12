@@ -176,7 +176,7 @@ describe('ChatStore 비공개 채널 (Phase 16c)', () => {
     expect(s.setVisibility(ch.id, 'public')).toBe(true);
     const re = new ChatStore(dir).listChannels().find((c) => c.id === ch.id)!;
     expect(re.memberIds).toEqual(['u2', 'u3']);
-    expect(re.visibility).toBe('public');
+    expect(re.visibility).toBeUndefined();
     expect(s.setMembers('없음', ['x'])).toBe(false);
     expect(s.setVisibility('없음', 'private')).toBe(false);
   });
