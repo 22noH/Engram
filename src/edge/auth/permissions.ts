@@ -1,7 +1,7 @@
 // 행위별 권한(Phase 16b 스펙 §2.1). owner는 전권(role 단락). 무인증 경로는 호출자가 게이트를
 // 아예 건너뛰므로 이 함수는 "계정이 있을 때"의 판정만 담당한다.
 
-export const PERMISSIONS = ['wiki.approve', 'channels.manage'] as const;
+export const PERMISSIONS = ['wiki.approve', 'channels.manage', 'wiki.unpublish', 'wiki.edit', 'wiki.delete'] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export function can(account: { role: string; permissions?: string[] } | undefined, perm: Permission): boolean {
