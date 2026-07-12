@@ -178,6 +178,18 @@ export class SelfMessenger implements MessengerPort {
     if (!me) return false;
     return can(me, 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
   }
+  // Phase 16c: 멤버 관리(visibility·memberIds) 게이트. 비공개 채널은 주인(creatorId)만 —
+  // owner·channels.manage 예외 없음(감시 방지: 관리 권한이 비공개 채널 멤버를 "정할" 권리를 주지 않는다).
+  // 공개 채널은 기존 16b canManageChannel 규칙을 그대로 따른다.
+  private canAdminChannel(ws: WebSocket, ch: ChatChannel | undefined): boolean {
+    if (!this.authDeps) return true;
+    if (!ch) return false;
+    if ((ch.visibility ?? 'public') === 'private') {
+      const me = this.users.get(ws);
+      return !!me && ch.creatorId === me.id;
+    }
+    return this.canManageChannel(ws, ch);
+  }
   // Phase 16c: 채널 목록 가시성 게이트. authDeps 미주입(무인증)이면 전부 접근(회귀 금지).
   // 공개는 전원. 비공개는 만든 사람 본인 또는 초대된 멤버만 — owner·channels.manage 예외 없음
   // (감시 방지: 관리 권한이 비공개 채널을 "볼" 권리를 주지 않는다).
@@ -384,6 +396,34 @@ export class SelfMessenger implements MessengerPort {
             this.authDeps!.accounts.setPermissions(f.id, f.permissions as Permission[]);
           }
           this.sendAdminList(ws);
+          return;
+        }
+        case 'setChannelVisibility': {
+          if (typeof f.id === 'string' && (f.visibility === 'public' || f.visibility === 'private')) {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) this.store.setVisibility(f.id, f.visibility);
+          }
+          this.broadcastChannels();
+          return;
+        }
+        case 'setChannelMembers': {
+          if (typeof f.id === 'string' && Array.isArray(f.memberIds)) {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) {
+              const valid = this.authDeps
+                ? (f.memberIds as unknown[]).filter((x): x is string => typeof x === 'string' && !!this.authDeps!.accounts.get(x))
+                : [];
+              this.store.setMembers(f.id, valid);
+            }
+          }
+          this.broadcastChannels();
+          return;
+        }
+        case 'channelRoster': {
+          const list = this.authDeps
+            ? this.authDeps.accounts.list().filter((a) => a.status === 'active').map((a) => ({ id: a.id, displayName: a.displayName }))
+            : [];
+          this.sendTo(ws, { t: 'roster', list });
           return;
         }
         default: return; // 미지 타입 무시(스펙 §6)

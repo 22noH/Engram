@@ -1185,3 +1185,159 @@ describe('비공개 채널 메시지 접근(Phase 16c)', () => {
     await sm.stop();
   });
 });
+
+describe('비공개 채널 멤버 관리(Phase 16c)', () => {
+  let dir: string;
+  let clients: WebSocket[];
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roster-'));
+    clients = [];
+  });
+  afterEach(() => {
+    for (const c of clients) c.terminate();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function connectAs(sm: SelfMessenger, deps: AuthDeps, acc: Account): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(c);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+    await nextFrame(c); // authOk
+    return c;
+  }
+
+  it('주인은 setChannelMembers로 멤버 추가 → 추가된 멤버가 채널을 보게 됨', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', memberA.id, 'private')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const aWs = await connectAs(sm, deps, memberA);
+    const bWs = await connectAs(sm, deps, memberB);
+
+    bWs.send(JSON.stringify({ t: 'channels' }));
+    const before = await nextFrame(bWs);
+    expect(before.list.map((c: { name: string }) => c.name)).not.toContain('secret');
+
+    const bFramePromise = nextFrame(bWs); // A의 setChannelMembers가 트리거한 broadcastChannels 대기
+    aWs.send(JSON.stringify({ t: 'setChannelMembers', id: ch.id, memberIds: [memberB.id] }));
+    await nextFrame(aWs); // A 자신의 broadcastChannels 결과
+
+    const bFrame = await bFramePromise;
+    expect(bFrame.t).toBe('channels');
+    expect(bFrame.list.map((c: { name: string }) => c.name)).toContain('secret');
+
+    await sm.stop();
+  });
+
+  it('비주인(멤버·channels.manage·owner)의 setChannelMembers/setChannelVisibility는 비공개 채널에 무시', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const owner = deps.accounts.createPassword('owner', 'pw', 'Owner', { role: 'owner', status: 'active' });
+    const mgr = deps.accounts.createPassword('mgr', 'pw', 'Mgr', { status: 'active' });
+    deps.accounts.setPermissions(mgr.id, ['channels.manage']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    store.setMembers(ch.id, [memberB.id]);
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    for (const actor of [memberB, owner, mgr]) {
+      const ws = await connectAs(sm, deps, actor);
+      ws.send(JSON.stringify({ t: 'setChannelMembers', id: ch.id, memberIds: [] }));
+      await nextFrame(ws); // broadcastChannels 결과(변경 없음이어도 프레임은 옴)
+      ws.send(JSON.stringify({ t: 'setChannelVisibility', id: ch.id, visibility: 'public' }));
+      await nextFrame(ws);
+    }
+
+    const stored = store.listChannels().find((c) => c.id === ch.id)!;
+    expect(stored.memberIds).toEqual([memberB.id]);
+    expect(stored.visibility).toBe('private');
+
+    await sm.stop();
+  });
+
+  it('공개 채널 setChannelVisibility는 16b 관리자(creator/channels.manage/owner)가 가능', async () => {
+    const deps = makeAuthDeps(dir);
+    const mgr = deps.accounts.createPassword('mgr', 'pw', 'Mgr', { status: 'active' });
+    deps.accounts.setPermissions(mgr.id, ['channels.manage']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('pub', 'chat', 'someone-else')!; // 공개, mgr은 창설자가 아님
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, mgr);
+    ws.send(JSON.stringify({ t: 'setChannelVisibility', id: ch.id, visibility: 'private' }));
+    await nextFrame(ws); // broadcastChannels
+
+    const stored = store.listChannels().find((c) => c.id === ch.id)!;
+    expect(stored.visibility).toBe('private');
+
+    await sm.stop();
+  });
+
+  it('setChannelMembers는 존재하는 계정만 수용', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, creator);
+    ws.send(JSON.stringify({ t: 'setChannelMembers', id: ch.id, memberIds: [memberB.id, 'nope-does-not-exist'] }));
+    await nextFrame(ws); // broadcastChannels
+
+    const stored = store.listChannels().find((c) => c.id === ch.id)!;
+    expect(stored.memberIds).toEqual([memberB.id]);
+
+    await sm.stop();
+  });
+
+  it('channelRoster는 id+displayName만(민감정보 없음), active 계정만, 인증 사용자면 반환', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    deps.accounts.createPassword('p', 'pw', 'Pending'); // 기본 status=pending → roster 제외
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, memberA);
+    ws.send(JSON.stringify({ t: 'channelRoster' }));
+    const f = await nextFrame(ws);
+    expect(f.t).toBe('roster');
+    const ids = f.list.map((r: { id: string }) => r.id).sort();
+    expect(ids).toEqual([memberA.id, memberB.id].sort());
+    for (const entry of f.list) {
+      expect(Object.keys(entry).sort()).toEqual(['displayName', 'id']);
+    }
+
+    await sm.stop();
+  });
+
+  it('무인증 모드 channelRoster는 빈 목록', async () => {
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    const ws = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(ws);
+    await once(ws, 'open');
+
+    ws.send(JSON.stringify({ t: 'channelRoster' }));
+    const f = await nextFrame(ws);
+    expect(f).toEqual({ t: 'roster', list: [] });
+
+    await sm.stop();
+  });
+});

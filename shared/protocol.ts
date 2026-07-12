@@ -33,6 +33,8 @@ export interface UserDto { id: string; displayName: string; role: 'owner' | 'mem
 export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean; permissions: string[] }
 export interface AdminSettings { serverName?: string; oidc?: { issuer: string; clientId: string; clientSecret: string } }
 
+export interface RosterEntry { id: string; displayName: string } // Phase 16c: 채널 멤버 관리용 — id+표시이름만(민감정보 없음)
+
 export interface WikiPageMeta { slug: string; title: string; category: string; status: 'draft' | 'published'; updated: string }
 export interface WikiPageDto extends WikiPageMeta { body: string }
 export interface ProposalDto {
@@ -72,7 +74,10 @@ export type ClientFrame =
   | { t: 'adminForceLogout'; id: string }
   | { t: 'adminGetSettings' }
   | { t: 'adminSetSettings'; settings: AdminSettings }
-  | { t: 'adminSetPermissions'; id: string; permissions: string[] };
+  | { t: 'adminSetPermissions'; id: string; permissions: string[] }
+  | { t: 'setChannelVisibility'; id: string; visibility: 'public' | 'private' }
+  | { t: 'setChannelMembers'; id: string; memberIds: string[] }
+  | { t: 'channelRoster' };
 
 // 서버 → 클라
 export type ServerFrame =
@@ -88,4 +93,5 @@ export type ServerFrame =
   | { t: 'wikiChanged' }
   | { t: 'proposalsChanged' }
   | { t: 'adminUsers'; list: AdminUserDto[] }
-  | { t: 'adminSettings'; settings: AdminSettings };
+  | { t: 'adminSettings'; settings: AdminSettings }
+  | { t: 'roster'; list: RosterEntry[] };
