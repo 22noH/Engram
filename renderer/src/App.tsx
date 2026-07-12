@@ -476,9 +476,15 @@ export default function App() {
               openPage={wikiOpen}
               proposals={proposals}
               canApprove={allow(meByConn[connState.defaultConnId], 'wiki.approve')}
+              canUnpublish={allow(meByConn[connState.defaultConnId], 'wiki.unpublish')}
+              canEdit={allow(meByConn[connState.defaultConnId], 'wiki.edit')}
+              canDelete={allow(meByConn[connState.defaultConnId], 'wiki.delete')}
               onOpenPage={(slug) => send(connState.defaultConnId, { t: 'wikiGet', slug })}
               onApprove={(id) => send(connState.defaultConnId, { t: 'proposalApprove', id })}
               onReject={(id) => send(connState.defaultConnId, { t: 'proposalReject', id })}
+              onUnpublish={(slug) => send(connState.defaultConnId, { t: 'wikiUnpublish', slug })}
+              onEdit={(slug, body) => send(connState.defaultConnId, { t: 'wikiEdit', slug, body })}
+              onDelete={(slug) => { send(connState.defaultConnId, { t: 'wikiDelete', slug }); setWikiOpen(null); }}
             />
           ) : (
             <>

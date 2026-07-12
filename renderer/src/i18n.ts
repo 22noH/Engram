@@ -42,6 +42,12 @@ export const T = {
   wikiFilterPh: ko ? '필터…' : 'Filter…',
   wikiApprove: ko ? '승인' : 'Approve',
   wikiReject: ko ? '거부' : 'Reject',
+  wikiUnpublish: ko ? '내리기' : 'Unpublish',
+  wikiEdit: ko ? '수정' : 'Edit',
+  wikiDelete: ko ? '삭제' : 'Delete',
+  wikiSave: ko ? '저장' : 'Save',
+  wikiCancel: ko ? '취소' : 'Cancel',
+  wikiDeleteConfirm: ko ? '이 페이지를 영구 삭제합니다. 되돌릴 수 없습니다. 계속할까요?' : 'Permanently delete this page? This cannot be undone.',
   // Phase 16a — 계정
   signIn: ko ? '로그인' : 'Sign in',
   signInTitle: (name: string) => (ko ? `${name}에 로그인` : `Sign in to ${name}`),
@@ -82,6 +88,9 @@ export const T = {
   // Phase 16b — 권한 체크박스
   permWikiApprove: ko ? '위키 승인' : 'Approve wiki',
   permChannelsManage: ko ? '채널 관리' : 'Manage channels',
+  permWikiUnpublish: ko ? '위키 내리기' : 'Unpublish wiki',
+  permWikiEdit: ko ? '위키 수정' : 'Edit wiki',
+  permWikiDelete: ko ? '위키 삭제' : 'Delete wiki',
   permAll: ko ? '전체 (owner)' : 'all (owner)',
   adminPermissions: ko ? '권한' : 'Permissions',
   // Phase 16c — 비공개 채널

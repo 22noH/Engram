@@ -3,27 +3,41 @@ import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/pro
 import { renderMarkdown } from '../render/markdown';
 import { T } from '../i18n';
 
-// 위키 영역: ① 페이지 읽기(아티팩트 스타일) ② 승인함(두뇌 제안 승인/거부). 순수 프레젠테이션.
+// 위키 영역: ① 페이지 읽기(+게시 페이지 파괴적 행위) ② 승인함(두뇌 제안 승인/거부). 순수 프레젠테이션.
 export function WikiArea(props: {
   pages: WikiPageMeta[];
   openPage: WikiPageDto | null;
   proposals: ProposalDto[];
   canApprove: boolean;
+  canUnpublish: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
   onOpenPage: (slug: string) => void;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  onUnpublish: (slug: string) => void;
+  onEdit: (slug: string, body: string) => void;
+  onDelete: (slug: string) => void;
 }) {
   const [tab, setTab] = useState<'pages' | 'inbox'>('pages');
   const [filter, setFilter] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // 다른 페이지로 전환하면 편집 모드 해제.
+  useEffect(() => { setEditing(false); }, [props.openPage?.slug]);
+
   useEffect(() => {
+    if (editing) return; // 편집 중엔 docBody 미마운트
     const el = bodyRef.current;
     if (el) el.replaceChildren(props.openPage ? renderMarkdown(props.openPage.body) : document.createDocumentFragment());
-  }, [props.openPage]);
+  }, [props.openPage, editing]);
 
   const q = filter.trim().toLowerCase();
   const shown = q ? props.pages.filter((p) => p.title.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)) : props.pages;
+  const open = props.openPage;
+  const canAct = !!open && open.status === 'published'; // 게시 페이지만 대상
 
   return (
     <div id="wikiArea">
@@ -39,7 +53,7 @@ export function WikiArea(props: {
           <div id="wikiList">
             <input type="text" placeholder={T.wikiFilterPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
             {shown.map((p) => (
-              <div key={p.slug} className={'wikiRow' + (props.openPage?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
+              <div key={p.slug} className={'wikiRow' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
                 <span className="title">{p.title}</span>
                 <span className={'badge ' + p.status}>{p.status}</span>
                 <span className="cat">{p.category}</span>
@@ -47,8 +61,30 @@ export function WikiArea(props: {
             ))}
           </div>
           <div id="wikiDoc">
-            {props.openPage && <div className="docHead"><h1>{props.openPage.title}</h1><span className="cat">{props.openPage.category}</span></div>}
-            <div className="docBody" ref={bodyRef} />
+            {open && (
+              <div className="docHead">
+                <h1>{open.title}</h1>
+                <span className="cat">{open.category}</span>
+                {canAct && !editing && (
+                  <span className="docActions">
+                    {props.canEdit && <button type="button" onClick={() => { setDraft(open.body); setEditing(true); }}>{T.wikiEdit}</button>}
+                    {props.canUnpublish && <button type="button" onClick={() => props.onUnpublish(open.slug)}>{T.wikiUnpublish}</button>}
+                    {props.canDelete && <button type="button" className="danger" onClick={() => { if (window.confirm(T.wikiDeleteConfirm)) props.onDelete(open.slug); }}>{T.wikiDelete}</button>}
+                  </span>
+                )}
+              </div>
+            )}
+            {editing && open ? (
+              <div className="docEdit">
+                <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
+                <div className="docEditActions">
+                  <button type="button" onClick={() => { props.onEdit(open.slug, draft); setEditing(false); }}>{T.wikiSave}</button>
+                  <button type="button" onClick={() => setEditing(false)}>{T.wikiCancel}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="docBody" ref={bodyRef} />
+            )}
           </div>
         </div>
       ) : (
