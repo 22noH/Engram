@@ -152,6 +152,20 @@ describe('WikiEngine 파괴적 행위', () => {
     expect(await engine.deletePage('nope')).toBe(false);
   });
 
+  it('editPage: draft 페이지는 throw(게시전용 서버 강제)', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'dr', title: 'T', category: 'c', body: 'x' }); // draft
+    await expect(engine.editPage('dr', 'new')).rejects.toThrow();
+    expect((await engine.getPage('dr'))?.body).toBe('x'); // 미변경
+  });
+
+  it('deletePage: draft 페이지는 no-op(false)·파일 유지(게시전용 서버 강제)', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'dr', title: 'T', category: 'c', body: 'x' }); // draft
+    expect(await engine.deletePage('dr')).toBe(false);
+    expect(await engine.getPage('dr')).not.toBeNull(); // 삭제 안 됨
+  });
+
   it('deletePage: 색인에서 removePage로 제거', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-'));
     tmpDirs.push(dir);

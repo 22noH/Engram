@@ -187,11 +187,13 @@ export class WikiEngine {
   // 게시된 페이지 본문 직접 교체(파괴적 — 사람 조작). updated만 갱신, 나머지 메타·status 보존.
   // updatePage(patch)와 동작이 겹치나 감사 이력에 'edit' 커밋을 남기려 별도 경로로 둔다.
   // ponytail: updatePage와 유사 — 분리 이유는 커밋 메시지(감사 신호)뿐. 통합하려면 커밋 메시지 인자화.
-  // 없는 페이지 → throw(호출자가 흡수). read-modify-write를 락으로 감싼다.
+  // 없는 페이지 → throw(호출자가 흡수). 게시전용: draft는 throw(제안 흐름 소관 — 서버가 스코프 강제).
+  // read-modify-write를 락으로 감싼다.
   async editPage(slug: string, body: string, userId: string = DEFAULT_USER): Promise<WikiPage> {
     return this.lock.run(`${userId}/${slug}`, async () => {
       const existing = await this.getPage(slug, userId);
       if (!existing) throw new Error(`Page not found: ${userId}/${slug}`);
+      if (existing.frontmatter.status !== 'published') throw new Error(`Not published: ${userId}/${slug}`);
       const edited: WikiPage = {
         ...existing,
         frontmatter: { ...existing.frontmatter, updated: new Date().toISOString() },
@@ -208,11 +210,12 @@ export class WikiEngine {
 
   // 페이지 하드삭제(파괴적 — 사람 조작). 파일 unlink → 삭제 스테이징 커밋 → 색인 제거.
   // git add <path>가 삭제도 스테이징하므로(git 2.x) commitAll 재사용으로 충분(새 WikiGit 메서드 불필요).
-  // 없는 페이지 → 멱등 no-op(false). 있으면 삭제하고 true. read-modify-write를 락으로 감싼다.
+  // 없는 페이지 → 멱등 no-op(false). 게시전용: draft도 no-op(false — 제안 흐름 소관, 서버가 스코프 강제).
+  // 있으면 삭제하고 true. read-modify-write를 락으로 감싼다.
   async deletePage(slug: string, userId: string = DEFAULT_USER): Promise<boolean> {
     return this.lock.run(`${userId}/${slug}`, async () => {
       const existing = await this.getPage(slug, userId);
-      if (!existing) return false;
+      if (!existing || existing.frontmatter.status !== 'published') return false;
       await fs.unlink(this.pagePath(slug, userId));
       await this.git.commitAll(`delete ${userId}/${slug}`, this.relPath(slug, userId));
       await this.indexer?.removePage(slug, userId);
