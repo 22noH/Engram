@@ -6,6 +6,9 @@ import { T } from '../i18n';
 const PERM_KEYS: { key: string; label: string }[] = [
   { key: 'wiki.approve', label: T.permWikiApprove },
   { key: 'channels.manage', label: T.permChannelsManage },
+  { key: 'wiki.unpublish', label: T.permWikiUnpublish },
+  { key: 'wiki.edit', label: T.permWikiEdit },
+  { key: 'wiki.delete', label: T.permWikiDelete },
 ];
 
 // 관리 영역(스펙 §2.5) — owner에게만 App이 렌더. 순수 UI, 통신은 App 콜백(ws admin 프레임).

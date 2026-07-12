@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { AdminUserDto } from '../../../shared/protocol';
 import { AdminArea } from './AdminArea';
 
 const users = [
@@ -47,5 +48,35 @@ describe('AdminArea', () => {
     render(<AdminArea users={users3} settings={{}} onSetPermissions={()=>{}}
       onApprove={()=>{}} onSuspend={()=>{}} onRestore={()=>{}} onResetPassword={()=>{}} onForceLogout={()=>{}} onSaveSettings={()=>{}} />);
     expect(screen.queryAllByRole('checkbox').length).toBe(0);
+  });
+  it('active 멤버 행에 위키 파괴 3키 체크박스가 렌더된다', () => {
+    const users: AdminUserDto[] = [
+      { id: 'm1', displayName: 'Mem', role: 'member', loginId: 'mem', status: 'active', createdAt: '2026-01-01', sso: false, permissions: [] },
+    ];
+    render(
+      <AdminArea users={users} settings={null}
+        onApprove={() => {}} onSuspend={() => {}} onRestore={() => {}}
+        onResetPassword={() => {}} onForceLogout={() => {}} onSaveSettings={() => {}}
+        onSetPermissions={() => {}} />,
+    );
+    expect(document.querySelector('input[data-perm="wiki.unpublish"]')).toBeTruthy();
+    expect(document.querySelector('input[data-perm="wiki.edit"]')).toBeTruthy();
+    expect(document.querySelector('input[data-perm="wiki.delete"]')).toBeTruthy();
+  });
+
+  it('wiki.delete 체크 시 onSetPermissions에 키가 추가된다', () => {
+    const calls: { id: string; perms: string[] }[] = [];
+    const users: AdminUserDto[] = [
+      { id: 'm1', displayName: 'Mem', role: 'member', loginId: 'mem', status: 'active', createdAt: '2026-01-01', sso: false, permissions: [] },
+    ];
+    render(
+      <AdminArea users={users} settings={null}
+        onApprove={() => {}} onSuspend={() => {}} onRestore={() => {}}
+        onResetPassword={() => {}} onForceLogout={() => {}} onSaveSettings={() => {}}
+        onSetPermissions={(id, perms) => calls.push({ id, perms })} />,
+    );
+    const box = document.querySelector('input[data-perm="wiki.delete"]') as HTMLInputElement;
+    fireEvent.click(box);
+    expect(calls).toEqual([{ id: 'm1', perms: ['wiki.delete'] }]);
   });
 });
