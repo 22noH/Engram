@@ -13,13 +13,14 @@ export function Channels(props: {
   myId?: string;
   onSelect: (id: string) => void;
   onSetMode: (m: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
-  onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin') => void;
+  onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin', visibility?: 'public' | 'private') => void;
   onDelete: (id: string) => void;
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
   showAdmin?: boolean;
 }) {
   const { channels, current, mode } = props;
   const [creating, setCreating] = useState(false);
+  const [newPrivate, setNewPrivate] = useState(false);
   // 팝오버: 열린 채널 id + ⋯ 앵커 좌표(rect.left/bottom). 실제 화면 좌표는 렌더 후 실측해서 pos에.
   const [menu, setMenu] = useState<{ id: string; ax: number; ay: number } | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: -9999, top: -9999 });
@@ -71,6 +72,7 @@ export function Channels(props: {
           {visible.map((c) => (
             <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
               <span>{'# ' + c.name}</span>
+              {c.visibility === 'private' && <span className="lock" title={T.channelPrivate} aria-label={T.channelPrivate}>🔒</span>}
               {canManage(c) && <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>}
             </div>
           ))}
@@ -93,17 +95,23 @@ export function Channels(props: {
       {mode !== 'wiki' && mode !== 'admin' && (
         <div id="newch">
           {creating ? (
-            <input
-              autoFocus
-              type="text"
-              placeholder={mode === 'code' ? T.newCodeChannelPrompt : T.newChannelPrompt}
-              onKeyDown={(e) => {
-                const v = (e.target as HTMLInputElement).value;
-                if (e.key === 'Enter' && v.trim()) { props.onCreate(v, mode); setCreating(false); }
-                else if (e.key === 'Escape') setCreating(false);
-              }}
-              onBlur={() => setCreating(false)}
-            />
+            <>
+              <input
+                autoFocus
+                type="text"
+                placeholder={mode === 'code' ? T.newCodeChannelPrompt : T.newChannelPrompt}
+                onKeyDown={(e) => {
+                  const v = (e.target as HTMLInputElement).value;
+                  if (e.key === 'Enter' && v.trim()) { props.onCreate(v, mode, newPrivate ? 'private' : undefined); setCreating(false); setNewPrivate(false); }
+                  else if (e.key === 'Escape') setCreating(false);
+                }}
+                onBlur={() => setCreating(false)}
+              />
+              <label className="privToggle" onMouseDown={(e) => e.preventDefault()}>
+                <input type="checkbox" checked={newPrivate} onChange={(e) => setNewPrivate(e.target.checked)} />
+                {T.newChannelPrivate}
+              </label>
+            </>
           ) : (
             <span onClick={() => setCreating(true)}>{T.newChannel}</span>
           )}

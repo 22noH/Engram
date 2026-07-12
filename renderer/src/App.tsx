@@ -424,7 +424,7 @@ export default function App() {
           canManageChannels={allow(meByConn[connState.defaultConnId], 'channels.manage')}
           myId={meByConn[connState.defaultConnId]?.id}
           onSelect={(name) => setCurrentName(name)} onSetMode={setMode}
-          onCreate={(name, m) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m }); }}
+          onCreate={(name, m, visibility) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m, ...(visibility ? { visibility } : {}) }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
           showAdmin={meByConn[connState.defaultConnId]?.role === 'owner'}

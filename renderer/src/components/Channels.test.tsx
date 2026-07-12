@@ -33,3 +33,17 @@ it('canManageChannels=true면 남 채널도 ⋯메뉴 표시', () => {
     onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
   expect(screen.getByText('⋯')).toBeTruthy();
 });
+
+it('visibility=private 채널은 자물쇠 마커 표시', () => {
+  const channels = [{ id: 'secret', name: 'secret', respondMode: 'all' as const, mode: 'chat' as const, visibility: 'private' as const }];
+  render(<Channels channels={channels} current="secret" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
+  expect(screen.getByTitle(/private|비공개/i)).toBeTruthy();
+});
+
+it('공개 채널은 자물쇠 없음', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} />);
+  expect(screen.queryByTitle(/private|비공개/i)).toBeNull();
+});

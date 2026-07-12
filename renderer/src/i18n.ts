@@ -84,4 +84,7 @@ export const T = {
   permChannelsManage: ko ? '채널 관리' : 'Manage channels',
   permAll: ko ? '전체 (owner)' : 'all (owner)',
   adminPermissions: ko ? '권한' : 'Permissions',
+  // Phase 16c — 비공개 채널
+  channelPrivate: ko ? '비공개' : 'Private',
+  newChannelPrivate: ko ? '비공개 채널' : 'Private channel',
 };
