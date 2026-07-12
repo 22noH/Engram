@@ -122,7 +122,12 @@ export default function App() {
       setErrText((prev) => ({ ...prev, [connId]: f.text }));
     } else if (connId === connState.defaultConnId) {
       // 위키/제안 프레임 — 위키는 기본 연결(그 서버)로만 스코프된다(팀 채널과 동일한 원칙).
-      if (f.t === 'wikiPages') setWikiPages(f.list);
+      if (f.t === 'wikiPages') {
+        setWikiPages(f.list);
+        // 다른 사용자가 내가 열람 중인 페이지를 삭제하면 목록에서 사라진다 — 열람도 비워 stale 문서 방지.
+        const open = wikiOpenRef.current;
+        if (open && !f.list.some((p) => p.slug === open.slug)) setWikiOpen(null);
+      }
       else if (f.t === 'wikiPage') setWikiOpen(f.page);
       else if (f.t === 'proposals') setProposals(f.list);
       else if (f.t === 'wikiChanged') {

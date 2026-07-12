@@ -165,6 +165,19 @@ describe('WikiEngine 파괴적 행위', () => {
     await engine.deletePage('d');
     expect(removed).toEqual(['d']);
   });
+
+  it('deletePage: 삭제가 delete 커밋으로 스테이징된다(relPath 삭제 스테이징 고정)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-'));
+    tmpDirs.push(dir);
+    const paths = new PathResolver(dir);
+    const git = new WikiGit(paths);
+    await git.ensureRepo();
+    const engine = new WikiEngine(paths, git, new KeyedLock());
+    await engine.createPage({ slug: 'd', title: 'T', category: 'c', body: 'x', status: 'published' });
+    await engine.deletePage('d');
+    // commitAll(msg, relPath)이 git add <relPath>로 삭제를 스테이징해 실제 커밋으로 남는지 고정(빈커밋 no-op 아님).
+    expect((await git.recentMessages()).some((m) => m.includes('delete') && m.includes('d'))).toBe(true);
+  });
 });
 
 afterAll(async () => {
