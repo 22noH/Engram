@@ -193,7 +193,12 @@ export class WikiGit {
     const slug = path.basename(rel, '.md');
     const oursRaw = await this.showStage(2, rel);
     const theirsRaw = await this.showStage(3, rel);
-    if (oursRaw == null || theirsRaw == null) throw new Error(`stage 없음: ${rel}`); // → 상위 catch가 abort
+    // delete/modify 충돌: 한쪽 스테이지가 없음 = 그쪽이 삭제. "삭제가 이김" — 내용 병합 없이 삭제를 스테이징.
+    // 양쪽 다 삭제(delete/delete)는 git이 자동 병합해 애초에 충돌 목록에 안 들어온다.
+    if (oursRaw == null || theirsRaw == null) {
+      await this.git.raw(['rm', '--force', rel]);
+      return;
+    }
     const ours = parsePage(slug, oursRaw);
     const theirs = parsePage(slug, theirsRaw);
     const frontmatter = reconcileFrontmatter(ours.frontmatter, theirs.frontmatter);

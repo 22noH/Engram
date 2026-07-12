@@ -117,6 +117,23 @@ describe('WikiGit 원격', () => {
     expect(body).not.toContain('<<<<<<<');     // 충돌 마커 없음(손상 없음)
   });
 
+  it('한쪽 삭제 + 다른쪽 수정 동시 → pull 시 "삭제가 이김"(conflict:false·파일 사라짐)', async () => {
+    // 공통 base 확보
+    await writeFullPage(dirA, 'alpha', { body: 'base', updated: '2026-01-01T00:00:00.000Z' });
+    await gitA.ensureRemote(remote); await gitA.commitAll('base'); await gitA.push('main');
+    await gitB.ensureRemote(remote); await gitB.pull('main');
+    // A가 alpha를 하드삭제하고 push
+    fs.unlinkSync(path.join(dirA, 'wiki', 'pages', 'default', 'alpha.md'));
+    await gitA.commitAll('delete alpha'); await gitA.push('main');
+    // B가 같은 alpha를 수정·커밋 후 pull → delete/modify 충돌 → 삭제가 이김
+    await writeFullPage(dirB, 'alpha', { body: 'B-edit', updated: '2026-01-03T00:00:00.000Z' });
+    await gitB.commitAll('b-edit');
+    const pr = await gitB.pull('main');
+    expect(pr).toEqual({ ok: true, conflict: false });
+    // B에서도 파일이 사라짐(삭제 반영)
+    expect(fs.existsSync(path.join(dirB, 'wiki', 'pages', 'default', 'alpha.md'))).toBe(false);
+  });
+
   describe('WikiGit 동시 편집 자동 병합', () => {
     // (상위 describe의 beforeEach가 remote/dirA/dirB/gitA/gitB를 준비한다)
     it('본문 다른 줄 편집 + frontmatter 다름 → 깨끗 병합(양쪽 다 있음, conflict:false)', async () => {
