@@ -47,7 +47,7 @@ it('clicking "set default" on a non-default row calls onSetDefault(id)', () => {
 
 describe('Add local brain button', () => {
   afterEach(() => {
-    delete (window.engramDesktop as any);
+    delete (window as any).engramDesktop;
   });
 
   it('does not render "Add local brain" button when window.engramDesktop is undefined', () => {

@@ -79,4 +79,9 @@ export const T = {
   statusPending: ko ? '대기' : 'pending',
   statusActive: ko ? '활성' : 'active',
   statusSuspended: ko ? '정지' : 'suspended',
+  // Phase 16b — 권한 체크박스
+  permWikiApprove: ko ? '위키 승인' : 'Approve wiki',
+  permChannelsManage: ko ? '채널 관리' : 'Manage channels',
+  permAll: ko ? '전체 (owner)' : 'all (owner)',
+  adminPermissions: ko ? '권한' : 'Permissions',
 };

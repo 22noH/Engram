@@ -440,6 +440,7 @@ export default function App() {
               onResetPassword={(id, password) => send(connState.defaultConnId, { t: 'adminResetPassword', id, password })}
               onForceLogout={(id) => send(connState.defaultConnId, { t: 'adminForceLogout', id })}
               onSaveSettings={(s) => send(connState.defaultConnId, { t: 'adminSetSettings', settings: s })}
+              onSetPermissions={(id, permissions) => send(connState.defaultConnId, { t: 'adminSetPermissions', id, permissions })}
             />
           ) : mode === 'wiki' ? (
             <WikiArea
