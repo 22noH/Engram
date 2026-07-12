@@ -66,3 +66,27 @@ describe('AccountStore', () => {
     expect(a.loginId).toContain('#engram');
   });
 });
+
+describe('AccountStore.setPermissions (Phase 16b)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'accp-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('member 권한 설정·재로드 영속·알 수 없는 키 필터', () => {
+    const s = new AccountStore(dir);
+    const a = s.createPassword('kim', 'pw', 'Kim', { status: 'active' });
+    expect(s.setPermissions(a.id, ['wiki.approve', 'bogus' as any])).toBe(true);
+    expect(new AccountStore(dir).get(a.id)?.permissions).toEqual(['wiki.approve']);
+  });
+
+  it('owner 대상은 no-op(권한 배열 미기록, true 반환)', () => {
+    const s = new AccountStore(dir);
+    const o = s.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+    expect(s.setPermissions(o.id, ['wiki.approve'])).toBe(true);
+    expect(s.get(o.id)?.permissions).toBeUndefined(); // owner는 전권이라 배열 무의미
+  });
+
+  it('없는 id는 false', () => {
+    expect(new AccountStore(dir).setPermissions('없음', ['wiki.approve'])).toBe(false);
+  });
+});

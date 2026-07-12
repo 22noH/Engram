@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { sanitizePermissions, type Permission } from './permissions';
 
 // 계정 저장소(Phase 16a 스펙 §2.2). accounts.json 단일 파일, 손상 시 빈 목록(chat-store 관례).
 // 비밀번호 = scrypt(사용자별 salt) 해시만 저장. 'engram'은 예약(사칭 방지).
@@ -12,6 +13,7 @@ export interface Account {
   pass?: { salt: string; hash: string };
   oidc?: { issuer: string; sub: string; email?: string };
   role: AccountRole; status: AccountStatus; createdAt: string;
+  permissions?: string[]; // Phase 16b — member의 세분 권한. owner는 전권이라 무시.
 }
 
 const RESERVED = 'engram';
@@ -107,6 +109,16 @@ export class AccountStore {
     if (!a) return false;
     const salt = randomBytes(16).toString('hex');
     a.pass = { salt, hash: hashPw(password, salt) };
+    this.save(list);
+    return true;
+  }
+
+  setPermissions(id: string, permissions: Permission[]): boolean {
+    const list = this.load();
+    const a = list.find((x) => x.id === id);
+    if (!a) return false;
+    if (a.role === 'owner') return true; // owner는 전권 — 배열 미기록(혼동 방지)
+    a.permissions = sanitizePermissions(permissions);
     this.save(list);
     return true;
   }
