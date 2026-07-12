@@ -615,6 +615,7 @@ function fakeProposal(id: string, status: Proposal['status'] = 'pending'): Propo
 describe('SelfMessenger 위키·승인함', () => {
   let dir: string; let store: ChatStore; let sm: SelfMessenger; let client: WebSocket;
   let pages: WikiPage[]; let proposals: Proposal[]; let applied: string[]; let rejected: string[];
+  let unpublished: string[]; let edited: { slug: string; body: string }[]; let deleted: string[];
 
   beforeEach(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-wiki-'));
@@ -622,10 +623,14 @@ describe('SelfMessenger 위키·승인함', () => {
     pages = [fakePage('alpha'), fakePage('beta', 'draft')];
     proposals = [fakeProposal('p1'), fakeProposal('p2')];
     applied = []; rejected = [];
+    unpublished = []; edited = []; deleted = [];
     const wikiDeps = {
       wiki: {
         listPages: async () => pages,
         getPage: async (slug: string) => pages.find((p) => p.slug === slug) ?? null,
+        unpublishPage: async (slug: string) => { unpublished.push(slug); return {} as WikiPage; },
+        editPage: async (slug: string, body: string) => { edited.push({ slug, body }); return {} as WikiPage; },
+        deletePage: async (slug: string) => { deleted.push(slug); return true; },
       },
       proposals: {
         listPending: async () => proposals.filter((p) => p.status === 'pending'),
@@ -701,6 +706,33 @@ describe('SelfMessenger 위키·승인함', () => {
     const f = await nextFrame(client);
     expect(f.t).toBe('wikiPages');
     expect(applied).toEqual([]);
+  });
+
+  it('wikiUnpublish → unpublishPage 호출 + wikiChanged 브로드캐스트', async () => {
+    const got: string[] = [];
+    client.on('message', (d) => got.push(JSON.parse(String(d)).t));
+    client.send(JSON.stringify({ t: 'wikiUnpublish', slug: 'alpha' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(unpublished).toEqual(['alpha']);
+    expect(got).toContain('wikiChanged');
+  });
+
+  it('wikiEdit → editPage(slug, body) 호출 + wikiChanged', async () => {
+    const got: string[] = [];
+    client.on('message', (d) => got.push(JSON.parse(String(d)).t));
+    client.send(JSON.stringify({ t: 'wikiEdit', slug: 'alpha', body: 'NEW' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(edited).toEqual([{ slug: 'alpha', body: 'NEW' }]);
+    expect(got).toContain('wikiChanged');
+  });
+
+  it('wikiDelete → deletePage 호출 + wikiChanged', async () => {
+    const got: string[] = [];
+    client.on('message', (d) => got.push(JSON.parse(String(d)).t));
+    client.send(JSON.stringify({ t: 'wikiDelete', slug: 'alpha' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(deleted).toEqual(['alpha']);
+    expect(got).toContain('wikiChanged');
   });
 
   it('wikiDeps 미주입 시 wikiList는 무시(no-op) — 뒤이은 channels만 응답', async () => {
@@ -808,6 +840,70 @@ describe('권한 게이트(Phase 16b)', () => {
     expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
     c.terminate();
     await sm.stop();
+  });
+
+  it('권한 없는 member의 wikiDelete/wikiEdit/wikiUnpublish는 무시(메서드 미호출)', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat')); store.listChannels();
+    const calls: string[] = [];
+    const wikiDeps = {
+      wiki: {
+        listPages: async () => [], getPage: async () => null,
+        unpublishPage: async () => { calls.push('unpublish'); return {} as WikiPage; },
+        editPage: async () => { calls.push('edit'); return {} as WikiPage; },
+        deletePage: async () => { calls.push('delete'); return true; },
+      },
+      proposals: { listPending: async () => [], get: async () => null },
+      applier: { apply: async () => {}, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as never, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'wikiDelete', slug: 'x' }));
+    c.send(JSON.stringify({ t: 'wikiEdit', slug: 'x', body: 'y' }));
+    c.send(JSON.stringify({ t: 'wikiUnpublish', slug: 'x' }));
+    expect(await noFrameWithin(c)).toBe('timeout');
+    expect(calls).toEqual([]);
+    c.terminate(); await sm.stop();
+  });
+
+  it('권한 보유 member의 wikiDelete는 통과(deletePage 호출 + wikiChanged)', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    deps.accounts.setPermissions(acc.id, ['wiki.delete']);
+    const store = new ChatStore(path.join(dir, 'chat')); store.listChannels();
+    const calls: string[] = [];
+    const wikiDeps = {
+      wiki: {
+        listPages: async () => [], getPage: async () => null,
+        unpublishPage: async () => ({} as WikiPage),
+        editPage: async () => ({} as WikiPage),
+        deletePage: async () => { calls.push('delete'); return true; },
+      },
+      proposals: { listPending: async () => [], get: async () => null },
+      applier: { apply: async () => {}, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as never, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    const got: string[] = [];
+    c.on('message', (d) => got.push(JSON.parse(String(d)).t));
+    c.send(JSON.stringify({ t: 'wikiDelete', slug: 'x' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toEqual(['delete']);
+    expect(got).toContain('wikiChanged');
+    c.terminate(); await sm.stop();
   });
 
   it('내가 만든 채널은 channels.manage 없이도 삭제 가능', async () => {

@@ -305,6 +305,27 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'wikiPage', page: toPageDto(page) });
           return;
         }
+        case 'wikiUnpublish': {
+          if (!this.wikiDeps || typeof f.slug !== 'string') return;
+          if (!this.allowed(ws, 'wiki.unpublish')) return; // 무권한 조용히 무시
+          await this.wikiDeps.wiki.unpublishPage(f.slug);
+          this.broadcast({ t: 'wikiChanged' });
+          return;
+        }
+        case 'wikiEdit': {
+          if (!this.wikiDeps || typeof f.slug !== 'string' || typeof f.body !== 'string') return;
+          if (!this.allowed(ws, 'wiki.edit')) return;
+          await this.wikiDeps.wiki.editPage(f.slug, f.body);
+          this.broadcast({ t: 'wikiChanged' });
+          return;
+        }
+        case 'wikiDelete': {
+          if (!this.wikiDeps || typeof f.slug !== 'string') return;
+          if (!this.allowed(ws, 'wiki.delete')) return;
+          await this.wikiDeps.wiki.deletePage(f.slug);
+          this.broadcast({ t: 'wikiChanged' });
+          return;
+        }
         case 'proposalsList': {
           if (!this.wikiDeps) return;
           const list = (await this.wikiDeps.proposals.listPending(DEFAULT_USER)).map(toProposalDto);

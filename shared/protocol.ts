@@ -63,6 +63,9 @@ export type ClientFrame =
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
   | { t: 'wikiList' }
   | { t: 'wikiGet'; slug: string }
+  | { t: 'wikiUnpublish'; slug: string }
+  | { t: 'wikiEdit'; slug: string; body: string }
+  | { t: 'wikiDelete'; slug: string }
   | { t: 'proposalsList' }
   | { t: 'proposalApprove'; id: string }
   | { t: 'proposalReject'; id: string }
