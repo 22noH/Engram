@@ -120,6 +120,53 @@ describe('WikiEngine 상태(draft/published)', () => {
   });
 });
 
+describe('WikiEngine 파괴적 행위', () => {
+  it('editPage: 게시 페이지 본문 교체·updated 갱신·published 유지·메타 보존', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'p', title: 'T', category: 'c', body: 'old', sources: ['s1'], status: 'published' });
+    const before = await engine.getPage('p');
+    const edited = await engine.editPage('p', 'new body');
+    expect(edited.body).toBe('new body');
+    expect(edited.frontmatter.status).toBe('published');
+    expect(edited.frontmatter.title).toBe('T');
+    expect(edited.frontmatter.sources).toEqual(['s1']);
+    expect(edited.frontmatter.updated >= before!.frontmatter.updated).toBe(true);
+    // 다시 읽어도 반영됨
+    expect((await engine.getPage('p'))?.body).toBe('new body');
+  });
+
+  it('editPage: 없는 페이지는 throw', async () => {
+    const engine = await makeEngine();
+    await expect(engine.editPage('nope', 'x')).rejects.toThrow();
+  });
+
+  it('deletePage: 파일 제거 + true 반환', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'd', title: 'T', category: 'c', body: 'x', status: 'published' });
+    expect(await engine.deletePage('d')).toBe(true);
+    expect(await engine.getPage('d')).toBeNull();
+  });
+
+  it('deletePage: 없는 페이지는 멱등 no-op(false)', async () => {
+    const engine = await makeEngine();
+    expect(await engine.deletePage('nope')).toBe(false);
+  });
+
+  it('deletePage: 색인에서 removePage로 제거', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-wiki-'));
+    tmpDirs.push(dir);
+    const paths = new PathResolver(dir);
+    const git = new WikiGit(paths);
+    await git.ensureRepo();
+    const removed: string[] = [];
+    const indexer = { indexPage: async () => {}, removePage: async (slug: string) => { removed.push(slug); } };
+    const engine = new WikiEngine(paths, git, new KeyedLock(), indexer as never);
+    await engine.createPage({ slug: 'd', title: 'T', category: 'c', body: 'x', status: 'published' });
+    await engine.deletePage('d');
+    expect(removed).toEqual(['d']);
+  });
+});
+
 afterAll(async () => {
   for (const d of tmpDirs) {
     await fs.rm(d, { recursive: true, force: true });
