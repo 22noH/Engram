@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { ServerFrame, Action } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
+import type { ChatChannel } from './chat-store';
 import { ChatConfig } from './chat.config';
 import { DEFAULT_USER } from '../../pal/path-resolver';
 import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
@@ -14,6 +15,7 @@ import type { AccountStore, Account } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
 import type { AuthSettings } from '../auth/auth.config';
+import { can, type Permission } from '../auth/permissions';
 
 interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
 
@@ -151,6 +153,19 @@ export class SelfMessenger implements MessengerPort {
     const me = this.users.get(ws);
     return !!this.authDeps && me?.role === 'owner';
   }
+
+  // Phase 16b: 세분 권한 게이트. authDeps 미주입(무인증 모드)이면 전부 통과(현행 유지 — 회귀 금지).
+  private allowed(ws: WebSocket, perm: Permission): boolean {
+    if (!this.authDeps) return true;
+    return can(this.users.get(ws), perm);
+  }
+  // 채널 관리 게이트: channels.manage 보유 또는 그 채널을 만든 본인(소유권 예외).
+  private canManageChannel(ws: WebSocket, ch: ChatChannel | undefined): boolean {
+    if (!this.authDeps) return true;
+    const me = this.users.get(ws);
+    if (!me) return false;
+    return can(me, 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
+  }
   private adminList(): AdminUserDto[] {
     return this.authDeps!.accounts.list().map((a) => ({
       id: a.id, displayName: a.displayName, role: a.role,
@@ -170,7 +185,7 @@ export class SelfMessenger implements MessengerPort {
       if (acc && acc.status === 'active') {
         this.authed.add(ws);
         this.users.set(ws, acc);
-        this.sendTo(ws, { t: 'authOk', user: { id: acc.id, displayName: acc.displayName, role: acc.role } });
+        this.sendTo(ws, { t: 'authOk', user: { id: acc.id, displayName: acc.displayName, role: acc.role, permissions: acc.permissions ?? [] } });
       } else {
         this.sendTo(ws, { t: 'authErr' });
         try { ws.close(); } catch { /* 격리 */ }
@@ -190,25 +205,39 @@ export class SelfMessenger implements MessengerPort {
         case 'channels':
           this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
           return;
-        case 'createChannel':
+        case 'createChannel': {
           if (this.cfg.role === 'brain' && f.mode === 'team') return; // brain=개인 연산용, 팀 방 없음
-          if (typeof f.name === 'string') this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat');
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
-          return;
-        case 'setRepoPath':
-          if (typeof f.id === 'string' && typeof f.repoPath === 'string') this.store.setRepoPath(f.id, f.repoPath);
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
-          return;
-        case 'deleteChannel':
-          if (typeof f.id === 'string') this.store.deleteChannel(f.id);
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
-          return;
-        case 'setRespondMode':
-          if (typeof f.id === 'string' && (f.mode === 'all' || f.mode === 'mention')) {
-            this.store.setRespondMode(f.id, f.mode);
+          const me = this.users.get(ws);
+          if (typeof f.name === 'string') {
+            this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat', me?.id);
           }
           this.broadcast({ t: 'channels', list: this.store.listChannels() });
           return;
+        }
+        case 'setRepoPath': {
+          if (typeof f.id === 'string' && typeof f.repoPath === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canManageChannel(ws, ch)) this.store.setRepoPath(f.id, f.repoPath);
+          }
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        }
+        case 'deleteChannel': {
+          if (typeof f.id === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canManageChannel(ws, ch)) this.store.deleteChannel(f.id);
+          }
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        }
+        case 'setRespondMode': {
+          if (typeof f.id === 'string' && (f.mode === 'all' || f.mode === 'mention')) {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canManageChannel(ws, ch)) this.store.setRespondMode(f.id, f.mode);
+          }
+          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          return;
+        }
         case 'wikiList': {
           if (!this.wikiDeps) return;
           const list = (await this.wikiDeps.wiki.listPages()).map(toPageMeta);
@@ -230,6 +259,7 @@ export class SelfMessenger implements MessengerPort {
         }
         case 'proposalApprove': {
           if (!this.wikiDeps || typeof f.id !== 'string') return;
+          if (!this.allowed(ws, 'wiki.approve')) return;   // 무권한 무시
           if (this.approving.has(f.id)) return;  // 동시 승인 창 — 중복 반영 차단
           this.approving.add(f.id);              // 동기 마킹(다음 요청이 즉시 봄)
           try {
@@ -245,6 +275,7 @@ export class SelfMessenger implements MessengerPort {
         }
         case 'proposalReject': {
           if (!this.wikiDeps || typeof f.id !== 'string') return;
+          if (!this.allowed(ws, 'wiki.approve')) return;   // 무권한 무시
           const p = await this.wikiDeps.proposals.get(f.id);
           if (!p || p.status !== 'pending') return;
           await this.wikiDeps.applier.reject(p);

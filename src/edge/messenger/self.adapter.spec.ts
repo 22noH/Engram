@@ -325,7 +325,7 @@ describe('세션 인증(Phase 16a)', () => {
     const c = await connect();
     c.send(JSON.stringify({ t: 'auth', token: sess.token }));
     const f = await nextFrame(c);
-    expect(f).toEqual({ t: 'authOk', user: { id: acc.id, displayName: 'Kim', role: 'member' } });
+    expect(f).toEqual({ t: 'authOk', user: { id: acc.id, displayName: 'Kim', role: 'member', permissions: [] } });
     c.send(JSON.stringify({ t: 'channels' }));
     const f2 = await nextFrame(c);
     expect(f2.t).toBe('channels');
@@ -694,5 +694,186 @@ describe('SelfMessenger 위키·승인함', () => {
     client2.terminate();
     await sm2.stop();
     fs.rmSync(dir2, { recursive: true, force: true });
+  });
+});
+
+describe('권한 게이트(Phase 16b)', () => {
+  let dir: string;
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  function noFrameWithin(ws: WebSocket, ms = 150): Promise<'frame' | 'timeout'> {
+    return Promise.race([
+      nextFrame(ws).then(() => 'frame' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms)),
+    ]);
+  }
+
+  it('authOk가 자기 permissions를 실어 보냄', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    deps.accounts.setPermissions(acc.id, ['wiki.approve']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('authOk');
+    expect(f.user.permissions).toEqual(['wiki.approve']);
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('wiki.approve 없는 member의 proposalApprove는 무시(제안 그대로 pending)', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    const wikiDeps = {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: { listPending: async () => [proposal], get: async (id: string) => (id === proposal.id ? proposal : null) },
+      applier: { apply: async (p: Proposal) => { applied.push(p.id); }, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    expect(await noFrameWithin(c)).toBe('timeout');
+    expect(applied).toEqual([]);
+    expect(proposal.status).toBe('pending');
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('wiki.approve 보유 member의 proposalApprove는 통과', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    deps.accounts.setPermissions(acc.id, ['wiki.approve']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    const wikiDeps = {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: { listPending: async () => [proposal], get: async (id: string) => (id === proposal.id ? proposal : null) },
+      applier: { apply: async (p: Proposal) => { applied.push(p.id); }, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    const got: string[] = [];
+    c.on('message', (d) => got.push(JSON.parse(String(d)).t));
+    c.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(applied).toEqual([proposal.id]);
+    expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('내가 만든 채널은 channels.manage 없이도 삭제 가능', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'createChannel', name: 'mine' }));
+    const f1 = await nextFrame(c);
+    const ch = f1.list.find((x: { name: string }) => x.name === 'mine');
+    expect(ch).toBeDefined();
+    c.send(JSON.stringify({ t: 'deleteChannel', id: ch.id }));
+    const f2 = await nextFrame(c);
+    expect(f2.list.find((x: { id: string }) => x.id === ch.id)).toBeUndefined();
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('남이 만든 채널은 channels.manage 없으면 삭제 무시', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('theirs', 'chat', 'other')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'deleteChannel', id: ch.id }));
+    const f = await nextFrame(c);
+    expect(f.list.find((x: { id: string }) => x.id === ch.id)).toBeDefined();
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('channels.manage 보유 member는 남 채널도 삭제 가능', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const deps = makeAuthDeps(dir);
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    deps.accounts.setPermissions(acc.id, ['channels.manage']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('theirs', 'chat', 'other')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'deleteChannel', id: ch.id }));
+    const f = await nextFrame(c);
+    expect(f.list.find((x: { id: string }) => x.id === ch.id)).toBeUndefined();
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('무인증 모드(authDeps 없음)는 전부 통과(회귀)', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perm-'));
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('theirs', 'chat', 'other')!;
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    const wikiDeps = {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: { listPending: async () => [proposal], get: async (id: string) => (id === proposal.id ? proposal : null) },
+      applier: { apply: async (p: Proposal) => { applied.push(p.id); }, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'deleteChannel', id: ch.id }));
+    const f = await nextFrame(c);
+    expect(f.list.find((x: { id: string }) => x.id === ch.id)).toBeUndefined();
+    c.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(applied).toEqual([proposal.id]);
+    c.terminate();
+    await sm.stop();
   });
 });

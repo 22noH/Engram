@@ -14,6 +14,7 @@ export interface Channel {
   respondMode: 'all' | 'mention';
   mode?: 'chat' | 'code' | 'team'; // 누락/오염=chat
   repoPath?: string;      // Code 채널이 바인딩한 레포 절대경로
+  creatorId?: string;     // Phase 16b: 만든 사람(소유권 예외)
 }
 
 export interface Message {
@@ -26,7 +27,7 @@ export interface Message {
   actions?: Action[];
 }
 
-export interface UserDto { id: string; displayName: string; role: 'owner' | 'member' }
+export interface UserDto { id: string; displayName: string; role: 'owner' | 'member'; permissions?: string[] }
 export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean }
 export interface AdminSettings { serverName?: string; oidc?: { issuer: string; clientId: string; clientSecret: string } }
 
