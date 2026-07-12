@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Channel, ClientFrame, Message as Msg, ServerFrame, UserDto } from '../../shared/protocol';
+import type { Channel, ClientFrame, Message as Msg, RosterEntry, ServerFrame, UserDto } from '../../shared/protocol';
 import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
 import { fetchStatus, apiLogin, apiRegister, apiSetup, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
 import { Channels } from './components/Channels';
+import { ChannelMembers } from './components/ChannelMembers';
 import { Thread } from './components/Thread';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
@@ -49,6 +50,9 @@ export default function App() {
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserDto[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings | null>(null);
+  // Phase 16c — 비공개 채널 멤버 관리(주인 전용, 기본 연결의 실제 채널 대상).
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [membersFor, setMembersFor] = useState<string | null>(null); // 관리 중인 실제 채널 id(기본 연결)
   // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
   // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
   const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
@@ -129,6 +133,7 @@ export default function App() {
       else if (f.t === 'proposalsChanged') send(connState.defaultConnId, { t: 'proposalsList' });
       else if (f.t === 'adminUsers') setAdminUsers(f.list);
       else if (f.t === 'adminSettings') setAdminSettings(f.settings);
+      else if (f.t === 'roster') setRoster(f.list);
     }
   }
 
@@ -266,7 +271,11 @@ export default function App() {
   const sidebarChannels: Channel[] = mode === 'wiki' || mode === 'admin' ? [] : logicalChannels(viewChannelsByConn, mode).map((name) => {
     const fromDefault = viewChannelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
     const any = fromDefault ?? Object.values(viewChannelsByConn).flat().find((c) => c.name === name && (c.mode ?? 'chat') === mode);
-    return { id: name, name, respondMode: any?.respondMode ?? 'all', mode, ...(any?.creatorId ? { creatorId: any.creatorId } : {}) };
+    return {
+      id: name, name, respondMode: any?.respondMode ?? 'all', mode,
+      ...(any?.creatorId ? { creatorId: any.creatorId } : {}),
+      ...(any?.visibility ? { visibility: any.visibility } : {}),
+    };
   });
   // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
   const defaultChan = currentName
@@ -427,8 +436,27 @@ export default function App() {
           onCreate={(name, m, visibility) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m, ...(visibility ? { visibility } : {}) }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
+          onManageMembers={(name) => {
+            const ch = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
+            if (ch) { setMembersFor(ch.id); send(connState.defaultConnId, { t: 'channelRoster' }); }
+          }}
           showAdmin={meByConn[connState.defaultConnId]?.role === 'owner'}
         />
+        {membersFor && (() => {
+          const ch = channelsByConn[connState.defaultConnId]?.find((c) => c.id === membersFor);
+          if (!ch) return null;
+          return (
+            <ChannelMembers
+              roster={roster}
+              memberIds={ch.memberIds ?? []}
+              creatorId={ch.creatorId}
+              visibility={ch.visibility ?? 'public'}
+              onSetMembers={(memberIds) => send(connState.defaultConnId, { t: 'setChannelMembers', id: ch.id, memberIds })}
+              onSetVisibility={(v) => send(connState.defaultConnId, { t: 'setChannelVisibility', id: ch.id, visibility: v })}
+              onClose={() => setMembersFor(null)}
+            />
+          );
+        })()}
         <div id="main">
           {mode === 'admin' ? (
             <AdminArea

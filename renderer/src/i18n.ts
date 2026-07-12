@@ -87,4 +87,8 @@ export const T = {
   // Phase 16c — 비공개 채널
   channelPrivate: ko ? '비공개' : 'Private',
   newChannelPrivate: ko ? '비공개 채널' : 'Private channel',
+  manageMembers: ko ? '멤버 관리' : 'Manage members',
+  makePrivate: ko ? '비공개로 전환' : 'Make private',
+  makePublic: ko ? '공개로 전환' : 'Make public',
+  membersClose: ko ? '닫기' : 'Close',
 };

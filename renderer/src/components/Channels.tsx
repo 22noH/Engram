@@ -16,6 +16,7 @@ export function Channels(props: {
   onCreate: (name: string, mode: 'chat' | 'code' | 'team' | 'wiki' | 'admin', visibility?: 'public' | 'private') => void;
   onDelete: (id: string) => void;
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
+  onManageMembers: (id: string) => void;
   showAdmin?: boolean;
 }) {
   const { channels, current, mode } = props;
@@ -27,7 +28,10 @@ export function Channels(props: {
   const popRef = useRef<HTMLDivElement>(null);
   const visible = channels.filter((c) => (c.mode || 'chat') === mode);
   // Phase 16b: ⋯메뉴(삭제·응답모드)는 channels.manage 권한 또는 채널 소유자(creatorId===myId)에게만.
-  const canManage = (c: Channel) => props.canManageChannels || (!!props.myId && c.creatorId === props.myId);
+  // Phase 16c: 비공개 채널은 감시 방지를 위해 주인(creatorId===myId)에게만 ⋯메뉴를 준다(서버 canAdminChannel 미러).
+  const canManage = (c: Channel) => c.visibility === 'private'
+    ? (!!props.myId && c.creatorId === props.myId)
+    : (props.canManageChannels || (!!props.myId && c.creatorId === props.myId));
   const label: Record<'chat' | 'code' | 'team' | 'wiki' | 'admin', string> = { chat: T.tabAsk, team: T.tabTeam, code: T.tabCode, wiki: T.tabWiki, admin: T.tabAdmin };
   const tabs = areaTabs(TEAM_CHAT, props.showAdmin);
 
@@ -85,6 +89,9 @@ export function Channels(props: {
           <div id="popmenu" ref={popRef} style={{ left: pos.left, top: pos.top }}>
             <div onClick={() => { props.onSetRespondMode(c.id, c.respondMode === 'all' ? 'mention' : 'all'); setMenu(null); }}>
               {c.respondMode === 'all' ? T.modeMention : T.modeAll}
+            </div>
+            <div onClick={() => { setMenu(null); props.onManageMembers(c.id); }}>
+              {T.manageMembers}
             </div>
             <div className="danger" onClick={() => { setMenu(null); if (window.confirm(T.delConfirm(c.name))) props.onDelete(c.id); }}>
               {T.delChannel}
