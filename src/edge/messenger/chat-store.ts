@@ -23,8 +23,9 @@ export interface ChatChannel {
   respondMode: 'all' | 'mention';
   mode?: 'chat' | 'code' | 'team';     // Phase 11b: team 추가. 누락/오염=chat.
   repoPath?: string;                   // Phase 10: Code 채널이 바인딩한 레포 절대경로.
-  ownerId?: string;                    // 9b: 계정 도입 시 소유자
-  visibility?: 'public' | 'private';   // 9b: 비공개 잠금
+  creatorId?: string;                  // Phase 16b: 만든 사람 계정 id(소유권 예외 판정용)
+  ownerId?: string;                    // 9b/16c: 비공개 채널 소유자(별개 — 건드리지 않음)
+  visibility?: 'public' | 'private';   // 9b/16c
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
@@ -68,13 +69,13 @@ export class ChatStore {
     return list;
   }
 
-  createChannel(name: string, mode: 'chat' | 'code' | 'team' = 'chat'): ChatChannel | null {
+  createChannel(name: string, mode: 'chat' | 'code' | 'team' = 'chat', creatorId?: string): ChatChannel | null {
     const trimmed = (name ?? '').trim();
     if (!trimmed) return null;
     const list = this.listChannels();
     const m = mode === 'code' ? 'code' : mode === 'team' ? 'team' : 'chat';
     // Team 채널은 사람 대화 영역 → 기본 멘션-전용(Ask=all과 구분). Phase 14에서 실동작.
-    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: m === 'team' ? 'mention' : 'all', mode: m };
+    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: m === 'team' ? 'mention' : 'all', mode: m, ...(creatorId ? { creatorId } : {}) };
     list.push(ch);
     this.save(list);
     return ch;

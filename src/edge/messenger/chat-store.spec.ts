@@ -131,3 +131,22 @@ describe('ChatStore', () => {
     expect(store.listChannels().find((c) => c.id === t!.id)?.mode).toBe('team');
   });
 });
+
+describe('ChatStore.createChannel creatorId (Phase 16b)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chc-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('creatorId 전달 시 채널에 기록', () => {
+    const s = new ChatStore(dir);
+    const ch = s.createChannel('general', 'chat', 'user-1');
+    expect(ch?.creatorId).toBe('user-1');
+    expect(s.listChannels().find((c) => c.id === ch!.id)?.creatorId).toBe('user-1');
+  });
+
+  it('creatorId 없으면 미기록(기존 동작)', () => {
+    const s = new ChatStore(dir);
+    const ch = s.createChannel('general', 'chat');
+    expect(ch?.creatorId).toBeUndefined();
+  });
+});
