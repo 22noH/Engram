@@ -142,6 +142,17 @@ export class SelfMessenger implements MessengerPort {
       }
     }
   }
+  // Phase 16c: 그 채널에 canAccessChannel 통과하는 인증 소켓에만 전송(공개면 canAccess=true → 전원).
+  // 채널이 이미 삭제됐으면(ch undefined) 접근 판정을 건너뛰고 기존 broadcast처럼 전원에게 보낸다.
+  private broadcastToChannel(channelId: string, frame: ServerFrame): void {
+    const ch = this.store.listChannels().find((c) => c.id === channelId);
+    const data = JSON.stringify(frame);
+    for (const c of this.wss?.clients ?? []) {
+      if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
+      if (ch && !this.canAccessChannel(c, ch)) continue;
+      try { c.send(data); } catch { /* 격리 */ }
+    }
+  }
 
   // Phase 16a: owner 전용 관리 프레임 집합. 비owner 소켓(또는 authDeps 미주입)의 admin 프레임은
   // 조용히 무시 — 응답도 로그도 없다(존재 유출 방지).
@@ -220,6 +231,8 @@ export class SelfMessenger implements MessengerPort {
         case 'history': {
           const channelId = typeof f.channelId === 'string' ? f.channelId : '';
           const before = typeof f.before === 'string' ? f.before : undefined;
+          const ch = this.store.listChannels().find((c) => c.id === channelId);
+          if (ch && !this.canAccessChannel(ws, ch)) { this.sendTo(ws, { t: 'history', channelId, messages: [] }); return; }
           this.sendTo(ws, { t: 'history', channelId, messages: this.store.history(channelId, { before }) });
           return;
         }
@@ -386,6 +399,7 @@ export class SelfMessenger implements MessengerPort {
     if (!text.trim() || !channelId) return;
     const ch = this.store.listChannels().find((c) => c.id === channelId);
     if (!ch) { this.sendTo(ws, { t: 'error', text: 'unknown channel' }); return; }
+    if (!this.canAccessChannel(ws, ch)) return; // 비공개 비접근 → 조용히 무시(기록 안 함)
     // 작성자는 서버가 세션에서 찍는다(Phase 16a) — 클라 authorId 주장은 무시(Phase 14 자가선언 폐기).
     const me = this.users.get(ws);
     const msg = this.store.appendMessage(channelId, {
@@ -395,7 +409,7 @@ export class SelfMessenger implements MessengerPort {
       threadId: typeof f.threadId === 'string' && f.threadId ? f.threadId : undefined,
     });
     if (!msg) return;
-    this.broadcast({ t: 'msg', channelId, message: msg });
+    this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
 
     const name = this.opts.engramName ?? 'Engram';
     const isMention = ch.respondMode !== 'mention' || hasEngramMention(text, name);
@@ -420,12 +434,12 @@ export class SelfMessenger implements MessengerPort {
   async reply(target: ReplyTarget, text: string, actions?: Action[]): Promise<void> {
     const t = target as SelfTarget;
     const msg = this.store.appendMessage(t.channelId, { authorId: 'engram', text, threadId: t.anchorId, ...(actions ? { actions } : {}) });
-    if (msg) this.broadcast({ t: 'msg', channelId: t.channelId, message: msg });
+    if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }
 
   async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
     const msg = this.store.appendMessage(channelId, { authorId: 'engram', text, threadId });
-    if (msg) this.broadcast({ t: 'msg', channelId, message: msg });
+    if (msg) this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
   }
 
   // Phase 16a: 관리자가 계정을 정지/삭제할 때 그 계정의 연결 소켓을 즉시 끊는다.

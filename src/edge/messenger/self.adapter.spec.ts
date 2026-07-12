@@ -1023,3 +1023,165 @@ describe('비공개 채널 목록 필터(Phase 16c)', () => {
     await sm.stop();
   });
 });
+
+describe('비공개 채널 메시지 접근(Phase 16c)', () => {
+  let dir: string;
+  let clients: WebSocket[];
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pvmsg-'));
+    clients = [];
+  });
+  afterEach(() => {
+    for (const c of clients) c.terminate();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function noFrameWithin(ws: WebSocket, ms = 150): Promise<'frame' | 'timeout'> {
+    return Promise.race([
+      nextFrame(ws).then(() => 'frame' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms)),
+    ]);
+  }
+
+  it('비멤버 send는 무시(메시지 미기록·브로드캐스트 없음)', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberC = deps.accounts.createPassword('c', 'pw', 'C', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', memberA.id, 'private')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const cWs = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(cWs);
+    await once(cWs, 'open');
+    cWs.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(memberC.id).token }));
+    await nextFrame(cWs); // authOk
+
+    cWs.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '몰래 들어옴' }));
+    expect(await noFrameWithin(cWs)).toBe('timeout');
+    expect(store.history(ch.id)).toHaveLength(0);
+
+    await sm.stop();
+  });
+
+  it('비멤버 history는 빈 목록', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberC = deps.accounts.createPassword('c', 'pw', 'C', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', memberA.id, 'private')!;
+    store.appendMessage(ch.id, { authorId: memberA.id, text: '비밀 메시지' });
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const cWs = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(cWs);
+    await once(cWs, 'open');
+    cWs.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(memberC.id).token }));
+    await nextFrame(cWs); // authOk
+
+    cWs.send(JSON.stringify({ t: 'history', channelId: ch.id }));
+    const f = await nextFrame(cWs);
+    expect(f).toEqual({ t: 'history', channelId: ch.id, messages: [] });
+
+    await sm.stop();
+  });
+
+  it('비공개 채널 msg는 접근자에게만 브로드캐스트', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const owner = deps.accounts.createPassword('owner', 'pw', 'Owner', { role: 'owner', status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', memberA.id, 'private')!;
+    store.setMembers(ch.id, [memberB.id]);
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    async function connectAs(acc: Account): Promise<WebSocket> {
+      const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+      clients.push(c);
+      await once(c, 'open');
+      c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+      await nextFrame(c); // authOk
+      return c;
+    }
+
+    const aWs = await connectAs(memberA);
+    const bWs = await connectAs(memberB);
+    const ownerWs = await connectAs(owner); // 비멤버(감시 방지 — owner라도 못 봄)
+
+    const bFramePromise = nextFrame(bWs);
+    const ownerNoFramePromise = noFrameWithin(ownerWs);
+    aWs.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '멤버만' }));
+    const aFrame = await nextFrame(aWs);
+    expect(aFrame.t).toBe('msg');
+    expect(aFrame.message.text).toBe('멤버만');
+
+    const bFrame = await bFramePromise;
+    expect(bFrame.t).toBe('msg');
+    expect(bFrame.message.text).toBe('멤버만');
+
+    expect(await ownerNoFramePromise).toBe('timeout');
+
+    await sm.stop();
+  });
+
+  it('공개 채널 msg는 전원(회귀)', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels(); // general(public)
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    async function connectAs(acc: Account): Promise<WebSocket> {
+      const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+      clients.push(c);
+      await once(c, 'open');
+      c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+      await nextFrame(c); // authOk
+      return c;
+    }
+
+    const aWs = await connectAs(memberA);
+    const bWs = await connectAs(memberB);
+
+    const bFramePromise = nextFrame(bWs);
+    aWs.send(JSON.stringify({ t: 'send', channelId: 'general', text: '전원에게' }));
+    const aFrame = await nextFrame(aWs);
+    expect(aFrame.t).toBe('msg');
+    const bFrame = await bFramePromise;
+    expect(bFrame.t).toBe('msg');
+    expect(bFrame.message.text).toBe('전원에게');
+
+    await sm.stop();
+  });
+
+  it('무인증 모드는 send/history 정상(회귀)', async () => {
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(c);
+    await once(c, 'open');
+
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi' }));
+    const f = await nextFrame(c);
+    expect(f.t).toBe('msg');
+    expect(f.message.text).toBe('hi');
+
+    c.send(JSON.stringify({ t: 'history', channelId: 'general' }));
+    const h = await nextFrame(c);
+    expect(h.t).toBe('history');
+    expect(h.messages.map((m: { text: string }) => m.text)).toEqual(['hi']);
+
+    await sm.stop();
+  });
+});
