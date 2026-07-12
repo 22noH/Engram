@@ -900,3 +900,126 @@ describe('권한 게이트(Phase 16b)', () => {
     await sm.stop();
   });
 });
+
+describe('비공개 채널 목록 필터(Phase 16c)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pv-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('비멤버는 channels에서 비공개 채널을 못 봄, 주인/멤버는 봄', async () => {
+    const deps = makeAuthDeps(dir);
+    const owner = deps.accounts.createPassword('owner', 'pw', 'Owner', { role: 'owner', status: 'active' });
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const memberC = deps.accounts.createPassword('c', 'pw', 'C', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels(); // general(public) 생성
+    const ch = store.createChannel('secret', 'chat', memberA.id, 'private')!;
+    store.setMembers(ch.id, [memberB.id]);
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    async function connectAs(acc: Account): Promise<WebSocket> {
+      const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+      await once(c, 'open');
+      c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+      await nextFrame(c); // authOk
+      return c;
+    }
+    async function names(ws: WebSocket): Promise<string[]> {
+      ws.send(JSON.stringify({ t: 'channels' }));
+      const f = await nextFrame(ws);
+      return f.list.map((x: { name: string }) => x.name);
+    }
+
+    const ownerWs = await connectAs(owner);
+    const aWs = await connectAs(memberA);
+    const bWs = await connectAs(memberB);
+    const cWs = await connectAs(memberC);
+
+    expect(await names(aWs)).toContain('secret');   // 주인
+    expect(await names(bWs)).toContain('secret');   // 초대된 멤버
+    expect(await names(ownerWs)).not.toContain('secret'); // owner라도 멤버 아니면 못 봄(감시 방지)
+    expect(await names(cWs)).not.toContain('secret');     // 비멤버
+
+    for (const c of [ownerWs, aWs, bWs, cWs]) c.terminate();
+    await sm.stop();
+  });
+
+  it('공개 채널은 전원이 봄(회귀)', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels(); // general(public) 생성
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    async function connectAs(acc: Account): Promise<WebSocket> {
+      const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+      await once(c, 'open');
+      c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+      await nextFrame(c);
+      return c;
+    }
+
+    const aWs = await connectAs(memberA);
+    const bWs = await connectAs(memberB);
+    aWs.send(JSON.stringify({ t: 'channels' }));
+    const fa = await nextFrame(aWs);
+    bWs.send(JSON.stringify({ t: 'channels' }));
+    const fb = await nextFrame(bWs);
+    expect(fa.list.map((x: { name: string }) => x.name)).toContain('general');
+    expect(fb.list.map((x: { name: string }) => x.name)).toContain('general');
+
+    aWs.terminate(); bWs.terminate();
+    await sm.stop();
+  });
+
+  it('무인증 모드는 비공개 채널도 전부 보임(회귀)', async () => {
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    store.createChannel('secret', 'chat', 'someone', 'private');
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(c);
+    expect(f.list.map((x: { name: string }) => x.name)).toContain('secret');
+    c.terminate();
+    await sm.stop();
+  });
+
+  it('createChannel visibility=private로 만들면 주인만 보임', async () => {
+    const deps = makeAuthDeps(dir);
+    const memberA = deps.accounts.createPassword('a', 'pw', 'A', { status: 'active' });
+    const memberB = deps.accounts.createPassword('b', 'pw', 'B', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const aWs = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(aWs, 'open');
+    const bWs = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(bWs, 'open');
+    aWs.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(memberA.id).token }));
+    await nextFrame(aWs); // authOk
+    bWs.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(memberB.id).token }));
+    await nextFrame(bWs); // authOk
+
+    const bFramePromise = nextFrame(bWs); // createChannel의 broadcastChannels 대기
+    aWs.send(JSON.stringify({ t: 'createChannel', name: 'p', visibility: 'private' }));
+    const aFrame = await nextFrame(aWs);
+    expect(aFrame.t).toBe('channels');
+    expect(aFrame.list.map((c: { name: string }) => c.name)).toContain('p'); // 주인 소켓엔 보임
+
+    const bFrame = await bFramePromise;
+    expect(bFrame.t).toBe('channels');
+    expect(bFrame.list.map((c: { name: string }) => c.name)).not.toContain('p'); // 다른 멤버엔 안 보임
+
+    aWs.terminate(); bWs.terminate();
+    await sm.stop();
+  });
+});

@@ -15,6 +15,8 @@ export interface Channel {
   mode?: 'chat' | 'code' | 'team'; // 누락/오염=chat
   repoPath?: string;      // Code 채널이 바인딩한 레포 절대경로
   creatorId?: string;     // Phase 16b: 만든 사람(소유권 예외)
+  visibility?: 'public' | 'private'; // Phase 16c: 비공개 = 초대된 사람만
+  memberIds?: string[];   // Phase 16c: 비공개 채널 입장 허용 계정 id
 }
 
 export interface Message {
@@ -53,7 +55,7 @@ export type ClientFrame =
   | { t: 'channels' }
   | { t: 'history'; channelId: string; before?: string }
   | { t: 'send'; channelId: string; text: string; threadId?: string }
-  | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team' }
+  | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team'; visibility?: 'public' | 'private' }
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }

@@ -167,6 +167,25 @@ export class SelfMessenger implements MessengerPort {
     if (!me) return false;
     return can(me, 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
   }
+  // Phase 16c: 채널 목록 가시성 게이트. authDeps 미주입(무인증)이면 전부 접근(회귀 금지).
+  // 공개는 전원. 비공개는 만든 사람 본인 또는 초대된 멤버만 — owner·channels.manage 예외 없음
+  // (감시 방지: 관리 권한이 비공개 채널을 "볼" 권리를 주지 않는다).
+  private canAccessChannel(ws: WebSocket, ch: ChatChannel): boolean {
+    if (!this.authDeps) return true;
+    if ((ch.visibility ?? 'public') !== 'private') return true;
+    const me = this.users.get(ws);
+    if (!me) return false;
+    return ch.creatorId === me.id || (ch.memberIds ?? []).includes(me.id);
+  }
+  // 소켓별로 접근 가능한 채널만 담아 channels 프레임을 각 인증 소켓에 전송.
+  private broadcastChannels(): void {
+    const all = this.store.listChannels();
+    for (const c of this.wss?.clients ?? []) {
+      if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
+      const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(c, ch)) : all;
+      try { c.send(JSON.stringify({ t: 'channels', list })); } catch { /* 격리 */ }
+    }
+  }
   private adminList(): AdminUserDto[] {
     return this.authDeps!.accounts.list().map((a) => ({
       id: a.id, displayName: a.displayName, role: a.role,
@@ -204,16 +223,24 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'history', channelId, messages: this.store.history(channelId, { before }) });
           return;
         }
-        case 'channels':
-          this.sendTo(ws, { t: 'channels', list: this.store.listChannels() });
+        case 'channels': {
+          const all = this.store.listChannels();
+          const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(ws, ch)) : all;
+          this.sendTo(ws, { t: 'channels', list });
           return;
+        }
         case 'createChannel': {
           if (this.cfg.role === 'brain' && f.mode === 'team') return; // brain=개인 연산용, 팀 방 없음
           const me = this.users.get(ws);
           if (typeof f.name === 'string') {
-            this.store.createChannel(f.name, f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat', me?.id);
+            this.store.createChannel(
+              f.name,
+              f.mode === 'code' ? 'code' : f.mode === 'team' ? 'team' : 'chat',
+              me?.id,
+              f.visibility === 'private' ? 'private' : undefined,
+            );
           }
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          this.broadcastChannels();
           return;
         }
         case 'setRepoPath': {
@@ -221,7 +248,7 @@ export class SelfMessenger implements MessengerPort {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
             if (this.canManageChannel(ws, ch)) this.store.setRepoPath(f.id, f.repoPath);
           }
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          this.broadcastChannels();
           return;
         }
         case 'deleteChannel': {
@@ -229,7 +256,7 @@ export class SelfMessenger implements MessengerPort {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
             if (this.canManageChannel(ws, ch)) this.store.deleteChannel(f.id);
           }
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          this.broadcastChannels();
           return;
         }
         case 'setRespondMode': {
@@ -237,7 +264,7 @@ export class SelfMessenger implements MessengerPort {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
             if (this.canManageChannel(ws, ch)) this.store.setRespondMode(f.id, f.mode);
           }
-          this.broadcast({ t: 'channels', list: this.store.listChannels() });
+          this.broadcastChannels();
           return;
         }
         case 'wikiList': {
