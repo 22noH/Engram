@@ -25,7 +25,8 @@ export interface ChatChannel {
   repoPath?: string;                   // Phase 10: Code 채널이 바인딩한 레포 절대경로.
   creatorId?: string;                  // Phase 16b: 만든 사람 계정 id(소유권 예외 판정용)
   ownerId?: string;                    // 9b/16c: 비공개 채널 소유자(별개 — 건드리지 않음)
-  visibility?: 'public' | 'private';   // 9b/16c
+  visibility?: 'public' | 'private';   // Phase 16c: 비공개 = 초대된 사람만
+  memberIds?: string[];                // Phase 16c: 비공개 채널 입장 허용 계정 id
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
@@ -69,13 +70,13 @@ export class ChatStore {
     return list;
   }
 
-  createChannel(name: string, mode: 'chat' | 'code' | 'team' = 'chat', creatorId?: string): ChatChannel | null {
+  createChannel(name: string, mode: 'chat' | 'code' | 'team' = 'chat', creatorId?: string, visibility?: 'public' | 'private'): ChatChannel | null {
     const trimmed = (name ?? '').trim();
     if (!trimmed) return null;
     const list = this.listChannels();
     const m = mode === 'code' ? 'code' : mode === 'team' ? 'team' : 'chat';
     // Team 채널은 사람 대화 영역 → 기본 멘션-전용(Ask=all과 구분). Phase 14에서 실동작.
-    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: m === 'team' ? 'mention' : 'all', mode: m, ...(creatorId ? { creatorId } : {}) };
+    const ch: ChatChannel = { id: randomUUID(), name: trimmed, respondMode: m === 'team' ? 'mention' : 'all', mode: m, ...(creatorId ? { creatorId } : {}), ...(visibility === 'private' ? { visibility: 'private' } : {}) };
     list.push(ch);
     this.save(list);
     return ch;
@@ -105,6 +106,24 @@ export class ChatStore {
     const ch = list.find((c) => c.id === id);
     if (!ch) return false;
     ch.repoPath = repoPath.trim();
+    this.save(list);
+    return true;
+  }
+
+  setVisibility(id: string, visibility: 'public' | 'private'): boolean {
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    ch.visibility = visibility;
+    this.save(list);
+    return true;
+  }
+
+  setMembers(id: string, memberIds: string[]): boolean {
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    ch.memberIds = memberIds.filter((x) => typeof x === 'string');
     this.save(list);
     return true;
   }

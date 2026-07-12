@@ -150,3 +150,34 @@ describe('ChatStore.createChannel creatorId (Phase 16b)', () => {
     expect(ch?.creatorId).toBeUndefined();
   });
 });
+
+describe('ChatStore 비공개 채널 (Phase 16c)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chpv-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('createChannel visibility=private 기록', () => {
+    const s = new ChatStore(dir);
+    const ch = s.createChannel('secret', 'chat', 'u1', 'private');
+    expect(ch?.visibility).toBe('private');
+    expect(s.listChannels().find((c) => c.id === ch!.id)?.visibility).toBe('private');
+  });
+
+  it('visibility 미전달·public이면 미기록(기존 동작)', () => {
+    const s = new ChatStore(dir);
+    expect(s.createChannel('a', 'chat', 'u1')?.visibility).toBeUndefined();
+    expect(s.createChannel('b', 'chat', 'u1', 'public')?.visibility).toBeUndefined();
+  });
+
+  it('setVisibility·setMembers 영속, 없는 id는 false', () => {
+    const s = new ChatStore(dir);
+    const ch = s.createChannel('secret', 'chat', 'u1', 'private')!;
+    expect(s.setMembers(ch.id, ['u2', 'u3'])).toBe(true);
+    expect(s.setVisibility(ch.id, 'public')).toBe(true);
+    const re = new ChatStore(dir).listChannels().find((c) => c.id === ch.id)!;
+    expect(re.memberIds).toEqual(['u2', 'u3']);
+    expect(re.visibility).toBe('public');
+    expect(s.setMembers('없음', ['x'])).toBe(false);
+    expect(s.setVisibility('없음', 'private')).toBe(false);
+  });
+});
