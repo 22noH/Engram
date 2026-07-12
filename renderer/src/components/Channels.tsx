@@ -110,9 +110,9 @@ export function Channels(props: {
                 onKeyDown={(e) => {
                   const v = (e.target as HTMLInputElement).value;
                   if (e.key === 'Enter' && v.trim()) { props.onCreate(v, mode, newPrivate ? 'private' : undefined); setCreating(false); setNewPrivate(false); }
-                  else if (e.key === 'Escape') setCreating(false);
+                  else if (e.key === 'Escape') { setCreating(false); setNewPrivate(false); }
                 }}
-                onBlur={() => setCreating(false)}
+                onBlur={() => { setCreating(false); setNewPrivate(false); }}
               />
               <label className="privToggle" onMouseDown={(e) => e.preventDefault()}>
                 <input type="checkbox" checked={newPrivate} onChange={(e) => setNewPrivate(e.target.checked)} />

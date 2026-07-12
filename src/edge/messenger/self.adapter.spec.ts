@@ -1264,6 +1264,25 @@ describe('비공개 채널 멤버 관리(Phase 16c)', () => {
     await sm.stop();
   });
 
+  it('비주인 owner의 deleteChannel은 비공개 채널에 무시(주인 전용, 최종리뷰)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const owner = deps.accounts.createPassword('owner', 'pw', 'Owner', { role: 'owner', status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, owner);
+    ws.send(JSON.stringify({ t: 'deleteChannel', id: ch.id }));
+    await nextFrame(ws); // broadcastChannels(변경 없음이어도 프레임은 옴)
+
+    expect(store.listChannels().find((c) => c.id === ch.id)).toBeDefined();
+
+    await sm.stop();
+  });
+
   it('공개 채널 setChannelVisibility는 16b 관리자(creator/channels.manage/owner)가 가능', async () => {
     const deps = makeAuthDeps(dir);
     const mgr = deps.accounts.createPassword('mgr', 'pw', 'Mgr', { status: 'active' });

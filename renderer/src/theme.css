@@ -174,4 +174,17 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #loginCard button.sso { background:transparent; border:1px solid var(--line); color:var(--text); }
 #loginCard a { color:var(--accent); font-size:12.5px; cursor:pointer; text-align:center; }
 #loginCard .err { color:#f26d6d; font-size:12.5px; }
+
+/* Phase 16c — 비공개 채널 멤버 관리 모달 */
+#membersOverlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex;
+                   align-items:center; justify-content:center; z-index:20; }
+#membersPanel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+                padding:18px; width:340px; max-width:92vw; }
+.visRow { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.visBadge { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; }
+.visBadge.private { color:var(--accent); }
+.rosterList { display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow-y:auto;
+              margin-bottom:12px; }
+.rosterList label { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); }
+#membersCloseBtn { margin-top:2px; background:transparent; border:1px solid var(--line); color:var(--text); }
 #loginCard .notice { color:var(--dim); font-size:12.5px; }

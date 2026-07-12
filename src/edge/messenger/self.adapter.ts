@@ -271,7 +271,7 @@ export class SelfMessenger implements MessengerPort {
         case 'setRepoPath': {
           if (typeof f.id === 'string' && typeof f.repoPath === 'string') {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
-            if (this.canManageChannel(ws, ch)) this.store.setRepoPath(f.id, f.repoPath);
+            if (this.canAdminChannel(ws, ch)) this.store.setRepoPath(f.id, f.repoPath);
           }
           this.broadcastChannels();
           return;
@@ -279,7 +279,7 @@ export class SelfMessenger implements MessengerPort {
         case 'deleteChannel': {
           if (typeof f.id === 'string') {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
-            if (this.canManageChannel(ws, ch)) this.store.deleteChannel(f.id);
+            if (this.canAdminChannel(ws, ch)) this.store.deleteChannel(f.id);
           }
           this.broadcastChannels();
           return;
@@ -287,7 +287,7 @@ export class SelfMessenger implements MessengerPort {
         case 'setRespondMode': {
           if (typeof f.id === 'string' && (f.mode === 'all' || f.mode === 'mention')) {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
-            if (this.canManageChannel(ws, ch)) this.store.setRespondMode(f.id, f.mode);
+            if (this.canAdminChannel(ws, ch)) this.store.setRespondMode(f.id, f.mode);
           }
           this.broadcastChannels();
           return;
