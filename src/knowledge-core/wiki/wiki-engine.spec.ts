@@ -264,11 +264,35 @@ describe('WikiEngine + PAGE_INDEXER', () => {
     expect(spy.removed).toHaveLength(0);
   });
 
-  it('search: indexer에 위임하고 결과를 그대로 반환(limit=8·DEFAULT_USER)', async () => {
+  it('search: indexer에 위임(over-fetch limit*4=32·DEFAULT_USER)하고 결과 반환', async () => {
     spy.searchReturn = [{ slug: 'a', title: 'A', text: 'snip', score: 0.9 }];
     const res = await engine.search('coffee');
     expect(res).toEqual([{ slug: 'a', title: 'A', text: 'snip', score: 0.9 }]);
-    expect(spy.searchQueries).toEqual([{ query: 'coffee', limit: 8, userId: DEFAULT_USER }]);
+    expect(spy.searchQueries).toEqual([{ query: 'coffee', limit: 32, userId: DEFAULT_USER }]);
+  });
+
+  it('search: 같은 slug의 여러 청크는 한 페이지로 dedup(최상위 청크 유지)', async () => {
+    spy.searchReturn = [
+      { slug: 'a', title: 'A', text: 'chunk1', score: 0.9 },
+      { slug: 'a', title: 'A', text: 'chunk2', score: 0.8 }, // 같은 페이지 다른 청크 → 버림
+      { slug: 'b', title: 'B', text: 'chunkB', score: 0.7 },
+    ];
+    const res = await engine.search('x');
+    expect(res).toEqual([
+      { slug: 'a', title: 'A', text: 'chunk1', score: 0.9 },
+      { slug: 'b', title: 'B', text: 'chunkB', score: 0.7 },
+    ]);
+  });
+
+  it('search: dedup 후 limit개 페이지로 슬라이스', async () => {
+    spy.searchReturn = [
+      { slug: 'a', title: 'A', text: 't', score: 0.9 },
+      { slug: 'b', title: 'B', text: 't', score: 0.8 },
+      { slug: 'c', title: 'C', text: 't', score: 0.7 },
+    ];
+    const res = await engine.search('x', 2);
+    expect(res.map((r) => r.slug)).toEqual(['a', 'b']);
+    expect(spy.searchQueries).toEqual([{ query: 'x', limit: 8, userId: DEFAULT_USER }]); // 2*4 over-fetch
   });
 
   it('search: 빈/공백 쿼리는 indexer 미호출·빈 배열', async () => {

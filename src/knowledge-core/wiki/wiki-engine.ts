@@ -225,9 +225,23 @@ export class WikiEngine {
 
   // 위키 의미검색(읽기 전용 — 락·파일·커밋 없음). indexer(RagStore)에 위임.
   // 빈/공백 쿼리는 서버 왕복 없이 빈 배열. indexer 미주입(RAG 미탑재) 시에도 빈 배열.
+  // RagStore는 청크 단위로 반환 — 한 페이지가 여러 청크로 쪼개지면 같은 slug가 여러 번 나온다.
+  // 페이지 단위 검색이므로 slug로 중복 제거(순위 순서라 첫 등장=최상위 청크 유지). 중복 제거로
+  // 결과가 줄어드니 넉넉히(limit*4) 가져와 뒤에서 limit개 페이지로 슬라이스한다.
+  // ponytail: over-fetch 배수 4 — 한 페이지가 상위 4청크를 독식하면 결과가 limit 미만일 수 있으나
+  // 개인/팀 위키 규모에선 충분. 부족이 실측되면 배수 상향 또는 페이지 단위 색인으로.
   async search(query: string, limit = 8, userId: string = DEFAULT_USER): Promise<SearchResult[]> {
     const q = query.trim();
     if (!q) return [];
-    return (await this.indexer?.search(q, limit, userId)) ?? [];
+    const rows = (await this.indexer?.search(q, limit * 4, userId)) ?? [];
+    const seen = new Set<string>();
+    const pages: SearchResult[] = [];
+    for (const r of rows) {
+      if (seen.has(r.slug)) continue;
+      seen.add(r.slug);
+      pages.push(r);
+      if (pages.length >= limit) break;
+    }
+    return pages;
   }
 }
