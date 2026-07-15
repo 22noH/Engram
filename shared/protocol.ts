@@ -37,6 +37,7 @@ export interface RosterEntry { id: string; displayName: string } // Phase 16c: ì
 
 export interface WikiPageMeta { slug: string; title: string; category: string; status: 'draft' | 'published'; updated: string }
 export interface WikiPageDto extends WikiPageMeta { body: string }
+export interface WikiSearchHit { slug: string; title: string; snippet: string; score: number }
 export interface ProposalDto {
   id: string;
   op: 'create' | 'append' | 'supersede';
@@ -63,6 +64,7 @@ export type ClientFrame =
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
   | { t: 'wikiList' }
   | { t: 'wikiGet'; slug: string }
+  | { t: 'wikiSearch'; query: string }
   | { t: 'wikiUnpublish'; slug: string }
   | { t: 'wikiEdit'; slug: string; body: string }
   | { t: 'wikiDelete'; slug: string }
@@ -92,6 +94,7 @@ export type ServerFrame =
   | { t: 'error'; text: string }
   | { t: 'wikiPages'; list: WikiPageMeta[] }
   | { t: 'wikiPage'; page: WikiPageDto }
+  | { t: 'wikiResults'; query: string; list: WikiSearchHit[] }
   | { t: 'proposals'; list: ProposalDto[] }
   | { t: 'wikiChanged' }
   | { t: 'proposalsChanged' }

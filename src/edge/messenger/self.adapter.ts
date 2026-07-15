@@ -305,6 +305,13 @@ export class SelfMessenger implements MessengerPort {
           this.sendTo(ws, { t: 'wikiPage', page: toPageDto(page) });
           return;
         }
+        case 'wikiSearch': {
+          if (!this.wikiDeps || typeof f.query !== 'string') return;
+          const hits = await this.wikiDeps.wiki.search(f.query);
+          const list = hits.map((h) => ({ slug: h.slug, title: h.title, snippet: h.text, score: h.score }));
+          this.sendTo(ws, { t: 'wikiResults', query: f.query, list });
+          return;
+        }
         case 'wikiUnpublish': {
           if (!this.wikiDeps || typeof f.slug !== 'string') return;
           if (!this.allowed(ws, 'wiki.unpublish')) return; // 무권한 조용히 무시

@@ -631,6 +631,7 @@ describe('SelfMessenger 위키·승인함', () => {
         unpublishPage: async (slug: string) => { unpublished.push(slug); return {} as WikiPage; },
         editPage: async (slug: string, body: string) => { edited.push({ slug, body }); return {} as WikiPage; },
         deletePage: async (slug: string) => { deleted.push(slug); return true; },
+        search: async (query: string) => (query === 'coffee' ? [{ slug: 'a', title: 'Alpha', text: 'matched snippet', score: 0.9 }] : []),
       },
       proposals: {
         listPending: async () => proposals.filter((p) => p.status === 'pending'),
@@ -733,6 +734,21 @@ describe('SelfMessenger 위키·승인함', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(deleted).toEqual(['alpha']);
     expect(got).toContain('wikiChanged');
+  });
+
+  it('wikiSearch → wikiResults(query 에코 + text→snippet 매핑)', async () => {
+    client.send(JSON.stringify({ t: 'wikiSearch', query: 'coffee' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiResults');
+    expect(f.query).toBe('coffee');
+    expect(f.list).toEqual([{ slug: 'a', title: 'Alpha', snippet: 'matched snippet', score: 0.9 }]);
+  });
+
+  it('wikiSearch 결과 없음 → 빈 list', async () => {
+    client.send(JSON.stringify({ t: 'wikiSearch', query: 'nope' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiResults');
+    expect(f.list).toEqual([]);
   });
 
   it('wikiDeps 미주입 시 wikiList는 무시(no-op) — 뒤이은 channels만 응답', async () => {
