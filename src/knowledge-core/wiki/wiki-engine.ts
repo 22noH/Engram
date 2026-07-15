@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { IndexablePage, PageIndexer, PAGE_INDEXER } from '../rag/rag.types';
+import { IndexablePage, PageIndexer, PAGE_INDEXER, SearchResult } from '../rag/rag.types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
@@ -221,5 +221,13 @@ export class WikiEngine {
       await this.indexer?.removePage(slug, userId);
       return true;
     });
+  }
+
+  // 위키 의미검색(읽기 전용 — 락·파일·커밋 없음). indexer(RagStore)에 위임.
+  // 빈/공백 쿼리는 서버 왕복 없이 빈 배열. indexer 미주입(RAG 미탑재) 시에도 빈 배열.
+  async search(query: string, limit = 8, userId: string = DEFAULT_USER): Promise<SearchResult[]> {
+    const q = query.trim();
+    if (!q) return [];
+    return (await this.indexer?.search(q, limit, userId)) ?? [];
   }
 }

@@ -192,6 +192,11 @@ describe('WikiEngine 파괴적 행위', () => {
     // commitAll(msg, relPath)이 git add <relPath>로 삭제를 스테이징해 실제 커밋으로 남는지 고정(빈커밋 no-op 아님).
     expect((await git.recentMessages()).some((m) => m.includes('delete') && m.includes('d'))).toBe(true);
   });
+
+  it('search: indexer 미주입 시 빈 배열', async () => {
+    const engine = await makeEngine(); // 인덱서 없음
+    expect(await engine.search('coffee')).toEqual([]);
+  });
 });
 
 afterAll(async () => {
@@ -200,14 +205,17 @@ afterAll(async () => {
   }
 });
 
-import { PageIndexer, IndexablePage } from '../rag/rag.types';
+import { PageIndexer, IndexablePage, SearchResult } from '../rag/rag.types';
 
 class SpyIndexer implements PageIndexer {
   indexed: IndexablePage[] = [];
   removed: Array<{ slug: string; userId?: string }> = [];
+  searchQueries: Array<{ query: string; limit?: number; userId?: string }> = [];
+  searchReturn: SearchResult[] = [];
   async indexPage(p: IndexablePage) { this.indexed.push(p); }
   async removePage(slug: string, userId?: string) { this.removed.push({ slug, userId }); }
   async reindexAll(pages: IndexablePage[]) { for (const p of pages) this.indexed.push(p); }
+  async search(query: string, limit?: number, userId?: string) { this.searchQueries.push({ query, limit, userId }); return this.searchReturn; }
 }
 
 describe('WikiEngine + PAGE_INDEXER', () => {
@@ -254,5 +262,17 @@ describe('WikiEngine + PAGE_INDEXER', () => {
     const result = await engine.unpublishPage('d2');
     expect(result.frontmatter.status).toBe('draft');
     expect(spy.removed).toHaveLength(0);
+  });
+
+  it('search: indexer에 위임하고 결과를 그대로 반환(limit=8·DEFAULT_USER)', async () => {
+    spy.searchReturn = [{ slug: 'a', title: 'A', text: 'snip', score: 0.9 }];
+    const res = await engine.search('coffee');
+    expect(res).toEqual([{ slug: 'a', title: 'A', text: 'snip', score: 0.9 }]);
+    expect(spy.searchQueries).toEqual([{ query: 'coffee', limit: 8, userId: DEFAULT_USER }]);
+  });
+
+  it('search: 빈/공백 쿼리는 indexer 미호출·빈 배열', async () => {
+    expect(await engine.search('   ')).toEqual([]);
+    expect(spy.searchQueries).toEqual([]);
   });
 });

@@ -26,4 +26,5 @@ export interface PageIndexer {
   indexPage(page: IndexablePage): Promise<void>;
   removePage(slug: string, userId?: string): Promise<void>; // userId 지정 시 해당 유저 범위로만 제거.
   reindexAll(pages: IndexablePage[]): Promise<void>;
+  search(query: string, limit?: number, userId?: string): Promise<SearchResult[]>;
 }
