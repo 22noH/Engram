@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit } from '../../../shared/protocol';
 import { renderMarkdown } from '../render/markdown';
 import { T } from '../i18n';
 
-// 위키 영역: ① 페이지 읽기(+게시 페이지 파괴적 행위) ② 승인함(두뇌 제안 승인/거부). 순수 프레젠테이션.
+// 위키 영역: ① 페이지 읽기·의미검색(+게시 페이지 파괴적 행위) ② 승인함(두뇌 제안 승인/거부). 순수 프레젠테이션.
 export function WikiArea(props: {
   pages: WikiPageMeta[];
   openPage: WikiPageDto | null;
   proposals: ProposalDto[];
+  searchResults: WikiSearchHit[];
   canApprove: boolean;
   canUnpublish: boolean;
   canEdit: boolean;
@@ -18,12 +19,15 @@ export function WikiArea(props: {
   onUnpublish: (slug: string) => void;
   onEdit: (slug: string, body: string) => void;
   onDelete: (slug: string) => void;
+  onSearch: (query: string) => void;
 }) {
   const [tab, setTab] = useState<'pages' | 'inbox'>('pages');
   const [filter, setFilter] = useState('');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
+  // onSearch의 최신 참조(App이 매 렌더 새 콜백을 넘겨도 디바운스 effect를 재실행하지 않기 위함 — App의 ref 패턴).
+  const onSearchRef = useRef(props.onSearch); onSearchRef.current = props.onSearch;
 
   // 다른 페이지로 전환하면 편집 모드 해제.
   useEffect(() => { setEditing(false); }, [props.openPage?.slug]);
@@ -34,8 +38,15 @@ export function WikiArea(props: {
     if (el) el.replaceChildren(props.openPage ? renderMarkdown(props.openPage.body) : document.createDocumentFragment());
   }, [props.openPage, editing]);
 
-  const q = filter.trim().toLowerCase();
-  const shown = q ? props.pages.filter((p) => p.title.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)) : props.pages;
+  // 검색어 디바운스(300ms) → 서버 의미검색. 빈 쿼리면 검색 안 함(브라우즈 모드).
+  useEffect(() => {
+    const query = filter.trim();
+    if (!query) return;
+    const id = setTimeout(() => onSearchRef.current(query), 300);
+    return () => clearTimeout(id);
+  }, [filter]);
+
+  const q = filter.trim();
   const open = props.openPage;
   const canAct = !!open && open.status === 'published'; // 게시 페이지만 대상
 
@@ -51,14 +62,25 @@ export function WikiArea(props: {
       {tab === 'pages' ? (
         <div id="wikiPagesView">
           <div id="wikiList">
-            <input type="text" placeholder={T.wikiFilterPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
-            {shown.map((p) => (
-              <div key={p.slug} className={'wikiRow' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
-                <span className="title">{p.title}</span>
-                <span className={'badge ' + p.status}>{p.status}</span>
-                <span className="cat">{p.category}</span>
-              </div>
-            ))}
+            <input type="text" placeholder={T.wikiSearchPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
+            {q === '' ? (
+              props.pages.map((p) => (
+                <div key={p.slug} className={'wikiRow' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
+                  <span className="title">{p.title}</span>
+                  <span className={'badge ' + p.status}>{p.status}</span>
+                  <span className="cat">{p.category}</span>
+                </div>
+              ))
+            ) : props.searchResults.length === 0 ? (
+              <div className="empty">{T.wikiNoResults}</div>
+            ) : (
+              props.searchResults.map((h) => (
+                <div key={h.slug} className={'wikiRow' + (open?.slug === h.slug ? ' sel' : '')} onClick={() => props.onOpenPage(h.slug)}>
+                  <span className="title">{h.title}</span>
+                  <span className="snippet">{h.snippet}</span>
+                </div>
+              ))
+            )}
           </div>
           <div id="wikiDoc">
             {open && (

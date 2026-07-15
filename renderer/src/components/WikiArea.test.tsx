@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { WikiArea } from './WikiArea';
 import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
@@ -11,7 +11,7 @@ const pages: WikiPageMeta[] = [
 const proposals: ProposalDto[] = [
   { id: 'p1', op: 'create', targetSlug: 's1', title: 'Prop One', category: 'cat', payload: 'proposed body', sources: ['src'], importance: 3, confidence: 0.8, reason: 'because' },
 ];
-const noActions = { canUnpublish: false, canEdit: false, canDelete: false, onUnpublish: () => {}, onEdit: () => {}, onDelete: () => {} };
+const noActions = { canUnpublish: false, canEdit: false, canDelete: false, onUnpublish: () => {}, onEdit: () => {}, onDelete: () => {}, searchResults: [], onSearch: () => {} };
 
 describe('WikiArea', () => {
   it('페이지 목록 렌더 + 클릭 시 onOpenPage', () => {
@@ -22,12 +22,40 @@ describe('WikiArea', () => {
     expect(opened).toEqual(['alpha']);
   });
 
-  it('필터가 제목으로 목록을 좁힌다', () => {
+  it('검색창이 비면 전체 목록을 브라우즈한다', () => {
     render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
-    const filter = screen.getByPlaceholderText(/filter|필터/i);
-    fireEvent.change(filter, { target: { value: 'alph' } });
     expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+  });
+
+  it('타이핑하면 디바운스(300ms) 후 onSearch(query) 호출', () => {
+    vi.useFakeTimers();
+    const searched: string[] = [];
+    render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} onSearch={(q) => searched.push(q)} />);
+    fireEvent.change(screen.getByPlaceholderText(/search|검색/i), { target: { value: 'coffee' } });
+    expect(searched).toEqual([]); // 아직 디바운스 전
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(searched).toEqual(['coffee']);
+    vi.useRealTimers();
+  });
+
+  it('검색어 있으면 searchResults를 결과 행(제목+스니펫, score 미표시)으로 렌더', () => {
+    const hits = [{ slug: 'x', title: 'Xanadu', snippet: 'matched snippet text', score: 0.9 }];
+    const opened: string[] = [];
+    render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} searchResults={hits} onOpenPage={(s) => opened.push(s)} onApprove={() => {}} onReject={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/search|검색/i), { target: { value: 'coffee' } });
+    expect(screen.getByText('Xanadu')).toBeInTheDocument();
+    expect(screen.getByText('matched snippet text')).toBeInTheDocument();
+    expect(screen.queryByText('0.9')).toBeNull(); // score 미표시
+    expect(screen.queryByText('Alpha')).toBeNull(); // 브라우즈 목록 아님
+    fireEvent.click(screen.getByText('Xanadu'));
+    expect(opened).toEqual(['x']);
+  });
+
+  it('검색어 있고 결과 없으면 "결과 없음"', () => {
+    render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} searchResults={[]} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/search|검색/i), { target: { value: 'zzz' } });
+    expect(screen.getByText(/no results|결과 없음/i)).toBeInTheDocument();
   });
 
   it('승인함 탭: 제안 카드 렌더 + 승인/거부 콜백', () => {
@@ -66,6 +94,7 @@ describe('WikiArea', () => {
         canUnpublish={false} canEdit={false} canDelete={false}
         onOpenPage={noop} onApprove={noop} onReject={noop}
         onUnpublish={noop} onEdit={noop} onDelete={noop}
+        searchResults={[]} onSearch={noop}
         {...over}
       />,
     );

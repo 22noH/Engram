@@ -17,7 +17,7 @@ import { WikiArea } from './components/WikiArea';
 import { AdminArea } from './components/AdminArea';
 import { LoginGate } from './components/LoginGate';
 import { allow } from './permissions';
-import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings } from '../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit, AdminUserDto, AdminSettings } from '../../shared/protocol';
 import { T } from './i18n';
 
 // 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
@@ -48,6 +48,7 @@ export default function App() {
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
+  const [wikiResults, setWikiResults] = useState<WikiSearchHit[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserDto[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings | null>(null);
   // Phase 16c — 비공개 채널 멤버 관리(주인 전용, 기본 연결의 실제 채널 대상).
@@ -71,6 +72,7 @@ export default function App() {
   const channelsByConnRef = useRef(channelsByConn); channelsByConnRef.current = channelsByConn;
   const modeRef = useRef(mode); modeRef.current = mode;
   const wikiOpenRef = useRef<WikiPageDto | null>(null); wikiOpenRef.current = wikiOpen;
+  const wikiQueryRef = useRef(''); // 현재 검색어(늦은 wikiResults 응답 에코 대조용)
 
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
@@ -129,6 +131,7 @@ export default function App() {
         if (open && !f.list.some((p) => p.slug === open.slug)) setWikiOpen(null);
       }
       else if (f.t === 'wikiPage') setWikiOpen(f.page);
+      else if (f.t === 'wikiResults') { if (f.query === wikiQueryRef.current) setWikiResults(f.list); }
       else if (f.t === 'proposals') setProposals(f.list);
       else if (f.t === 'wikiChanged') {
         send(connState.defaultConnId, { t: 'wikiList' });
@@ -484,6 +487,8 @@ export default function App() {
               canUnpublish={allow(meByConn[connState.defaultConnId], 'wiki.unpublish')}
               canEdit={allow(meByConn[connState.defaultConnId], 'wiki.edit')}
               canDelete={allow(meByConn[connState.defaultConnId], 'wiki.delete')}
+              searchResults={wikiResults}
+              onSearch={(query) => { wikiQueryRef.current = query; send(connState.defaultConnId, { t: 'wikiSearch', query }); }}
               onOpenPage={(slug) => send(connState.defaultConnId, { t: 'wikiGet', slug })}
               onApprove={(id) => send(connState.defaultConnId, { t: 'proposalApprove', id })}
               onReject={(id) => send(connState.defaultConnId, { t: 'proposalReject', id })}

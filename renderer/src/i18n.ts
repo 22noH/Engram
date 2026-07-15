@@ -40,6 +40,8 @@ export const T = {
   wikiInbox: ko ? '승인함' : 'Inbox',
   wikiInboxEmpty: ko ? '대기 중인 제안이 없습니다' : 'No pending proposals',
   wikiFilterPh: ko ? '필터…' : 'Filter…',
+  wikiSearchPh: ko ? '위키 검색…' : 'Search wiki…',
+  wikiNoResults: ko ? '결과 없음' : 'No results',
   wikiApprove: ko ? '승인' : 'Approve',
   wikiReject: ko ? '거부' : 'Reject',
   wikiUnpublish: ko ? '내리기' : 'Unpublish',
