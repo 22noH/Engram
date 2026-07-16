@@ -24,6 +24,9 @@ export interface BrainProvider {
   // onChunk: 텍스트 조각이 생성될 때마다 호출(스트리밍). 생략 시 블로킹 수집.
   // opts: 코딩 에이전트 등 호출별 옵션(옵셔널, 하위호환).
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult>;
+  // Phase 8d: 이 두뇌가 지휘자(ask_brain 위임)를 지원하는가. 엔그램 자체 하네스(anthropic-api·openai-api)만 true.
+  // CLI 두뇌는 우리 도구 루프를 안 타므로 미지원(undefined=false). ReaderAgent가 지휘자 활성 여부를 이걸로 가른다.
+  readonly canDelegate?: boolean;
 }
 
 export const BRAIN = Symbol('BRAIN'); // DI 토큰

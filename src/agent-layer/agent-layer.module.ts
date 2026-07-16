@@ -38,17 +38,19 @@ import { BrainDelegator } from './brain-delegator';
     ReaderAgent,
     {
       provide: BrainDelegator,
-      useFactory: (paths: PathResolver, defaultBrain: BrainProvider) => {
-        // SpecialistAgent와 동일 캐시 패턴: 'claude'(default 프로필명)은 주입 BRAIN 고정.
+      useFactory: (paths: PathResolver) => {
+        // ★SpecialistAgent와 달리 여기선 'claude'를 주입 BRAIN으로 pre-seed하지 않는다.
+        // 위임 대상 이름은 brains.json 실키(listBrainNames)라 'claude'는 진짜 claude-cli 프로필이다.
+        // 주입 BRAIN(=지휘자 자신)으로 alias하면 (1)'claude' 위임이 지휘자를 다시 돌려 데드락(같은 Semaphore 재진입),
+        // (2)사용자가 지목한 claude-cli 대신 엉뚱한 두뇌가 돈다. 그래서 항상 프로필로부터 새 인스턴스(고유 Semaphore)로 해소.
         const cache = new Map<string, BrainProvider>();
-        cache.set('claude', defaultBrain);
         const resolve = (key: string): BrainProvider => {
           if (!cache.has(key)) cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
           return cache.get(key)!;
         };
         return new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir()));
       },
-      inject: [PathResolver, BRAIN],
+      inject: [PathResolver],
     },
     IngesterAgent,
     // personas 디렉토리는 절대경로로 해소(테스트 cwd 무관): dataDir 오버라이드 우선, 없으면 레포/앱 루트(Phase 7).

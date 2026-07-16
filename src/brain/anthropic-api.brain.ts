@@ -20,6 +20,7 @@ function fail(raw: string): BrainResult {
 
 @Injectable()
 export class AnthropicApiBrain implements BrainProvider {
+  readonly canDelegate = true; // 엔그램 자체 하네스 — ask_brain 위임 지원(Phase 8d)
   private readonly sem: Semaphore;
 
   constructor(

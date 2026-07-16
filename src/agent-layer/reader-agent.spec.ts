@@ -179,10 +179,12 @@ it('reader prompt: english + interactive directive + chart contract', () => {
 
 describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
   const rag8d = { search: async () => [] } as any;
-  const logger8d = { error: () => {}, info: () => {}, warn: () => {} } as any;
-  function recordingBrain() {
+  const logger8d = { error: () => {}, log: () => {}, warn: () => {} } as any;
+  // canDelegate=true=엔그램 하네스(지휘자 지원), false=CLI 두뇌(미지원).
+  function recordingBrain(canDelegate = true) {
     const seen: { prompt: string; opts?: CompleteOpts }[] = [];
     const brain: BrainProvider = {
+      canDelegate,
       complete: async (prompt: string, _c?: (t: string) => void, opts?: CompleteOpts) => {
         seen.push({ prompt, opts });
         return { text: 'ok', costUsd: 0, isError: false } as BrainResult;
@@ -190,12 +192,12 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
     };
     return { brain, seen };
   }
+  const worker8d = { complete: async () => ({ text: 'w', costUsd: 0, isError: false } as BrainResult) } as BrainProvider;
   const msg8d = { text: '리뷰는 클로드로 해줘', userId: 'default' } as any;
 
-  it('delegator 주입 시 opts.delegate 전달 + conductor 프롬프트 포함', async () => {
-    const { brain, seen } = recordingBrain();
-    const worker = { complete: async () => ({ text: 'w', costUsd: 0, isError: false } as BrainResult) } as BrainProvider;
-    const delegator = new BrainDelegator(() => worker, () => ['claude', 'ollama']);
+  it('위임기 주입 + 두뇌가 위임지원이면 opts.delegate 전달 + conductor 프롬프트 포함', async () => {
+    const { brain, seen } = recordingBrain(true);
+    const delegator = new BrainDelegator(() => worker8d, () => ['claude', 'ollama']);
     const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
     await reader.handle(msg8d);
     expect(seen[0].opts?.delegate).toBeDefined();
@@ -203,8 +205,26 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
     expect(seen[0].prompt).toContain('ask_brain'); // conductor 지침 포함
   });
 
-  it('delegator 미주입 시 opts.delegate 미전달(회귀)', async () => {
-    const { brain, seen } = recordingBrain();
+  it('위임기 주입돼도 CLI 두뇌(canDelegate 미지원)면 지휘자 오프(회귀 — CLI 기본)', async () => {
+    const { brain, seen } = recordingBrain(false);
+    const delegator = new BrainDelegator(() => worker8d, () => ['claude', 'ollama']);
+    const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.delegate).toBeUndefined();
+    expect(seen[0].prompt).not.toContain('ask_brain');
+  });
+
+  it('위임 가능한 두뇌가 없으면(brains []) 지휘자 오프', async () => {
+    const { brain, seen } = recordingBrain(true);
+    const delegator = new BrainDelegator(() => worker8d, () => []);
+    const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.delegate).toBeUndefined();
+    expect(seen[0].prompt).not.toContain('ask_brain');
+  });
+
+  it('위임기 미주입 시 opts.delegate 미전달(회귀)', async () => {
+    const { brain, seen } = recordingBrain(true);
     const reader = new ReaderAgent(rag8d, brain, logger8d);
     await reader.handle(msg8d);
     expect(seen[0].opts?.delegate).toBeUndefined();

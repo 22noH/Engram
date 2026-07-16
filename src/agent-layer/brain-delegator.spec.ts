@@ -17,11 +17,12 @@ describe('BrainDelegator', () => {
   it('이름 지정 두뇌를 resolve해 complete(task)를 delegate 없이 부른다(깊이 1)', async () => {
     const worker = fakeBrain({});
     const d = new BrainDelegator((name) => (name === 'ollama' ? worker : (fakeBrain({}) as BrainProvider)), () => ['ollama', 'claude']);
-    const out = await d.handle().run('ollama', '리뷰해줘');
+    const h = d.handle();
+    const out = await h.run('ollama', '리뷰해줘');
     expect(out).toBe('worker-answer');
     expect(worker.calls).toHaveLength(1);
     expect(worker.calls[0].delegate).toBeUndefined(); // 재위임 불가
-    expect(d.spentUsd()).toBeCloseTo(0.5);
+    expect(h.spentUsd()).toBeCloseTo(0.5);
   });
 
   it('미지 두뇌는 에러 텍스트(throw 아님)', async () => {
@@ -36,13 +37,20 @@ describe('BrainDelegator', () => {
     expect(await d.handle().run('x', 't')).toContain('failed');
   });
 
-  it('handle()마다 비용 카운터 리셋 + brains 목록 노출', async () => {
+  it('resolve가 던져도 에러 텍스트(never-throw 자립)', async () => {
+    // 미지원 provider 등으로 프로필 빌드가 동기 throw해도 삼켜야 한다(계약 §I3).
+    const d = new BrainDelegator(() => { throw new Error('bad profile'); }, () => ['x']);
+    expect(await d.handle().run('x', 't')).toContain('threw');
+  });
+
+  it('비용은 handle()별로 격리된다(동시 대화 간섭 없음) + brains 노출', async () => {
     const d = new BrainDelegator(() => fakeBrain({}) as BrainProvider, () => ['a', 'b']);
-    expect(d.handle().brains).toEqual(['a', 'b']);
-    // 한 세션에서 비용을 쌓은 뒤, 다음 handle()이 카운터를 0으로 되돌린다.
-    await d.handle().run('a', 't');
-    expect(d.spentUsd()).toBeCloseTo(0.5);
-    d.handle();
-    expect(d.spentUsd()).toBe(0);
+    const h1 = d.handle();
+    expect(h1.brains).toEqual(['a', 'b']);
+    await h1.run('a', 't');
+    expect(h1.spentUsd()).toBeCloseTo(0.5);
+    const h2 = d.handle(); // 새 세션 = 0에서 시작(h1과 독립)
+    expect(h2.spentUsd()).toBe(0);
+    expect(h1.spentUsd()).toBeCloseTo(0.5); // h1은 영향 없음
   });
 });

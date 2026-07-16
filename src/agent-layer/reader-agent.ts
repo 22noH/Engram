@@ -53,12 +53,19 @@ export class ReaderAgent {
       try {
         recent = this.conversations ? await this.conversations.recent(msg.userId, RECENT_TURNS) : [];
       } catch { recent = []; }
-      const handle = this.delegator?.handle();
+      // 지휘자 활성 조건: 위임기 주입됨 + 이 두뇌가 위임 지원(엔그램 하네스) + 위임 가능한 두뇌가 실재.
+      // CLI 두뇌(canDelegate 없음)면 지휘자 오프 → 프롬프트·opts.delegate 모두 8d 이전과 동일(회귀 0).
+      const session = this.delegator && this.brain.canDelegate ? this.delegator.handle() : undefined;
+      const handle = session && session.brains.length > 0 ? session : undefined;
       const result = await this.brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle),
         onChunk,
         handle ? { delegate: handle } : undefined,
       );
+      // 위임 비용 노출(응답 문자열엔 비용 필드가 없어 로그로) — 스펙 §2.4 "비용 합산".
+      if (handle && handle.spentUsd() > 0) {
+        this.logger.log(`delegation cost $${handle.spentUsd().toFixed(4)}`, 'ReaderAgent');
+      }
       if (result.isError) {
         const m = t('answerGenFailedBrainError');
         emit(m);
