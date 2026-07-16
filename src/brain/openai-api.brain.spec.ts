@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { OpenAiApiBrain } from './openai-api.brain';
 import { BrainProfile } from './brain.config';
 
@@ -141,5 +144,34 @@ describe('OpenAiApiBrain', () => {
     await new OpenAiApiBrain(PROFILE, fetchFn).complete('hi');
     const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
     expect(body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['web_search', 'web_fetch']);
+  });
+
+  it('opts.cwd+codeGuard면 코딩 루프: Write 도구가 파일을 만든다', async () => {
+    const WRITE_CHUNKS = [
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'w1', type: 'function', function: { name: 'Write', arguments: '' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":"a.txt","content":"hi"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 1 } },
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-obrain-'));
+    try {
+      let call = 0;
+      const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(WRITE_CHUNKS) : sse(TEXT_CHUNKS); }) as unknown as typeof fetch;
+      const guarded: string[] = [];
+      const codeGuard = (p: string) => { guarded.push(p); };
+      const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: dir, codeGuard });
+      expect(r.isError).toBe(false);
+      expect(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe('hi');
+      expect(guarded).toContain(path.resolve(dir, 'a.txt'));
+      const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+      expect(body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('opts.cwd 있고 codeGuard 없으면 isError(모델 호출 안 함)', async () => {
+    const fetchFn = jest.fn() as unknown as typeof fetch;
+    const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: 'C:/x' });
+    expect(r.isError).toBe(true);
+    expect((fetchFn as jest.Mock)).not.toHaveBeenCalled();
   });
 });

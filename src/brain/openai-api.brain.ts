@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { BrainProvider, BrainResult, CompleteOpts, DelegateHandle } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { sseJson } from './sse';
-import { runToolLoop, ToolCall, TurnResult } from './tool-loop';
-import { WEB_TOOL_DEFS, executeWebTool } from './web-tools';
+import { runToolLoop, ToolCall, TurnResult, MAX_TOOL_ITERATIONS } from './tool-loop';
+import { WEB_TOOL_DEFS, WebToolDef, executeWebTool } from './web-tools';
 import { askBrainDef, runAskBrain } from './brain-tools';
+import { CODING_TOOL_DEFS, executeCodingTool, MAX_CODING_ITERATIONS } from './coding-tools';
 
 // OpenAI호환 chat/completions 하네스(스펙 §2.2) — Ollama·LM Studio·vLLM·OpenAI 공용.
 // 모델이 tool calling을 지원 안 하면 tool_calls가 안 올 뿐(기능 저하이지 에러 아님).
@@ -36,21 +37,29 @@ export class OpenAiApiBrain implements BrainProvider {
 
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return this.sem.run(async () => {
-      if (opts?.cwd) return fail('coding requires a CLI-harness brain until Phase 8b (opts.cwd rejected)');
+      // 코딩(opts.cwd)엔 쓰기 판정(codeGuard, agent-layer 주입)이 필수 — 없으면 무방비 쓰기라 거부(스펙 §6.2·불변식 4).
+      const coding = !!opts?.cwd;
+      if (coding && !opts!.codeGuard) return fail('coding requires an injected codeGuard (PermissionFence)');
       if (!this.profile.baseUrl) return fail('openai-api: baseUrl missing in brains.json profile');
       if (!this.profile.model) return fail('openai-api: model missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
       const history: OpenAiMsg[] = [{ role: 'user', content: prompt }];
+      const toolDefs: WebToolDef[] = coding
+        ? CODING_TOOL_DEFS
+        : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : [])];
+      const executor = coding
+        ? (name: string, input: unknown) => executeCodingTool(name, input, opts!.cwd!, opts!.codeGuard!, ctrl.signal)
+        : (name: string, input: unknown) =>
+            name === 'ask_brain' ? runAskBrain(input, opts?.delegate) : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal);
       try {
         const r = await runToolLoop(
-          () => this.turn(history, onChunk, ctrl.signal, opts?.delegate),
+          () => this.turn(history, onChunk, ctrl.signal, toolDefs),
           (results) => {
             for (const t of results) history.push({ role: 'tool', content: t.output, tool_call_id: t.id });
           },
-          (name, input) => name === 'ask_brain'
-            ? runAskBrain(input, opts?.delegate)
-            : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
+          executor,
+          coding ? MAX_CODING_ITERATIONS : MAX_TOOL_ITERATIONS,
         );
         return {
           text: r.text,
@@ -70,8 +79,7 @@ export class OpenAiApiBrain implements BrainProvider {
     return (inTok * (this.profile.inputUsdPerMTok ?? 0) + outTok * (this.profile.outputUsdPerMTok ?? 0)) / 1_000_000;
   }
 
-  private async turn(history: OpenAiMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, delegate?: DelegateHandle): Promise<TurnResult> {
-    const toolDefs = [...WEB_TOOL_DEFS, ...(delegate ? [askBrainDef(delegate.brains)] : [])];
+  private async turn(history: OpenAiMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, toolDefs: WebToolDef[]): Promise<TurnResult> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.profile.apiKey) headers.Authorization = `Bearer ${this.profile.apiKey}`;
     const res = await this.fetchFn(`${this.profile.baseUrl!.replace(/\/$/, '')}/chat/completions`, {
