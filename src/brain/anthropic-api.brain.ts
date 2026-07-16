@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { BrainProvider, BrainResult, CompleteOpts, DelegateHandle } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { sseJson } from './sse';
-import { runToolLoop, ToolCall, TurnResult } from './tool-loop';
-import { WEB_TOOL_DEFS, executeWebTool } from './web-tools';
+import { runToolLoop, ToolCall, TurnResult, MAX_TOOL_ITERATIONS } from './tool-loop';
+import { WEB_TOOL_DEFS, WebToolDef, executeWebTool } from './web-tools';
 import { askBrainDef, runAskBrain } from './brain-tools';
+import { CODING_TOOL_DEFS, executeCodingTool, MAX_CODING_ITERATIONS } from './coding-tools';
 
 // Anthropic Messages API 직접 호출 하네스(스펙 §2.1). 공식 SDK 미도입 — HTTP+SSE 직접.
 // ponytail: SDK의 재시도·타이핑이 필요해지면 도입 재검토.
@@ -32,22 +33,28 @@ export class AnthropicApiBrain implements BrainProvider {
 
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return this.sem.run(async () => {
-      // 코딩 신호(opts.cwd)는 8b까지 CLI 하네스 전용 — 조용한 품질저하 대신 정직한 거부(스펙 §2.3).
-      if (opts?.cwd) return fail('coding requires a CLI-harness brain until Phase 8b (opts.cwd rejected)');
+      const coding = !!opts?.cwd;
+      if (coding && !opts!.codeGuard) return fail('coding requires an injected codeGuard (PermissionFence)');
       if (!this.profile.apiKey) return fail('anthropic-api: apiKey missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
       const history: AnthropicMsg[] = [{ role: 'user', content: prompt }];
+      const toolDefs: WebToolDef[] = coding
+        ? CODING_TOOL_DEFS
+        : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : [])];
+      const executor = coding
+        ? (name: string, input: unknown) => executeCodingTool(name, input, opts!.cwd!, opts!.codeGuard!, ctrl.signal)
+        : (name: string, input: unknown) =>
+            name === 'ask_brain' ? runAskBrain(input, opts?.delegate) : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal);
       try {
         const r = await runToolLoop(
-          () => this.turn(history, onChunk, ctrl.signal, opts?.delegate),
+          () => this.turn(history, onChunk, ctrl.signal, toolDefs),
           (results) => history.push({
             role: 'user',
             content: results.map((t) => ({ type: 'tool_result', tool_use_id: t.id, content: t.output })),
           }),
-          (name, input) => name === 'ask_brain'
-            ? runAskBrain(input, opts?.delegate)
-            : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
+          executor,
+          coding ? MAX_CODING_ITERATIONS : MAX_TOOL_ITERATIONS,
         );
         return {
           text: r.text,
@@ -68,8 +75,7 @@ export class AnthropicApiBrain implements BrainProvider {
   }
 
   // 한 턴 = 모델 호출 1회. SSE에서 텍스트(onChunk)·tool_use·usage를 수집하고 assistant 턴을 history에 기록.
-  private async turn(history: AnthropicMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, delegate?: DelegateHandle): Promise<TurnResult> {
-    const toolDefs = [...WEB_TOOL_DEFS, ...(delegate ? [askBrainDef(delegate.brains)] : [])];
+  private async turn(history: AnthropicMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, toolDefs: WebToolDef[]): Promise<TurnResult> {
     const res = await this.fetchFn(`${this.profile.baseUrl || DEFAULT_BASE}/v1/messages`, {
       method: 'POST',
       headers: {

@@ -1,5 +1,8 @@
 import { AnthropicApiBrain } from './anthropic-api.brain';
 import { BrainProfile } from './brain.config';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const PROFILE: BrainProfile = {
   provider: 'anthropic-api', cli: '', model: 'claude-opus-4-8', concurrency: 1, timeoutMs: 5000,
@@ -83,10 +86,10 @@ describe('AnthropicApiBrain', () => {
     expect((fetchFn as jest.Mock)).not.toHaveBeenCalled();
   });
 
-  it('opts.cwd(코딩 신호)는 즉시 isError', async () => {
+  it('opts.cwd(코딩 신호)는 codeGuard 없으면 즉시 isError', async () => {
     const r = await new AnthropicApiBrain(PROFILE, jest.fn() as unknown as typeof fetch).complete('x', undefined, { cwd: 'C:/repo' });
     expect(r.isError).toBe(true);
-    expect(String(r.raw)).toContain('8b');
+    expect(String(r.raw)).toContain('codeGuard');
   });
 
   it('타임아웃은 isError(raw=timeout)', async () => {
@@ -152,5 +155,34 @@ describe('AnthropicApiBrain', () => {
     await new AnthropicApiBrain(PROFILE, fetchFn).complete('hi');
     const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
     expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
+  });
+
+  it('opts.cwd+codeGuard면 코딩 루프: Write 도구가 파일을 만든다', async () => {
+    const WRITE_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'w1', name: 'Write' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"a.txt","content":"hi"}' } },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-abrain-'));
+    try {
+      let call = 0;
+      const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(WRITE_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+      const guarded: string[] = [];
+      const codeGuard = (p: string) => { guarded.push(p); };
+      const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: dir, codeGuard });
+      expect(r.isError).toBe(false);
+      expect(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe('hi');
+      expect(guarded).toContain(path.resolve(dir, 'a.txt'));
+      const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+      expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('opts.cwd 있고 codeGuard 없으면 isError(모델 호출 안 함)', async () => {
+    const fetchFn = jest.fn() as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: 'C:/x' });
+    expect(r.isError).toBe(true);
+    expect((fetchFn as jest.Mock)).not.toHaveBeenCalled();
   });
 });
