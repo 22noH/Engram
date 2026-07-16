@@ -114,4 +114,16 @@ export class PermissionFence {
     return flags;
   }
 
+  // API 코딩 루프용 쓰기 판정(스펙 §5.1): 백스톱 + 프로젝트 쓰기 스코프. 막히면 throw.
+  // CLI는 --add-dir로 스코프를 강제하지만 API 두뇌는 이 판정을 주입받아(codeGuard) 쓴다.
+  assertCodingWrite(targetPath: string, projectWritePaths: string[]): void {
+    this.assertWritable(targetPath); // 백스톱(자기repo·시스템·denyPaths) + cfg writePaths
+    if (
+      projectWritePaths.length > 0 &&
+      !projectWritePaths.some((w) => PermissionFence.isWithin(targetPath, w))
+    ) {
+      throw new Error(`프로젝트 쓰기 스코프 밖: ${targetPath}`);
+    }
+  }
+
 }

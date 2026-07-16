@@ -124,3 +124,34 @@ it('assertWritable: C:/ProgramData도 시스템 폴더로 거부', () => {
   (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
   expect(() => f.assertWritable('C:/ProgramData/foo')).toThrow('시스템 폴더');
 });
+
+describe('assertCodingWrite (API 코딩 쓰기 판정)', () => {
+  it('엔그램 자기 저장소는 백스톱으로 거부', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-root-'));
+    try {
+      const fence = new PermissionFence(tmpFence(null), root);
+      await fence.load();
+      expect(() => fence.assertCodingWrite(path.join(root, 'src/x.ts'), [])).toThrow();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('projectWritePaths 지정 시 그 안이면 통과, 밖이면 throw', async () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-proj-'));
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-other-'));
+    try {
+      const fence = new PermissionFence(tmpFence(null)); // engramRoot 없음
+      await fence.load();
+      expect(() => fence.assertCodingWrite(path.join(proj, 'a.ts'), [proj])).not.toThrow();
+      expect(() => fence.assertCodingWrite(path.join(other, 'a.ts'), [proj])).toThrow('쓰기 스코프 밖');
+    } finally { fs.rmSync(proj, { recursive: true, force: true }); fs.rmSync(other, { recursive: true, force: true }); }
+  });
+
+  it('projectWritePaths 비면 백스톱 밖은 통과(자동모드)', async () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-proj2-'));
+    try {
+      const fence = new PermissionFence(tmpFence(null));
+      await fence.load();
+      expect(() => fence.assertCodingWrite(path.join(proj, 'a.ts'), [])).not.toThrow();
+    } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+  });
+});
