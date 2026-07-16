@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadActiveBrain, loadBrainProfile } from './brain.config';
+import { loadActiveBrain, loadBrainProfile, listBrainNames } from './brain.config';
 
 describe('loadActiveBrain', () => {
   let dir: string;
@@ -113,5 +113,16 @@ describe('Phase 8a — engram-api 프로필', () => {
     const p = loadActiveBrain(tmp, { ENGRAM_BRAIN_API_KEY: 'env-key', ENGRAM_BRAIN_BASE_URL: 'http://alt' } as NodeJS.ProcessEnv);
     expect(p.apiKey).toBe('env-key');
     expect(p.baseUrl).toBe('http://alt');
+  });
+});
+
+describe('listBrainNames', () => {
+  it('brains.json의 두뇌 이름들을 반환(없으면 [])', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-names-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'claude', brains: { claude: {}, ollama: {}, anthropic: {} } }));
+      expect(listBrainNames(dir).sort()).toEqual(['anthropic', 'claude', 'ollama']);
+      expect(listBrainNames(path.join(dir, 'nope'))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

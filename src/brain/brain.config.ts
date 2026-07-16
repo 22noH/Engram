@@ -90,3 +90,13 @@ export function loadBrainProfile(configDir: string, name: string, env: NodeJS.Pr
   const target = cfg.brains?.[name] ? name : cfg.default;
   return resolve(cfg, target, env);
 }
+
+// brains.json에 등록된 두뇌 이름 목록(지휘자 위임 대상 후보, Phase 8d). 없거나 깨지면 빈 배열.
+export function listBrainNames(configDir: string): string[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'brains.json'), 'utf8'));
+    return raw && typeof raw.brains === 'object' && raw.brains ? Object.keys(raw.brains) : [];
+  } catch {
+    return [];
+  }
+}
