@@ -6,11 +6,18 @@ export interface BrainResult {
   raw?: unknown; // 원본 응답(디버깅용)
 }
 
+// Phase 8d: 지휘자가 다른 두뇌를 부르는 위임 핸들(agent-layer가 만들어 주입 — src/brain은 함수만 부름).
+export interface DelegateHandle {
+  brains: string[];                                    // 위임 가능한 두뇌 이름들(brains.json 등록 전부)
+  run(brain: string, task: string): Promise<string>;   // never-throw — 실패·미지 두뇌는 에러 텍스트
+}
+
 // Phase 4: 호출별 옵션(코딩 에이전트가 타깃 디렉터리·도구 플래그 지정에 사용).
 export interface CompleteOpts {
   cwd?: string;          // 코딩 시 타깃 작업 디렉터리
   extraArgs?: string[];  // 도구 플래그 등 추가 인수
   timeoutMs?: number;    // 호출별 타임아웃(코딩은 길다)
+  delegate?: DelegateHandle;   // Phase 8d: 있으면 엔그램 하네스가 ask_brain 도구를 노출
 }
 
 export interface BrainProvider {
