@@ -8,6 +8,7 @@ import { readStatus } from './status';
 import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
+import { saveAnthropicApiKey } from './api-brain';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
 import { resolveLanguage } from '../agent-layer/language';
@@ -225,6 +226,9 @@ function registerIpc(): void {
   });
   ipcMain.handle('engram:save-token', (_e, token: string) => {
     saveDiscordToken(configDir, token);
+  });
+  ipcMain.handle('engram:save-api-key', (_e, apiKey: string, setDefault: boolean) => {
+    saveAnthropicApiKey(configDir, apiKey, setDefault);
   });
   ipcMain.handle('engram:open-path', (_e, which: string) => {
     const dirs: Record<string, string> = {

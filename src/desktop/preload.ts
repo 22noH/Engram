@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('engram', {
   addOllama: (model: string, setDefault: boolean) =>
     ipcRenderer.invoke('engram:add-ollama', model, setDefault),
   saveToken: (token: string) => ipcRenderer.invoke('engram:save-token', token),
+  saveApiKey: (apiKey: string, setDefault: boolean) =>
+    ipcRenderer.invoke('engram:save-api-key', apiKey, setDefault),
   openPath: (which: string) => ipcRenderer.invoke('engram:open-path', which),
   restart: () => ipcRenderer.invoke('engram:restart'),
   logTail: () => ipcRenderer.invoke('engram:log-tail'),

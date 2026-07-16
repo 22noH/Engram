@@ -42,10 +42,9 @@ describe('addOllamaProfile', () => {
     addOllamaProfile(tmp, 'llama3.3:latest');
     const cfg = readBrains();
     expect(cfg.brains.ollama).toEqual({
-      provider: 'claude-cli',
-      cli: 'claude',
+      provider: 'openai-api',
+      baseUrl: 'http://localhost:11434/v1',
       model: 'llama3.3:latest',
-      env: { ANTHROPIC_BASE_URL: 'http://localhost:11434' },
     });
     expect(cfg.default).toBe('claude');
   });

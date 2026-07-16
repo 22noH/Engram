@@ -108,7 +108,7 @@
       padding: 7px 10px;
     }
     input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    input#token { width: 340px; font-family: "Cascadia Mono", Consolas, monospace; }
+    input#token, input#apikey { width: 340px; font-family: "Cascadia Mono", Consolas, monospace; }
 
     .ok { color: var(--alive); }
     .bad { color: var(--dead); }
@@ -174,6 +174,12 @@
       <label style="font-size:13px"><input type="checkbox" id="ollama-default" /> <span data-t="setDefault"></span></label>
       <button class="primary" id="btn-ollama" data-t="addBrain"></button>
     </div>
+    <div class="row" id="api-add" style="margin-top:14px">
+      <input id="apikey" type="password" placeholder="sk-ant-…" />
+      <label style="font-size:13px"><input type="checkbox" id="api-default" /> <span data-t="setDefault"></span></label>
+      <button class="primary" id="btn-apikey" data-t="saveKey"></button>
+    </div>
+    <div id="api-note" style="font-size:12px;margin-top:4px;opacity:.75"></div>
   </section>
 
   <section id="sec-messenger">
@@ -213,8 +219,11 @@
       claudeOk: 'claude CLI 감지됨', claudeSignIn: '로그인은 터미널에서 claude 실행',
       claudeMissing: 'claude CLI를 찾을 수 없어요 — 아래 명령으로 설치하세요', copyCmd: '명령 복사', copied: '복사됨',
       ollamaOk: 'Ollama 실행 중', models: '개 모델',
-      ollamaMissing: 'Ollama가 실행 중이 아니에요 — 로컬 LLM을 쓰려면 ollama.com에서 설치하세요 (claude CLI는 하네스로 계속 필요해요)',
+      ollamaMissing: 'Ollama가 실행 중이 아니에요 — 로컬 LLM을 쓰려면 ollama.com에서 설치하세요',
       setDefault: '기본 두뇌로 사용', addBrain: '로컬 두뇌 추가', added: '추가됨 — 재시작하면 적용돼요',
+      saveKey: '저장',
+      apiKeyNote: 'Anthropic API 키 — claude CLI 없이 두뇌를 씁니다. 기본 두뇌로 설정해도 코딩 기능은 아직 CLI 두뇌가 필요해요(Phase 8b).',
+      apiKeySaved: '저장됨 — 재시작 후 적용',
       save: '저장', saved: '저장됨 — 재시작하면 적용돼요', tokenPlaceholder: '봇 토큰 붙여넣기',
       discordHint: '봇이 아직 없다면 discord.com/developers/applications 에서 만들고 Bot 탭에서 토큰을 발급하세요. 저장한 뒤 "재시작"을 누르면 연결돼요.',
       openData: '데이터 폴더', openLogs: '로그 폴더', openConfig: '설정 폴더',
@@ -231,8 +240,11 @@
       claudeOk: 'claude CLI detected', claudeSignIn: 'sign in by running claude in a terminal',
       claudeMissing: 'claude CLI not found — install it with the command below', copyCmd: 'Copy command', copied: 'Copied',
       ollamaOk: 'Ollama running', models: ' models',
-      ollamaMissing: 'Ollama is not running — install it from ollama.com to use a local LLM (claude CLI is still required as the harness)',
+      ollamaMissing: 'Ollama is not running — install it from ollama.com to use a local LLM',
       setDefault: 'Use as default brain', addBrain: 'Add local brain', added: 'Added — restart to apply',
+      saveKey: 'Save',
+      apiKeyNote: 'Anthropic API key — runs the brain without the claude CLI. Coding still needs a CLI brain until Phase 8b.',
+      apiKeySaved: 'Saved — restart to apply',
       save: 'Save', saved: 'Saved — restart to apply', tokenPlaceholder: 'Paste bot token',
       discordHint: 'No bot yet? Create one at discord.com/developers/applications and issue a token in the Bot tab. After saving, click Restart to connect.',
       openData: 'Data folder', openLogs: 'Log folder', openConfig: 'Config folder',
@@ -247,6 +259,14 @@
     $('log').textContent = t.logEmpty;
     $('claude').textContent = t.checking;
     $('ollama').textContent = t.checking;
+    $('api-note').textContent = t.apiKeyNote;
+    $('btn-apikey').onclick = async () => {
+      const k = $('apikey').value.trim();
+      if (!k) return;
+      await window.engram.saveApiKey(k, $('api-default').checked);
+      $('api-note').textContent = t.apiKeySaved;
+      $('apikey').value = '';
+    };
 
     // 외부 유래 문자열(명령 stdout·API 응답)은 전부 textContent로만 — innerHTML 주입 금지.
     function setLine(el, parts) {
