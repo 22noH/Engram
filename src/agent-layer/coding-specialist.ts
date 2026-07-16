@@ -44,7 +44,11 @@ export class CodingSpecialist {
     // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
     const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
     const brain = this.resolveBrain(persona.brain);
-    const r = await brain.complete(prompt, onChunk, { cwd: project.targetPath, extraArgs: flags });
+    const r = await brain.complete(prompt, onChunk, {
+      cwd: project.targetPath,
+      extraArgs: flags, // CLI 두뇌용(무변경)
+      codeGuard: (p) => this.fence.assertCodingWrite(p, project.writePaths), // API 두뇌용(Phase 8b-1)
+    });
     if (r.isError) throw new Error(`코딩 두뇌 호출 실패: ${personaName}/${ticket.id}`);
     return r.text;
   }

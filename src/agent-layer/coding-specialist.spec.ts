@@ -53,4 +53,21 @@ describe('CodingSpecialist', () => {
     expect(captured).toContain('# Work area');
     expect(captured).toContain("Respond in the language of the user's latest message.");
   });
+
+  it('brain.complete에 codeGuard(=fence.assertCodingWrite 바인딩)를 함께 넘긴다', async () => {
+    const calls: Array<{ target: string; scope: string[] }> = [];
+    const fence2 = {
+      codingAutoFlags: () => ['--allowedTools', 'Edit', '--add-dir', 'C:/proj'],
+      assertCodingWrite: (target: string, scope: string[]) => { calls.push({ target, scope }); },
+    } as any;
+    const captured: any = {};
+    const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+    const spec = new CodingSpecialist(registry, fence2, () => brain as any, logger);
+    await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }, project);
+    expect(typeof captured.opts.codeGuard).toBe('function');
+    expect(captured.opts.cwd).toBe('C:/proj');
+    expect(captured.opts.extraArgs).toContain('--allowedTools'); // CLI용도 그대로
+    captured.opts.codeGuard('C:/proj/a.ts'); // 호출 시 fence.assertCodingWrite로 위임
+    expect(calls).toEqual([{ target: 'C:/proj/a.ts', scope: ['C:/proj'] }]);
+  });
 });
