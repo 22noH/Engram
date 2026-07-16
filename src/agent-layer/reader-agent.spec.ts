@@ -5,6 +5,8 @@ import { InsightContext } from '../knowledge-core/insight/insight-context';
 import { PathResolver } from '../pal/path-resolver';
 import { PinoLogger } from '../pal/logger';
 import { RagStore } from '../knowledge-core/rag/rag-store';
+import { BrainDelegator } from './brain-delegator';
+import { BrainProvider, BrainResult, CompleteOpts } from '../brain/brain.port';
 
 const ragWith = (hits: { slug: string; title: string; text: string }[]): RagStore =>
   ({ search: async () => hits } as unknown as RagStore);
@@ -174,9 +176,6 @@ it('reader prompt: english + interactive directive + chart contract', () => {
   expect(p).toContain("Respond in the language of the user's latest message.");
   expect(p).toContain('```chart');
 });
-
-import { BrainDelegator } from './brain-delegator';
-import { BrainProvider, BrainResult, CompleteOpts } from '../brain/brain.port';
 
 describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
   const rag8d = { search: async () => [] } as any;
