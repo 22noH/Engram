@@ -36,8 +36,13 @@ describe('BrainDelegator', () => {
     expect(await d.handle().run('x', 't')).toContain('failed');
   });
 
-  it('handle()마다 비용 카운터 리셋 + brains 목록 노출', () => {
+  it('handle()마다 비용 카운터 리셋 + brains 목록 노출', async () => {
     const d = new BrainDelegator(() => fakeBrain({}) as BrainProvider, () => ['a', 'b']);
     expect(d.handle().brains).toEqual(['a', 'b']);
+    // 한 세션에서 비용을 쌓은 뒤, 다음 handle()이 카운터를 0으로 되돌린다.
+    await d.handle().run('a', 't');
+    expect(d.spentUsd()).toBeCloseTo(0.5);
+    d.handle();
+    expect(d.spentUsd()).toBe(0);
   });
 });

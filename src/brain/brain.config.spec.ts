@@ -125,4 +125,14 @@ describe('listBrainNames', () => {
       expect(listBrainNames(path.join(dir, 'nope'))).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('깨진 JSON이나 brains 키가 없으면 []', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-names-bad-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), '{ not valid json');
+      expect(listBrainNames(dir)).toEqual([]);
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'claude' }));
+      expect(listBrainNames(dir)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
 });
