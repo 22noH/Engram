@@ -124,4 +124,32 @@ describe('AnthropicApiBrain', () => {
     expect(toolSignal).toBeDefined();
     expect(toolSignal?.aborted).toBe(true);
   });
+
+  it('opts.delegate 있으면 ask_brain 도구 노출 + 호출 시 delegate.run 라우팅', async () => {
+    const ASK_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'ab1', name: 'ask_brain' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"brain":"ollama","task":"리뷰"}' } },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    let call = 0;
+    const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(ASK_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+    const ran: Array<{ brain: string; task: string }> = [];
+    const delegate = { brains: ['ollama', 'claude'], run: async (brain: string, task: string) => { ran.push({ brain, task }); return '리뷰 결과'; } };
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('do it', undefined, { delegate });
+    expect(r.isError).toBe(false);
+    expect(ran).toEqual([{ brain: 'ollama', task: '리뷰' }]);
+    const firstBody = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    const askDef = firstBody.tools.find((t: { name: string }) => t.name === 'ask_brain');
+    expect(askDef).toBeDefined();
+    expect(askDef.description).toContain('ollama');
+    expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('리뷰 결과');
+  });
+
+  it('opts.delegate 없으면 ask_brain 미노출(web 도구만)', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('hi');
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
+  });
 });

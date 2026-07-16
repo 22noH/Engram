@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts, DelegateHandle } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { sseJson } from './sse';
 import { runToolLoop, ToolCall, TurnResult } from './tool-loop';
 import { WEB_TOOL_DEFS, executeWebTool } from './web-tools';
+import { askBrainDef, runAskBrain } from './brain-tools';
 
 // Anthropic Messages API 직접 호출 하네스(스펙 §2.1). 공식 SDK 미도입 — HTTP+SSE 직접.
 // ponytail: SDK의 재시도·타이핑이 필요해지면 도입 재검토.
@@ -38,12 +39,14 @@ export class AnthropicApiBrain implements BrainProvider {
       const history: AnthropicMsg[] = [{ role: 'user', content: prompt }];
       try {
         const r = await runToolLoop(
-          () => this.turn(history, onChunk, ctrl.signal),
+          () => this.turn(history, onChunk, ctrl.signal, opts?.delegate),
           (results) => history.push({
             role: 'user',
             content: results.map((t) => ({ type: 'tool_result', tool_use_id: t.id, content: t.output })),
           }),
-          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
+          (name, input) => name === 'ask_brain'
+            ? runAskBrain(input, opts?.delegate)
+            : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
         );
         return {
           text: r.text,
@@ -64,7 +67,8 @@ export class AnthropicApiBrain implements BrainProvider {
   }
 
   // 한 턴 = 모델 호출 1회. SSE에서 텍스트(onChunk)·tool_use·usage를 수집하고 assistant 턴을 history에 기록.
-  private async turn(history: AnthropicMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal): Promise<TurnResult> {
+  private async turn(history: AnthropicMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, delegate?: DelegateHandle): Promise<TurnResult> {
+    const toolDefs = [...WEB_TOOL_DEFS, ...(delegate ? [askBrainDef(delegate.brains)] : [])];
     const res = await this.fetchFn(`${this.profile.baseUrl || DEFAULT_BASE}/v1/messages`, {
       method: 'POST',
       headers: {
@@ -77,7 +81,7 @@ export class AnthropicApiBrain implements BrainProvider {
         max_tokens: this.profile.maxTokens ?? DEFAULT_MAX_TOKENS,
         stream: true,
         messages: history,
-        tools: WEB_TOOL_DEFS.map((d) => ({ name: d.name, description: d.description, input_schema: d.parameters })),
+        tools: toolDefs.map((d) => ({ name: d.name, description: d.description, input_schema: d.parameters })),
       }),
       signal,
     });
