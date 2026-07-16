@@ -8,8 +8,19 @@ import { InsightContext } from '../knowledge-core/insight/insight-context';
 import { ConversationStore, ConversationRecord } from '../knowledge-core/conversation-store';
 import { outputDirective } from './language';
 import { t } from './i18n';
+import { BrainDelegator } from './brain-delegator';
+import { loadPrompt } from './prompt-store';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
+
+// prompts/conductor.md 없을 때의 내장 기본값(지휘자 지침 — out-of-box 동작 보장).
+export const CONDUCTOR_DEFAULT = [
+  'You can delegate subtasks to other registered brains using the ask_brain tool.',
+  '- If the user names a specific brain for part of the work, use ask_brain to hand that part to it.',
+  '- If you get stuck, or another brain would clearly do a part better, delegate it. For autonomous delegation, prefer local/free brains over paid API brains.',
+  '- If the request is ambiguous, ask one brief clarifying question instead of guessing.',
+  '- Coding delegation is not available yet — delegate only analysis, review, and writing tasks.',
+].join('\n');
 
 // A 읽기(설계 §7.2). 질문 → RAG 검색 → 컨텍스트 종합 → 답 + 출처.
 // 에이전트 자체는 stateless — 연속성은 ConversationStore의 직전 n턴을 프롬프트에 주입해서 얻는다.
@@ -21,6 +32,7 @@ export class ReaderAgent {
     private readonly logger: PinoLogger,
     @Optional() private readonly insight?: InsightContext,
     @Optional() private readonly conversations?: ConversationStore,
+    @Optional() private readonly delegator?: BrainDelegator,
   ) {}
 
   async handle(
@@ -41,7 +53,12 @@ export class ReaderAgent {
       try {
         recent = this.conversations ? await this.conversations.recent(msg.userId, RECENT_TURNS) : [];
       } catch { recent = []; }
-      const result = await this.brain.complete(this.buildPrompt(msg.text, hits, ctx, recent), onChunk);
+      const handle = this.delegator?.handle();
+      const result = await this.brain.complete(
+        this.buildPrompt(msg.text, hits, ctx, recent, !!handle),
+        onChunk,
+        handle ? { delegate: handle } : undefined,
+      );
       if (result.isError) {
         const m = t('answerGenFailedBrainError');
         emit(m);
@@ -62,7 +79,7 @@ export class ReaderAgent {
   }
 
   // 검색된 위키를 번호 매긴 컨텍스트로 조립 + 근거 우선·출처 표기 지시.
-  private buildPrompt(question: string, hits: SearchResult[], ctx = '', recent: ConversationRecord[] = []): string {
+  private buildPrompt(question: string, hits: SearchResult[], ctx = '', recent: ConversationRecord[] = [], conductorOn = false): string {
     const context = hits.map((h, i) => `[${i + 1}] ${h.title} (slug: ${h.slug})\n${h.text}`).join('\n\n');
     const clip = (s: string): string => (s.length > 400 ? s.slice(0, 400) + '…' : s);
     const recentBlock = recent.length
@@ -73,6 +90,7 @@ export class ReaderAgent {
     const insightBlock = ctx
       ? `# User context for reference (not evidence — evidence is the wiki below)\n${ctx}\n\n`
       : '';
+    const conductorBlock = conductorOn ? `# Delegation\n${loadPrompt('conductor', CONDUCTOR_DEFAULT)}\n\n` : '';
     return [
       'Answer the question using the searched wiki content below as the primary basis.',
       'Mark the evidence you use with [n]. If the search content cannot answer it, state that this is general knowledge outside the wiki.',
@@ -81,7 +99,7 @@ export class ReaderAgent {
       'Per-item comparisons also work as a markdown table (| header | ... |) — for changes attach arrows like ▲2.3% (up) / ▼1.1% (down) and the UI colors them green/red. Use - [ ] / - [x] checkboxes for to-do lists.',
       outputDirective('interactive'),
       '',
-      recentBlock + insightBlock + `# Searched wiki\n${context || '(none)'}`,
+      conductorBlock + recentBlock + insightBlock + `# Searched wiki\n${context || '(none)'}`,
       '',
       `# Question\n${question}`,
     ].join('\n');

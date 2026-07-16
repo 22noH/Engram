@@ -26,15 +26,30 @@ import { ConversationStore } from '../knowledge-core/conversation-store';
 import { BRAIN, JUDGE_BRAIN, BrainProvider } from '../brain/brain.port';
 import { Semaphore } from '../brain/semaphore';
 import { createBrain } from '../brain/brain.factory';
-import { loadBrainProfile } from '../brain/brain.config';
+import { loadBrainProfile, listBrainNames } from '../brain/brain.config';
 import { VerificationGate } from './verification-gate';
 import { InsightReporter } from './insight-reporter';
+import { BrainDelegator } from './brain-delegator';
 
 // AgentLayer(설계 §7). 코어(RagStore·PinoLogger)와 두뇌(BRAIN)를 소비.
 @Module({
   imports: [KnowledgeCoreModule, BrainModule],
   providers: [
     ReaderAgent,
+    {
+      provide: BrainDelegator,
+      useFactory: (paths: PathResolver, defaultBrain: BrainProvider) => {
+        // SpecialistAgent와 동일 캐시 패턴: 'claude'(default 프로필명)은 주입 BRAIN 고정.
+        const cache = new Map<string, BrainProvider>();
+        cache.set('claude', defaultBrain);
+        const resolve = (key: string): BrainProvider => {
+          if (!cache.has(key)) cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
+          return cache.get(key)!;
+        };
+        return new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir()));
+      },
+      inject: [PathResolver, BRAIN],
+    },
     IngesterAgent,
     // personas 디렉토리는 절대경로로 해소(테스트 cwd 무관): dataDir 오버라이드 우선, 없으면 레포/앱 루트(Phase 7).
     {

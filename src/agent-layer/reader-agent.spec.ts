@@ -174,3 +174,41 @@ it('reader prompt: english + interactive directive + chart contract', () => {
   expect(p).toContain("Respond in the language of the user's latest message.");
   expect(p).toContain('```chart');
 });
+
+import { BrainDelegator } from './brain-delegator';
+import { BrainProvider, BrainResult, CompleteOpts } from '../brain/brain.port';
+
+describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
+  const rag8d = { search: async () => [] } as any;
+  const logger8d = { error: () => {}, info: () => {}, warn: () => {} } as any;
+  function recordingBrain() {
+    const seen: { prompt: string; opts?: CompleteOpts }[] = [];
+    const brain: BrainProvider = {
+      complete: async (prompt: string, _c?: (t: string) => void, opts?: CompleteOpts) => {
+        seen.push({ prompt, opts });
+        return { text: 'ok', costUsd: 0, isError: false } as BrainResult;
+      },
+    };
+    return { brain, seen };
+  }
+  const msg8d = { text: '리뷰는 클로드로 해줘', userId: 'default' } as any;
+
+  it('delegator 주입 시 opts.delegate 전달 + conductor 프롬프트 포함', async () => {
+    const { brain, seen } = recordingBrain();
+    const worker = { complete: async () => ({ text: 'w', costUsd: 0, isError: false } as BrainResult) } as BrainProvider;
+    const delegator = new BrainDelegator(() => worker, () => ['claude', 'ollama']);
+    const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.delegate).toBeDefined();
+    expect(seen[0].opts?.delegate?.brains).toEqual(['claude', 'ollama']);
+    expect(seen[0].prompt).toContain('ask_brain'); // conductor 지침 포함
+  });
+
+  it('delegator 미주입 시 opts.delegate 미전달(회귀)', async () => {
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag8d, brain, logger8d);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.delegate).toBeUndefined();
+    expect(seen[0].prompt).not.toContain('ask_brain');
+  });
+});
