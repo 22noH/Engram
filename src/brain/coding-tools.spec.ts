@@ -123,4 +123,21 @@ describe('executeCodingTool (never-throw)', () => {
       expect(fs.existsSync(path.join(dir, '..', 'escape.txt'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('cwd 안 "깨진 심링크"가 밖을 가리켜도 Write는 막는다(POSIX 우회 봉쇄)', async () => {
+    const dir = tmp();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-dangle-'));
+    // 밖의 아직 없는 대상을 가리키는 심링크. Windows 파일심링크는 권한 필요 → 실패시 스킵.
+    let made = true;
+    try { fs.symlinkSync(path.join(outside, 'nope.txt'), path.join(dir, 'link')); } catch { made = false; }
+    try {
+      if (made) {
+        expect(await run('Write', { path: 'link', content: 'x' }, dir)).toContain('outside working directory');
+        expect(fs.existsSync(path.join(outside, 'nope.txt'))).toBe(false);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });

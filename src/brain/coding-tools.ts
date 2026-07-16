@@ -70,21 +70,25 @@ function norm(p: string): string {
 
 // 쓰기 대상의 실제 경로(심링크/정션 관통) — 대상 파일이 아직 없을 수 있어 존재하는 최상위 조상을 realpath.
 // 실경로가 cwd 밖이면 null. 읽기처럼 쓰기도 cwd 안으로 제한해, cwd 안 심링크가 밖(자기repo·시스템)을 가리켜도 봉쇄.
+// ★lstat로 조상 존재를 판정(심링크를 따라가지 않음) — existsSync는 깨진 심링크를 "없음"으로 봐서 그 링크를 건너뛰고
+//   텍스트 경로를 허용해버린다(POSIX 우회). 조상이 심링크면 realpath로 실위치를 구하고, realpath 실패(깨진 링크)면 차단.
 function resolveWriteWithin(cwd: string, p: string): string | null {
   const abs = path.resolve(cwd, p);
   let anc = abs;
   const tail: string[] = [];
-  while (!fs.existsSync(anc)) {
+  // lexists: lstat 성공 = 그 경로가 (심링크 자체 포함) 존재. 실패 = 없음 → 위로.
+  for (;;) {
+    try { fs.lstatSync(anc); break; } catch { /* 없음 */ }
     const parent = path.dirname(anc);
     if (parent === anc) break; // 루트 도달
     tail.unshift(path.basename(anc));
     anc = parent;
   }
-  let realAnc = anc;
-  try { realAnc = fs.realpathSync(anc); } catch { /* 조상 realpath 실패 → anc 그대로 */ }
+  let realAnc: string;
+  try { realAnc = fs.realpathSync(anc); } catch { return null; } // 깨진 심링크 등 실해소 불가 → 안전 차단
   const realTarget = tail.length ? path.join(realAnc, ...tail) : realAnc;
-  let realCwd = cwd;
-  try { realCwd = fs.realpathSync(cwd); } catch { /* cwd 미존재는 각 도구가 처리 */ }
+  let realCwd: string;
+  try { realCwd = fs.realpathSync(cwd); } catch { return null; } // cwd 해소 불가 → 차단(정상 cwd는 항상 해소됨)
   return within(realTarget, realCwd) ? realTarget : null;
 }
 
