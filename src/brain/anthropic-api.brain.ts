@@ -33,6 +33,7 @@ export class AnthropicApiBrain implements BrainProvider {
 
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return this.sem.run(async () => {
+      // 코딩(opts.cwd)엔 쓰기 판정(codeGuard, agent-layer 주입)이 필수 — 없으면 무방비 쓰기라 거부(스펙 §6.2·불변식 4).
       const coding = !!opts?.cwd;
       if (coding && !opts!.codeGuard) return fail('coding requires an injected codeGuard (PermissionFence)');
       if (!this.profile.apiKey) return fail('anthropic-api: apiKey missing in brains.json profile');
