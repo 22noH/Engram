@@ -77,3 +77,41 @@ describe('loadBrainProfile', () => {
     expect(loadBrainProfile(dir, 'judge', {}).model).toBe('opus'); // judge 없음 → default(w)
   });
 });
+
+describe('Phase 8a — engram-api 프로필', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-cfg8a-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it('anthropic-api provider가 허용되고 신규 필드가 병합된다', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({
+      default: 'api',
+      brains: { api: { provider: 'anthropic-api', apiKey: 'sk-x', maxTokens: 9000, inputUsdPerMTok: 5, outputUsdPerMTok: 25 } },
+    }));
+    const p = loadActiveBrain(tmp, {});
+    expect(p.provider).toBe('anthropic-api');
+    expect(p.apiKey).toBe('sk-x');
+    expect(p.maxTokens).toBe(9000);
+    expect(p.inputUsdPerMTok).toBe(5);
+  });
+
+  it('openai-api provider가 허용되고 baseUrl·searchProvider가 병합된다', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({
+      default: 'ollama',
+      brains: { ollama: { provider: 'openai-api', baseUrl: 'http://localhost:11434/v1', model: 'llama3.3', searchProvider: 'brave', searchApiKey: 'bk' } },
+    }));
+    const p = loadActiveBrain(tmp, {});
+    expect(p.provider).toBe('openai-api');
+    expect(p.baseUrl).toBe('http://localhost:11434/v1');
+    expect(p.searchProvider).toBe('brave');
+  });
+
+  it('ENGRAM_BRAIN_API_KEY·ENGRAM_BRAIN_BASE_URL env가 프로필을 덮어쓴다', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({
+      default: 'api', brains: { api: { provider: 'anthropic-api', apiKey: 'file-key' } },
+    }));
+    const p = loadActiveBrain(tmp, { ENGRAM_BRAIN_API_KEY: 'env-key', ENGRAM_BRAIN_BASE_URL: 'http://alt' } as NodeJS.ProcessEnv);
+    expect(p.apiKey).toBe('env-key');
+    expect(p.baseUrl).toBe('http://alt');
+  });
+});

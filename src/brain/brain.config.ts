@@ -10,6 +10,14 @@ export interface BrainProfile {
   timeoutMs: number;
   extraArgs: string[];
   env?: Record<string, string>;
+  // Phase 8a — engram 자체 하네스(API 직접 호출) 프로필 필드
+  apiKey?: string;             // anthropic-api 필수, openai-api 옵셔널(Ollama 불필요)
+  baseUrl?: string;            // openai-api 필수, anthropic-api는 기본 https://api.anthropic.com
+  maxTokens?: number;          // 기본 16000
+  inputUsdPerMTok?: number;    // costUsd 계산용(기본 0 — 가격표 하드코딩 안 함)
+  outputUsdPerMTok?: number;
+  searchProvider?: 'duckduckgo' | 'brave' | 'tavily'; // web_search 소스(기본 duckduckgo)
+  searchApiKey?: string;       // brave/tavily용
 }
 
 interface BrainsFile {
@@ -59,7 +67,9 @@ function resolve(cfg: BrainsFile, name: string, env: NodeJS.ProcessEnv): BrainPr
   // 비숫자·음수·0 env는 무시(NaN이면 Semaphore 상한·타임아웃이 무력화되므로). 유효할 때만 덮어쓴다.
   profile.concurrency = posIntEnv(env.ENGRAM_BRAIN_CONCURRENCY, profile.concurrency);
   profile.timeoutMs = posIntEnv(env.ENGRAM_BRAIN_TIMEOUT_MS, profile.timeoutMs);
-  const ALLOWED = ['claude-cli', 'gemini-cli', 'codex-cli'];
+  if (env.ENGRAM_BRAIN_API_KEY) profile.apiKey = env.ENGRAM_BRAIN_API_KEY;
+  if (env.ENGRAM_BRAIN_BASE_URL) profile.baseUrl = env.ENGRAM_BRAIN_BASE_URL;
+  const ALLOWED = ['claude-cli', 'gemini-cli', 'codex-cli', 'anthropic-api', 'openai-api'];
   if (!ALLOWED.includes(profile.provider)) {
     throw new Error(`지원하지 않는 provider: ${profile.provider}`);
   }
