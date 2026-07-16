@@ -80,4 +80,22 @@ describe('executeCodingTool (never-throw)', () => {
       expect(await run('Read', null, dir)).toContain('required');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('cwd 안의 정션/심링크가 밖을 가리켜도 Read/Grep은 막는다(유출 차단)', async () => {
+    const dir = tmp();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-outside-'));
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'TOP SECRET');
+    let made = true;
+    // 정션(dir)은 Windows에서 권한 없이도 생성됨. 리눅스/맥은 일반 심링크로 폴백.
+    try { fs.symlinkSync(outside, path.join(dir, 'link'), 'junction'); } catch { made = false; }
+    try {
+      if (made) {
+        expect(await run('Read', { path: 'link/secret.txt' }, dir)).toContain('outside working directory');
+        expect(await run('Grep', { pattern: 'SECRET', path: 'link' }, dir)).toContain('outside working directory');
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });

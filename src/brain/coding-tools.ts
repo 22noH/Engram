@@ -13,7 +13,7 @@ const READ_CHAR_LIMIT = 50_000;
 const GLOB_LIMIT = 200;
 const GREP_LIMIT = 100;
 const LINE_CLIP = 200;
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'coverage']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'coverage', 'build', 'out', '.venv', '__pycache__', '.cache', '.turbo']);
 
 export const CODING_TOOL_DEFS: WebToolDef[] = [
   { name: 'Read', description: 'Read a text file in the working directory. Returns its content (truncated if large).',
@@ -46,14 +46,25 @@ export async function executeCodingTool(name: string, input: unknown, cwd: strin
   }
 }
 
-// cwd 안으로 정규화. 밖이면 null.
+// cwd 안으로 정규화 + 심링크/정션 실제 경로까지 cwd 안인지 확인. 밖이면 null.
+// 텍스트 정규화만으론 cwd 안의 심링크가 밖을 가리켜도 통과하는데(fs가 실제 대상을 따라감) realpath로 막는다.
 function resolveWithin(cwd: string, p: string): string | null {
   const abs = path.resolve(cwd, p);
-  const a = norm(abs), b = norm(cwd);
-  return a === b || a.startsWith(b + '/') ? abs : null;
+  if (!within(abs, cwd)) return null; // 빠른 텍스트 차단
+  let realTarget = abs;
+  let realCwd = cwd;
+  try { realTarget = fs.realpathSync(abs); } catch { /* 미존재 경로 등 → abs로 판정(각 도구가 not-a-file 처리) */ }
+  try { realCwd = fs.realpathSync(cwd); } catch { /* cwd 자체 미존재는 각 도구에서 처리 */ }
+  return within(realTarget, realCwd) ? abs : null;
 }
+function within(target: string, base: string): boolean {
+  const t = norm(target), b = norm(base);
+  return t === b || t.startsWith(b + '/');
+}
+// Windows만 대소문자 무시. 리눅스/맥은 대소문자 구분이라 접어버리면 격리가 헐거워진다.
 function norm(p: string): string {
-  return path.normalize(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const s = path.normalize(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? s.toLowerCase() : s;
 }
 
 function readFile(cwd: string, arg: Record<string, unknown>): string {
