@@ -98,4 +98,29 @@ describe('executeCodingTool (never-throw)', () => {
       fs.rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  it('cwd 안의 정션이 밖을 가리켜도 Write/Edit는 막고 대상을 안 만든다(자기수정 차단)', async () => {
+    const dir = tmp();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-woutside-'));
+    let made = true;
+    try { fs.symlinkSync(outside, path.join(dir, 'link'), 'junction'); } catch { made = false; }
+    try {
+      if (made) {
+        expect(await run('Write', { path: 'link/evil.txt', content: 'x' }, dir)).toContain('outside working directory');
+        expect(fs.existsSync(path.join(outside, 'evil.txt'))).toBe(false);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('cwd 밖 경로로의 Write는 가드와 무관하게 막는다(자동모드 이탈 방지)', async () => {
+    const dir = tmp();
+    try {
+      // allow 가드(항상 허용)라도 cwd 밖은 막혀야 한다.
+      expect(await run('Write', { path: '../escape.txt', content: 'x' }, dir)).toContain('outside working directory');
+      expect(fs.existsSync(path.join(dir, '..', 'escape.txt'))).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
 });

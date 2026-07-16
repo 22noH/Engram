@@ -12,6 +12,7 @@ export type WriteGuard = (absPath: string) => void;
 const READ_CHAR_LIMIT = 50_000;
 const GLOB_LIMIT = 200;
 const GREP_LIMIT = 100;
+const GREP_FILE_LIMIT = 2_000_000; // 초대형 파일은 grep 건너뜀(메모리·시간 보호)
 const LINE_CLIP = 200;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'coverage', 'build', 'out', '.venv', '__pycache__', '.cache', '.turbo']);
 
@@ -67,6 +68,26 @@ function norm(p: string): string {
   return process.platform === 'win32' ? s.toLowerCase() : s;
 }
 
+// 쓰기 대상의 실제 경로(심링크/정션 관통) — 대상 파일이 아직 없을 수 있어 존재하는 최상위 조상을 realpath.
+// 실경로가 cwd 밖이면 null. 읽기처럼 쓰기도 cwd 안으로 제한해, cwd 안 심링크가 밖(자기repo·시스템)을 가리켜도 봉쇄.
+function resolveWriteWithin(cwd: string, p: string): string | null {
+  const abs = path.resolve(cwd, p);
+  let anc = abs;
+  const tail: string[] = [];
+  while (!fs.existsSync(anc)) {
+    const parent = path.dirname(anc);
+    if (parent === anc) break; // 루트 도달
+    tail.unshift(path.basename(anc));
+    anc = parent;
+  }
+  let realAnc = anc;
+  try { realAnc = fs.realpathSync(anc); } catch { /* 조상 realpath 실패 → anc 그대로 */ }
+  const realTarget = tail.length ? path.join(realAnc, ...tail) : realAnc;
+  let realCwd = cwd;
+  try { realCwd = fs.realpathSync(cwd); } catch { /* cwd 미존재는 각 도구가 처리 */ }
+  return within(realTarget, realCwd) ? realTarget : null;
+}
+
 function readFile(cwd: string, arg: Record<string, unknown>): string {
   if (typeof arg.path !== 'string') return 'Read error: path(string) required';
   const abs = resolveWithin(cwd, arg.path);
@@ -78,7 +99,8 @@ function readFile(cwd: string, arg: Record<string, unknown>): string {
 
 function writeFile(cwd: string, arg: Record<string, unknown>, guard: WriteGuard): string {
   if (typeof arg.path !== 'string' || typeof arg.content !== 'string') return 'Write error: path(string) and content(string) required';
-  const abs = path.resolve(cwd, arg.path);
+  const abs = resolveWriteWithin(cwd, arg.path); // 심링크 관통 + cwd 안으로 제한
+  if (!abs) return `Write error: path outside working directory: ${arg.path}`;
   try { guard(abs); } catch (e) { return `Write blocked: ${String(e)}`; }
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, arg.content, 'utf8');
@@ -88,7 +110,8 @@ function writeFile(cwd: string, arg: Record<string, unknown>, guard: WriteGuard)
 function editFile(cwd: string, arg: Record<string, unknown>, guard: WriteGuard): string {
   if (typeof arg.path !== 'string' || typeof arg.old_string !== 'string' || typeof arg.new_string !== 'string')
     return 'Edit error: path, old_string, new_string (all strings) required';
-  const abs = path.resolve(cwd, arg.path);
+  const abs = resolveWriteWithin(cwd, arg.path); // 심링크 관통 + cwd 안으로 제한
+  if (!abs) return `Edit error: path outside working directory: ${arg.path}`;
   try { guard(abs); } catch (e) { return `Edit blocked: ${String(e)}`; } // 가드 먼저 — 못 쓰는 파일은 읽지도 않음
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return `Edit error: not a file: ${arg.path}`;
   const text = fs.readFileSync(abs, 'utf8');
@@ -117,7 +140,10 @@ function grep(cwd: string, arg: Record<string, unknown>, signal: AbortSignal): s
   walk(base, cwd, signal, (rel, abs) => {
     if (out.length >= GREP_LIMIT) return;
     let content: string;
-    try { content = fs.readFileSync(abs, 'utf8'); } catch { return; }
+    try {
+      if (fs.statSync(abs).size > GREP_FILE_LIMIT) return; // 초대형 파일 건너뜀
+      content = fs.readFileSync(abs, 'utf8');
+    } catch { return; }
     const lines = content.split('\n');
     for (let i = 0; i < lines.length && out.length < GREP_LIMIT; i++) {
       if (re.test(lines[i])) out.push(`${rel}:${i + 1}:${lines[i].slice(0, LINE_CLIP)}`);
