@@ -1,8 +1,9 @@
 import { DelegateHandle } from './brain.port';
+import { WebToolDef } from './web-tools';
 
-// 지휘자 도구(스펙 §2.2). web-tools와 형태를 맞춘 provider 중립 스키마 + never-throw 실행기.
+// 지휘자 도구(스펙 §2.2). web-tools와 같은 WebToolDef 형태의 provider 중립 스키마 + never-throw 실행기.
 // 도구 설명은 호출 시점에 조립(가용 두뇌 목록이 동적이라 상수 아님).
-export function askBrainDef(brains: string[]): { name: string; description: string; parameters: Record<string, unknown> } {
+export function askBrainDef(brains: string[]): WebToolDef {
   return {
     name: 'ask_brain',
     description:
@@ -28,5 +29,10 @@ export async function runAskBrain(input: unknown, delegate?: DelegateHandle): Pr
   if (typeof arg.brain !== 'string' || typeof arg.task !== 'string') {
     return 'ask_brain error: brain(string) and task(string) required';
   }
-  return delegate.run(arg.brain, arg.task);
+  // delegate.run은 계약상 never-throw지만, 이 함수 자체의 never-throw를 호출부 규율에 의존시키지 않는다.
+  try {
+    return await delegate.run(arg.brain, arg.task);
+  } catch (e) {
+    return `ask_brain error: ${String(e)}`;
+  }
 }

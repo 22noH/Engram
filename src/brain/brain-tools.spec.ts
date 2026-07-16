@@ -23,4 +23,8 @@ describe('runAskBrain (never-throw)', () => {
     expect(await runAskBrain({ brain: 1, task: 't' }, delegate)).toContain('required');
     expect(await runAskBrain(null, delegate)).toContain('required');
   });
+  it('delegate.run이 던져도 에러 텍스트로 삼킨다(자체 never-throw)', async () => {
+    const bad: DelegateHandle = { brains: ['x'], run: async () => { throw new Error('boom'); } };
+    expect(await runAskBrain({ brain: 'x', task: 't' }, bad)).toContain('boom');
+  });
 });
