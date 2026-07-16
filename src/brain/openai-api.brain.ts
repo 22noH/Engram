@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
+import { BrainProvider, BrainResult, CompleteOpts, DelegateHandle } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { sseJson } from './sse';
 import { runToolLoop, ToolCall, TurnResult } from './tool-loop';
 import { WEB_TOOL_DEFS, executeWebTool } from './web-tools';
+import { askBrainDef, runAskBrain } from './brain-tools';
 
 // OpenAI호환 chat/completions 하네스(스펙 §2.2) — Ollama·LM Studio·vLLM·OpenAI 공용.
 // 모델이 tool calling을 지원 안 하면 tool_calls가 안 올 뿐(기능 저하이지 에러 아님).
@@ -42,11 +43,13 @@ export class OpenAiApiBrain implements BrainProvider {
       const history: OpenAiMsg[] = [{ role: 'user', content: prompt }];
       try {
         const r = await runToolLoop(
-          () => this.turn(history, onChunk, ctrl.signal),
+          () => this.turn(history, onChunk, ctrl.signal, opts?.delegate),
           (results) => {
             for (const t of results) history.push({ role: 'tool', content: t.output, tool_call_id: t.id });
           },
-          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
+          (name, input) => name === 'ask_brain'
+            ? runAskBrain(input, opts?.delegate)
+            : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
         );
         return {
           text: r.text,
@@ -66,7 +69,8 @@ export class OpenAiApiBrain implements BrainProvider {
     return (inTok * (this.profile.inputUsdPerMTok ?? 0) + outTok * (this.profile.outputUsdPerMTok ?? 0)) / 1_000_000;
   }
 
-  private async turn(history: OpenAiMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal): Promise<TurnResult> {
+  private async turn(history: OpenAiMsg[], onChunk: ((t: string) => void) | undefined, signal: AbortSignal, delegate?: DelegateHandle): Promise<TurnResult> {
+    const toolDefs = [...WEB_TOOL_DEFS, ...(delegate ? [askBrainDef(delegate.brains)] : [])];
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.profile.apiKey) headers.Authorization = `Bearer ${this.profile.apiKey}`;
     const res = await this.fetchFn(`${this.profile.baseUrl!.replace(/\/$/, '')}/chat/completions`, {
@@ -78,7 +82,7 @@ export class OpenAiApiBrain implements BrainProvider {
         stream: true,
         stream_options: { include_usage: true }, // usage 미지원 서버면 그 청크가 안 올 뿐(토큰 0)
         messages: history,
-        tools: WEB_TOOL_DEFS.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: d.parameters } })),
+        tools: toolDefs.map((d) => ({ type: 'function', function: { name: d.name, description: d.description, parameters: d.parameters } })),
       }),
       signal,
     });

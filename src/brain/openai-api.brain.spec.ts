@@ -113,4 +113,33 @@ describe('OpenAiApiBrain', () => {
     expect(toolSignal).toBeDefined();
     expect(toolSignal?.aborted).toBe(true);
   });
+
+  it('opts.delegate 있으면 ask_brain 도구 노출 + 호출 시 delegate.run 라우팅', async () => {
+    const ASK_CHUNKS = [
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'ask_brain', arguments: '' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"brain":"claude","task":"리뷰"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 1 } },
+    ];
+    let call = 0;
+    const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(ASK_CHUNKS) : sse(TEXT_CHUNKS); }) as unknown as typeof fetch;
+    const ran: Array<{ brain: string; task: string }> = [];
+    const delegate = { brains: ['claude', 'ollama'], run: async (brain: string, task: string) => { ran.push({ brain, task }); return '리뷰 결과'; } };
+    const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('go', undefined, { delegate });
+    expect(r.isError).toBe(false);
+    expect(ran).toEqual([{ brain: 'claude', task: '리뷰' }]);
+    const firstBody = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    const askDef = firstBody.tools.find((t: { function: { name: string } }) => t.function.name === 'ask_brain');
+    expect(askDef).toBeDefined();
+    expect(askDef.function.description).toContain('claude');
+    expect(askDef.function.parameters.required).toEqual(['brain', 'task']); // parameters 매핑이 새 도구에도 적용됨
+    expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('리뷰 결과');
+  });
+
+  it('opts.delegate 없으면 ask_brain 미노출', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_CHUNKS)) as unknown as typeof fetch;
+    await new OpenAiApiBrain(PROFILE, fetchFn).complete('hi');
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['web_search', 'web_fetch']);
+  });
 });
