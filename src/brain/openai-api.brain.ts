@@ -46,7 +46,7 @@ export class OpenAiApiBrain implements BrainProvider {
           (results) => {
             for (const t of results) history.push({ role: 'tool', content: t.output, tool_call_id: t.id });
           },
-          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn),
+          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
         );
         return {
           text: r.text,

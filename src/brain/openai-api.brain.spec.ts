@@ -87,4 +87,30 @@ describe('OpenAiApiBrain', () => {
     expect(r2.isError).toBe(true);
     expect(String(r2.raw)).toContain('503');
   });
+
+  it('타임아웃이 도구 실행도 덮는다(Finding1: hanging web_fetch가 루프 타임아웃을 무시하지 않는다)', async () => {
+    let modelCalls = 0;
+    let toolSignal: AbortSignal | undefined;
+    const hangUntilAbort = (init?: { signal?: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        if (init?.signal?.aborted) return rej(new Error('aborted'));
+        init?.signal?.addEventListener('abort', () => rej(new Error('aborted')));
+      });
+    const fetchFn = jest.fn((url: string, init?: { signal?: AbortSignal }) => {
+      if (String(url).includes('/chat/completions')) {
+        modelCalls++;
+        if (modelCalls === 1) return Promise.resolve(sse(TOOL_CHUNKS));
+        return hangUntilAbort(init);
+      }
+      // web_fetch 도구 호출 — signal을 캡처하고 abort될 때까지 매달린다.
+      toolSignal = init?.signal;
+      return hangUntilAbort(init);
+    }) as unknown as typeof fetch;
+    const brain = new OpenAiApiBrain(PROFILE, fetchFn);
+    const r = await brain.complete('x', undefined, { timeoutMs: 30 });
+    expect(r.isError).toBe(true);
+    expect(String(r.raw)).toContain('timeout');
+    expect(toolSignal).toBeDefined();
+    expect(toolSignal?.aborted).toBe(true);
+  });
 });

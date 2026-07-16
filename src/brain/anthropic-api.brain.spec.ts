@@ -96,4 +96,32 @@ describe('AnthropicApiBrain', () => {
     expect(r.isError).toBe(true);
     expect(String(r.raw)).toContain('timeout');
   });
+
+  it('타임아웃이 도구 실행도 덮는다(Finding1: hanging web_fetch가 루프 타임아웃을 무시하지 않는다)', async () => {
+    let modelCalls = 0;
+    let toolSignal: AbortSignal | undefined;
+    const hangUntilAbort = (init?: { signal?: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        if (init?.signal?.aborted) return rej(new Error('aborted'));
+        init?.signal?.addEventListener('abort', () => rej(new Error('aborted')));
+      });
+    const fetchFn = jest.fn((url: string, init?: { signal?: AbortSignal }) => {
+      if (String(url).includes('/v1/messages')) {
+        modelCalls++;
+        if (modelCalls === 1) return Promise.resolve(sse(TOOL_TURN));
+        // 도구가 abort로 끝난 뒤 루프가 모델을 다시 부른다 — 이 턴도 abort될 때까지 매달려 루프가
+        // 결국 타임아웃으로 종료되도록 한다(도구 abort만으로는 루프가 멈추지 않으므로).
+        return hangUntilAbort(init);
+      }
+      // web_fetch 도구 호출 — signal을 캡처하고 abort될 때까지 매달린다.
+      toolSignal = init?.signal;
+      return hangUntilAbort(init);
+    }) as unknown as typeof fetch;
+    const brain = new AnthropicApiBrain(PROFILE, fetchFn);
+    const r = await brain.complete('x', undefined, { timeoutMs: 30 });
+    expect(r.isError).toBe(true);
+    expect(String(r.raw)).toContain('timeout');
+    expect(toolSignal).toBeDefined();
+    expect(toolSignal?.aborted).toBe(true);
+  });
 });

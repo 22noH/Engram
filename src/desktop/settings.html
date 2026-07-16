@@ -224,6 +224,7 @@
       saveKey: '저장',
       apiKeyNote: 'Anthropic API 키 — claude CLI 없이 두뇌를 씁니다. 기본 두뇌로 설정해도 코딩 기능은 아직 CLI 두뇌가 필요해요(Phase 8b).',
       apiKeySaved: '저장됨 — 재시작 후 적용',
+      apiKeyError: '저장 실패 — 로그를 확인하세요',
       save: '저장', saved: '저장됨 — 재시작하면 적용돼요', tokenPlaceholder: '봇 토큰 붙여넣기',
       discordHint: '봇이 아직 없다면 discord.com/developers/applications 에서 만들고 Bot 탭에서 토큰을 발급하세요. 저장한 뒤 "재시작"을 누르면 연결돼요.',
       openData: '데이터 폴더', openLogs: '로그 폴더', openConfig: '설정 폴더',
@@ -245,6 +246,7 @@
       saveKey: 'Save',
       apiKeyNote: 'Anthropic API key — runs the brain without the claude CLI. Coding still needs a CLI brain until Phase 8b.',
       apiKeySaved: 'Saved — restart to apply',
+      apiKeyError: 'Save failed — check the logs',
       save: 'Save', saved: 'Saved — restart to apply', tokenPlaceholder: 'Paste bot token',
       discordHint: 'No bot yet? Create one at discord.com/developers/applications and issue a token in the Bot tab. After saving, click Restart to connect.',
       openData: 'Data folder', openLogs: 'Log folder', openConfig: 'Config folder',
@@ -263,9 +265,13 @@
     $('btn-apikey').onclick = async () => {
       const k = $('apikey').value.trim();
       if (!k) return;
-      await window.engram.saveApiKey(k, $('api-default').checked);
-      $('api-note').textContent = t.apiKeySaved;
-      $('apikey').value = '';
+      try {
+        await window.engram.saveApiKey(k, $('api-default').checked);
+        $('api-note').textContent = t.apiKeySaved;
+        $('apikey').value = '';
+      } catch (e) {
+        $('api-note').textContent = t.apiKeyError;
+      }
     };
 
     // 외부 유래 문자열(명령 stdout·API 응답)은 전부 textContent로만 — innerHTML 주입 금지.

@@ -27,4 +27,17 @@ describe('mergeBrainProfile', () => {
     mergeBrainProfile(tmp, 'x', { provider: 'openai-api' });
     expect(read().brains.x.provider).toBe('openai-api');
   });
+
+  it('유효 JSON이지만 brains/default 형태가 틀리면(배열·숫자 등) 기본 골격으로 재작성(Finding4)', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({ default: 42, brains: ['not', 'an', 'object'] }));
+    mergeBrainProfile(tmp, 'x', { provider: 'openai-api' });
+    const cfg = read();
+    expect(cfg).toEqual({ default: 'claude', brains: { x: { provider: 'openai-api' } } });
+  });
+
+  it('brains가 문자열이어도 기본 골격으로 재작성(Finding4)', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({ default: 'claude', brains: 'oops' }));
+    mergeBrainProfile(tmp, 'x', { provider: 'openai-api' });
+    expect(read().brains).toEqual({ x: { provider: 'openai-api' } });
+  });
 });

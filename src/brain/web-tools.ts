@@ -50,15 +50,32 @@ export function stripHtml(html: string): string {
     .trim();
 }
 
-export async function webFetch(url: string, fetchFn: typeof fetch = fetch): Promise<string> {
+const MAX_REDIRECTS = 5;
+
+// redirect:'manual' + 매 홉마다 isBlockedUrl 재검증(스펙 Finding2) — redirect:'follow'는 최초 URL만
+// 검사하고 302 목적지는 그대로 따라가므로 공개 URL → 사설/링크로컬 리다이렉트로 SSRF 가드를 우회당한다.
+export async function webFetch(url: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<string> {
   if (isBlockedUrl(url)) return `fetch error: blocked or invalid URL (public http/https only): ${url}`;
   try {
-    const res = await fetchFn(url, { redirect: 'follow' });
-    if (!res.ok) return `fetch error: HTTP ${res.status}`;
-    const body = await res.text();
-    const ct = res.headers.get('content-type') ?? '';
-    const text = ct.includes('html') || /^\s*</.test(body) ? stripHtml(body) : body;
-    return text.length > FETCH_CHAR_LIMIT ? `${text.slice(0, FETCH_CHAR_LIMIT)}\n…(truncated)` : text;
+    let current = url;
+    let hops = 0;
+    for (;;) {
+      const res = await fetchFn(current, { redirect: 'manual', signal });
+      const loc = res.headers.get('location');
+      if (res.status >= 300 && res.status < 400 && loc) {
+        hops++;
+        if (hops > MAX_REDIRECTS) return 'fetch error: too many redirects';
+        const next = new URL(loc, current).toString();
+        if (isBlockedUrl(next)) return `fetch error: blocked redirect target: ${next}`;
+        current = next;
+        continue;
+      }
+      if (!res.ok) return `fetch error: HTTP ${res.status}`;
+      const body = await res.text();
+      const ct = res.headers.get('content-type') ?? '';
+      const text = ct.includes('html') || /^\s*</.test(body) ? stripHtml(body) : body;
+      return text.length > FETCH_CHAR_LIMIT ? `${text.slice(0, FETCH_CHAR_LIMIT)}\n…(truncated)` : text;
+    }
   } catch (e) {
     return `fetch error: ${(e as Error).message}`;
   }
@@ -80,10 +97,11 @@ export function parseDdgHtml(html: string, limit = SEARCH_LIMIT): SearchHit[] {
   return out;
 }
 
-async function searchRaw(query: string, opts: SearchOpts, fetchFn: typeof fetch): Promise<SearchHit[]> {
+async function searchRaw(query: string, opts: SearchOpts, fetchFn: typeof fetch, signal?: AbortSignal): Promise<SearchHit[]> {
   if (opts.searchProvider === 'brave' && opts.searchApiKey) {
     const res = await fetchFn(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${SEARCH_LIMIT}`, {
       headers: { 'X-Subscription-Token': opts.searchApiKey, accept: 'application/json' },
+      signal,
     });
     if (!res.ok) throw new Error(`Brave HTTP ${res.status}`);
     const j = (await res.json()) as { web?: { results?: Array<{ title: string; url: string; description?: string }> } };
@@ -94,6 +112,7 @@ async function searchRaw(query: string, opts: SearchOpts, fetchFn: typeof fetch)
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ api_key: opts.searchApiKey, query, max_results: SEARCH_LIMIT }),
+      signal,
     });
     if (!res.ok) throw new Error(`Tavily HTTP ${res.status}`);
     const j = (await res.json()) as { results?: Array<{ title: string; url: string; content?: string }> };
@@ -101,6 +120,7 @@ async function searchRaw(query: string, opts: SearchOpts, fetchFn: typeof fetch)
   }
   const res = await fetchFn(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
     headers: { 'user-agent': 'Mozilla/5.0 (Engram)' },
+    signal,
   });
   if (!res.ok) throw new Error(`DuckDuckGo HTTP ${res.status}`);
   const hits = parseDdgHtml(await res.text());
@@ -108,9 +128,9 @@ async function searchRaw(query: string, opts: SearchOpts, fetchFn: typeof fetch)
   return hits;
 }
 
-export async function webSearch(query: string, opts: SearchOpts = {}, fetchFn: typeof fetch = fetch): Promise<string> {
+export async function webSearch(query: string, opts: SearchOpts = {}, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<string> {
   try {
-    const hits = await searchRaw(query, opts, fetchFn);
+    const hits = await searchRaw(query, opts, fetchFn, signal);
     if (hits.length === 0) return `no results for: ${query}`;
     return hits.map((r, i) => `${i + 1}. ${r.title}\n${r.url}\n${r.snippet}`).join('\n\n');
   } catch (e) {
@@ -119,13 +139,20 @@ export async function webSearch(query: string, opts: SearchOpts = {}, fetchFn: t
 }
 
 // 도구 실행 단일 진입점 — provider가 이름/인자만 넘긴다. never-throw.
-export async function executeWebTool(name: string, input: unknown, opts: SearchOpts = {}, fetchFn: typeof fetch = fetch): Promise<string> {
+// signal: 루프 타임아웃 AbortController를 관통시켜 모델 호출뿐 아니라 도구 실행(fetch)도 타임아웃이 덮게 한다(Finding1).
+export async function executeWebTool(
+  name: string,
+  input: unknown,
+  opts: SearchOpts = {},
+  fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<string> {
   const arg = (input ?? {}) as Record<string, unknown>;
   if (name === 'web_search') {
-    return typeof arg.query === 'string' ? webSearch(arg.query, opts, fetchFn) : 'tool error: query(string) required';
+    return typeof arg.query === 'string' ? webSearch(arg.query, opts, fetchFn, signal) : 'tool error: query(string) required';
   }
   if (name === 'web_fetch') {
-    return typeof arg.url === 'string' ? webFetch(arg.url, fetchFn) : 'tool error: url(string) required';
+    return typeof arg.url === 'string' ? webFetch(arg.url, fetchFn, signal) : 'tool error: url(string) required';
   }
   return `tool error: unknown tool ${name}`;
 }

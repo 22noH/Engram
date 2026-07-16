@@ -52,6 +52,49 @@ describe('webFetch', () => {
     const f = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
     expect(await webFetch('https://example.com/a', f)).toContain('HTTP 500');
   });
+  it('signal이 fetchFn에 전달되고 abort는 에러 텍스트(throw 아님)', async () => {
+    const ctrl = new AbortController();
+    const f = ((_u: string, init?: { signal?: AbortSignal }) =>
+      new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new Error('aborted'))))) as unknown as typeof fetch;
+    const p = webFetch('https://example.com/a', f, ctrl.signal);
+    ctrl.abort();
+    expect(await p).toBe('fetch error: aborted');
+  });
+});
+
+describe('webFetch 리다이렉트(SSRF 재검증, Finding2)', () => {
+  it('공개→사설 리다이렉트는 목적지 차단', async () => {
+    const f = (async (url: string) => {
+      if (String(url) === 'https://example.com/redir') {
+        return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } });
+      }
+      throw new Error('should not fetch redirect target');
+    }) as unknown as typeof fetch;
+    const out = await webFetch('https://example.com/redir', f);
+    expect(out).toContain('blocked redirect target');
+  });
+
+  it('공개→공개 리다이렉트는 따라가서 본문 반환', async () => {
+    const f = (async (url: string) => {
+      if (String(url) === 'https://example.com/redir') {
+        return new Response(null, { status: 302, headers: { location: 'https://example.com/final' } });
+      }
+      return new Response('<p>final body</p>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }) as unknown as typeof fetch;
+    const out = await webFetch('https://example.com/redir', f);
+    expect(out).toBe('final body');
+  });
+
+  it('5회 초과 리다이렉트는 too many redirects 에러(무한 루프 아님)', async () => {
+    let n = 0;
+    const f = (async () => {
+      n++;
+      return new Response(null, { status: 302, headers: { location: `https://example.com/hop${n}` } });
+    }) as unknown as typeof fetch;
+    const out = await webFetch('https://example.com/start', f);
+    expect(out).toBe('fetch error: too many redirects');
+    expect(n).toBeLessThanOrEqual(7);
+  });
 });
 
 describe('webSearch', () => {

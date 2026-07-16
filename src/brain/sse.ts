@@ -20,4 +20,17 @@ export async function* sseJson(body: ReadableStream<Uint8Array> | null): AsyncGe
       }
     }
   }
+  // 스트림 종료 후 버퍼에 trailing \n 없는 마지막 data: 라인이 남아있을 수 있다(Finding3) — 디코더 드레인 후 처리.
+  buf += decoder.decode();
+  const last = buf.trim();
+  if (last.startsWith('data:')) {
+    const data = last.slice(5).trim();
+    if (data && data !== '[DONE]') {
+      try {
+        yield JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        // 비JSON/오염 라인 무시
+      }
+    }
+  }
 }

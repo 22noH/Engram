@@ -43,7 +43,7 @@ export class AnthropicApiBrain implements BrainProvider {
             role: 'user',
             content: results.map((t) => ({ type: 'tool_result', tool_use_id: t.id, content: t.output })),
           }),
-          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn),
+          (name, input) => executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal),
         );
         return {
           text: r.text,
