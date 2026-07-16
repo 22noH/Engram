@@ -143,6 +143,7 @@ describe('AnthropicApiBrain', () => {
     const askDef = firstBody.tools.find((t: { name: string }) => t.name === 'ask_brain');
     expect(askDef).toBeDefined();
     expect(askDef.description).toContain('ollama');
+    expect(askDef.input_schema.required).toEqual(['brain', 'task']); // parameters→input_schema 매핑이 새 도구에도 적용됨
     expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('리뷰 결과');
   });
 
