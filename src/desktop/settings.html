@@ -234,19 +234,44 @@
 
   <section id="sec-coding">
     <h2 data-t="secCoding"></h2>
-    <div class="row">
-      <label for="cmd-mode" style="font-size:13px" data-t="cmdMode"></label>
-      <select id="cmd-mode">
-        <option value="auto" data-t="cmdAuto"></option>
-        <option value="allowlist" data-t="cmdAllow"></option>
-        <option value="off" data-t="cmdOff"></option>
-      </select>
+    <div class="grp">
+      <div class="li">
+        <label for="cmd-mode" style="font-size:13px" data-t="cmdMode"></label>
+        <span class="val"><select id="cmd-mode">
+          <option value="auto" data-t="cmdAuto"></option>
+          <option value="allowlist" data-t="cmdAllow"></option>
+          <option value="off" data-t="cmdOff"></option>
+        </select></span>
+      </div>
     </div>
-    <div class="hint" data-t="cmdHint"></div>
+    <div class="cap" data-t="cmdHint"></div>
+
+    <div class="grp-h" data-t="writePaths"></div>
+    <div class="grp" id="write-paths-grp"></div>
+    <div class="cap" id="write-paths-cap"></div>
+
+    <div class="grp-h" data-t="denyPaths"></div>
+    <div class="grp" id="deny-paths-grp"></div>
+
+    <div class="grp-h" data-t="cmdAllowlist"></div>
+    <div class="grp" id="cmd-list-grp"></div>
+    <div class="cap" id="cmd-list-cap"></div>
+
+    <p class="cap ok" id="perm-hint" hidden></p>
   </section>
 
   <section id="sec-repos">
     <h2 data-t="secRepos"></h2>
+
+    <div class="grp-h" data-t="aliases"></div>
+    <div class="grp" id="aliases-grp"></div>
+    <div class="cap" data-t="aliasCap"></div>
+
+    <div class="grp-h" data-t="searchRoots"></div>
+    <div class="grp" id="search-roots-grp"></div>
+    <div class="cap" data-t="rootsCap"></div>
+
+    <p class="cap ok" id="repos-hint" hidden></p>
   </section>
 
   <section id="sec-sched">
@@ -320,7 +345,14 @@
       secCoding: '코딩', cmdMode: '명령 실행', cmdAuto: '자동', cmdAllow: '제한', cmdOff: '끔',
       cmdHint: '자동 = 아무 명령이나 실행(클로드코드처럼). 제한 = 승인 목록만. 끔 = 파일만, 명령 없음.',
       writePaths: '쓰기 허용 경로', denyPaths: '거부 경로', cmdAllowlist: '명령 허용 목록',
+      remove: '제거', addFolder: '폴더 추가', addCommand: '명령 추가', resetDefault: '기본값으로 되돌리기',
+      cmdBuiltin: '지정 안 함 — 내장 기본 목록 사용 중',
+      cmdListCap: '제한 모드일 때만 적용돼요. 비우면 전부 거부.',
+      autoModeHint: '비어 있음 = 자동 모드(시스템 폴더 밖 허용)',
       aliases: '별칭', searchRoots: '검색 루트',
+      aliasCap: "채팅에서 'engram 고쳐줘'라고 부를 때의 그 이름이에요.",
+      rootsCap: '별칭에 없으면 이 폴더들에서 이름으로 찾아요.',
+      addAlias: '별칭 추가', browse: '찾아보기',
       wikiRemote: '원격 주소', wikiBranch: '브랜치', wikiInterval: '동기화 주기(초)',
       namePlaceholder: '두뇌 이름', nameHint: '채팅에서 이 이름으로 부릅니다 — 예: "qwen3-8b한테 물어봐"',
       overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
@@ -359,7 +391,14 @@
       secCoding: 'Coding', cmdMode: 'Command execution', cmdAuto: 'Auto', cmdAllow: 'Restricted', cmdOff: 'Off',
       cmdHint: 'Auto = run any command (like Claude Code). Restricted = allowlist only. Off = files only, no commands.',
       writePaths: 'Write paths', denyPaths: 'Deny paths', cmdAllowlist: 'Command allowlist',
+      remove: 'Remove', addFolder: 'Add folder', addCommand: 'Add command', resetDefault: 'Reset to built-in defaults',
+      cmdBuiltin: 'Not set — using the built-in list',
+      cmdListCap: 'Applies in Restricted mode only. Empty = deny all.',
+      autoModeHint: 'Empty = auto mode (allowed outside system folders)',
       aliases: 'Aliases', searchRoots: 'Search roots',
+      aliasCap: 'The name you use in chat — "fix engram".',
+      rootsCap: 'Folders searched by name when no alias matches.',
+      addAlias: 'Add alias', browse: 'Browse',
       wikiRemote: 'Remote', wikiBranch: 'Branch', wikiInterval: 'Sync interval (sec)',
       namePlaceholder: 'Brain name', nameHint: 'This is how you call it in chat — e.g. "ask qwen3-8b"',
       overwrite: 'Overwrite', del: 'Delete', defaultBadge: 'default',
@@ -386,8 +425,8 @@
       'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
       'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
         t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel],
-      'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist],
-      'sec-repos': [t.secRepos, t.aliases, t.searchRoots],
+      'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist, t.autoModeHint, t.cmdListCap, t.cmdBuiltin, t.resetDefault],
+      'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron'],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval],
       'sec-messenger': ['Discord', t.save],
@@ -773,8 +812,225 @@
     async function loadCmdMode() { $('cmd-mode').value = await window.engram.getCommandMode(); }
     $('cmd-mode').onchange = async () => { await window.engram.setCommandMode($('cmd-mode').value); };
 
+    // 목록 그룹 렌더(⊖줄 + ＋Add줄). getList/setList는 async, addFn은 값 하나를 얻는 함수(경로=pickFolder, 명령=prompt식 인라인 input).
+    function renderListGroup(elId, items, onRemove, addLabel, onAdd) {
+      const grp = $(elId);
+      grp.textContent = '';
+      for (const item of items) {
+        const row = document.createElement('div'); row.className = 'li';
+        const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
+        minus.setAttribute('aria-label', t.remove + ' ' + item);
+        minus.onclick = () => onRemove(item);
+        const label = document.createElement('span'); label.className = 'mono'; label.style.fontSize = '12.5px'; label.textContent = item;
+        row.append(minus, label); grp.appendChild(row);
+      }
+      const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + addLabel;
+      add.onclick = onAdd; grp.appendChild(add);
+    }
+
+    // ---- Coding: 권한 상세(writePaths/denyPaths/commands) ----
+    let permDetails = { writePaths: [], denyPaths: [], commands: null };
+
+    function showPermHint() { $('perm-hint').textContent = t.saved; $('perm-hint').hidden = false; }
+
+    function renderWritePaths() {
+      renderListGroup('write-paths-grp', permDetails.writePaths, async (item) => {
+        const next = permDetails.writePaths.filter((p) => p !== item);
+        await window.engram.setPermissionList('writePaths', next);
+        permDetails.writePaths = next;
+        renderWritePaths();
+        showPermHint();
+      }, t.addFolder, async () => {
+        const p = await window.engram.pickFolder();
+        if (!p) return;
+        const next = permDetails.writePaths.concat(p);
+        await window.engram.setPermissionList('writePaths', next);
+        permDetails.writePaths = next;
+        renderWritePaths();
+        showPermHint();
+      });
+      $('write-paths-cap').textContent = permDetails.writePaths.length === 0 ? t.autoModeHint : '';
+    }
+
+    function renderDenyPaths() {
+      renderListGroup('deny-paths-grp', permDetails.denyPaths, async (item) => {
+        const next = permDetails.denyPaths.filter((p) => p !== item);
+        await window.engram.setPermissionList('denyPaths', next);
+        permDetails.denyPaths = next;
+        renderDenyPaths();
+        showPermHint();
+      }, t.addFolder, async () => {
+        const p = await window.engram.pickFolder();
+        if (!p) return;
+        const next = permDetails.denyPaths.concat(p);
+        await window.engram.setPermissionList('denyPaths', next);
+        permDetails.denyPaths = next;
+        renderDenyPaths();
+        showPermHint();
+      });
+    }
+
+    function startCommandInput(addRow) {
+      const form = document.createElement('div'); form.className = 'li';
+      const input = document.createElement('input'); input.className = 'mono'; input.style.flex = '1';
+      form.appendChild(input);
+      addRow.replaceWith(form);
+      input.focus();
+      let done = false;
+      const commit = async () => {
+        if (done) return;
+        done = true;
+        const v = input.value.trim();
+        if (v) {
+          const next = (permDetails.commands === null ? [] : permDetails.commands).concat(v);
+          await window.engram.setPermissionList('commands', next);
+          permDetails.commands = next;
+          showPermHint();
+        }
+        renderCommands();
+      };
+      const cancel = () => { if (done) return; done = true; renderCommands(); };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      };
+      input.onblur = () => cancel();
+    }
+
+    function renderCommands() {
+      const grp = $('cmd-list-grp');
+      grp.textContent = '';
+      const commands = permDetails.commands;
+      if (commands !== null) {
+        for (const cmd of commands) {
+          const row = document.createElement('div'); row.className = 'li';
+          const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
+          minus.setAttribute('aria-label', t.remove + ' ' + cmd);
+          minus.onclick = async () => {
+            const next = commands.filter((c) => c !== cmd);
+            await window.engram.setPermissionList('commands', next);
+            permDetails.commands = next;
+            renderCommands();
+            showPermHint();
+          };
+          const label = document.createElement('span'); label.className = 'mono'; label.style.fontSize = '12.5px'; label.textContent = cmd;
+          row.append(minus, label); grp.appendChild(row);
+        }
+        const reset = document.createElement('div'); reset.className = 'li add-row'; reset.textContent = t.resetDefault;
+        reset.onclick = async () => {
+          await window.engram.setPermissionList('commands', null);
+          permDetails.commands = null;
+          renderCommands();
+          showPermHint();
+        };
+        grp.appendChild(reset);
+      }
+      const addRow = document.createElement('div'); addRow.className = 'li add-row'; addRow.textContent = '＋ ' + t.addCommand;
+      addRow.onclick = () => startCommandInput(addRow);
+      grp.appendChild(addRow);
+      $('cmd-list-cap').textContent = commands === null ? t.cmdBuiltin : t.cmdListCap;
+    }
+
+    async function loadPermissions() {
+      permDetails = await window.engram.getPermissionDetails();
+      renderWritePaths();
+      renderDenyPaths();
+      renderCommands();
+    }
+
+    // ---- Code repos: 별칭(alias→path) + 검색 루트 ----
+    let codeRepos = { aliases: {}, searchRoots: [] };
+
+    function showReposHint() { $('repos-hint').textContent = t.saved; $('repos-hint').hidden = false; }
+
+    function startAliasForm(addRow) {
+      const form = document.createElement('div'); form.className = 'li-form';
+      const aliasInput = document.createElement('input'); aliasInput.className = 'mono';
+      let chosenPath = '';
+      const pathSpan = document.createElement('span'); pathSpan.className = 'mono';
+      pathSpan.style.fontSize = '11.5px'; pathSpan.style.color = 'var(--muted)';
+      const browseBtn = document.createElement('button'); browseBtn.textContent = t.browse;
+      browseBtn.onclick = async () => {
+        const p = await window.engram.pickFolder();
+        if (p) { chosenPath = p; pathSpan.textContent = p; }
+      };
+      const pathRow = document.createElement('div'); pathRow.className = 'frow';
+      pathRow.append(browseBtn, pathSpan);
+
+      form.append(frow(t.aliases, aliasInput), pathRow);
+
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const cancelBtn = document.createElement('button'); cancelBtn.textContent = t.cancel;
+      cancelBtn.onclick = () => renderAliases();
+      const addBtn = document.createElement('button'); addBtn.className = 'primary'; addBtn.textContent = t.addAlias;
+      const status = document.createElement('span'); status.className = 'status';
+      addBtn.onclick = async () => {
+        const a = aliasInput.value.trim();
+        if (!a || !chosenPath) return;
+        const ok = await window.engram.setCodeAlias(a, chosenPath);
+        if (!ok) { status.textContent = t.nameConflict; return; }
+        await loadCodeRepos();
+        showReposHint();
+      };
+      actions.append(cancelBtn, addBtn, status);
+      form.appendChild(actions);
+      addRow.replaceWith(form);
+      aliasInput.focus();
+    }
+
+    function renderAliases() {
+      const grp = $('aliases-grp');
+      grp.textContent = '';
+      for (const alias of Object.keys(codeRepos.aliases)) {
+        const p = codeRepos.aliases[alias];
+        const row = document.createElement('div'); row.className = 'li';
+        const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
+        minus.setAttribute('aria-label', t.remove + ' ' + alias);
+        minus.onclick = async () => {
+          await window.engram.removeCodeAlias(alias);
+          await loadCodeRepos();
+          showReposHint();
+        };
+        const label = document.createElement('span'); label.className = 'mono'; label.style.fontSize = '12.5px'; label.textContent = alias;
+        const pathSpan = document.createElement('span');
+        pathSpan.style.color = 'var(--muted)'; pathSpan.style.fontSize = '11.5px'; pathSpan.style.marginLeft = 'auto';
+        pathSpan.style.overflow = 'hidden'; pathSpan.style.textOverflow = 'ellipsis'; pathSpan.style.whiteSpace = 'nowrap'; pathSpan.style.maxWidth = '260px';
+        pathSpan.textContent = p;
+        row.append(minus, label, pathSpan); grp.appendChild(row);
+      }
+      const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + t.addAlias;
+      add.onclick = () => startAliasForm(add);
+      grp.appendChild(add);
+    }
+
+    function renderSearchRoots() {
+      renderListGroup('search-roots-grp', codeRepos.searchRoots, async (item) => {
+        const next = codeRepos.searchRoots.filter((r) => r !== item);
+        await window.engram.setSearchRoots(next);
+        codeRepos.searchRoots = next;
+        renderSearchRoots();
+        showReposHint();
+      }, t.addFolder, async () => {
+        const p = await window.engram.pickFolder();
+        if (!p) return;
+        const next = codeRepos.searchRoots.concat(p);
+        await window.engram.setSearchRoots(next);
+        codeRepos.searchRoots = next;
+        renderSearchRoots();
+        showReposHint();
+      });
+    }
+
+    async function loadCodeRepos() {
+      codeRepos = await window.engram.getCodeRepos();
+      renderAliases();
+      renderSearchRoots();
+    }
+
     loadBrains();
     loadCmdMode();
+    loadPermissions();
+    loadCodeRepos();
 
     refresh();
     detect();
