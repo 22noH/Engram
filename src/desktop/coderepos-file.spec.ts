@@ -22,6 +22,12 @@ describe('coderepos-file', () => {
     removeAlias(tmp, 'a');
     expect(loadCodeRepos(tmp)).toEqual({ aliases: {}, searchRoots: ['C:\\Src'] });
   });
+  it("alias '__proto__'는 거짓 성공 대신 false, removeAlias는 상속 프로퍼티로 헛 저장 안 함", () => {
+    expect(setAlias(tmp, '__proto__', 'C:\\x')).toBe(false);
+    removeAlias(tmp, '__proto__');
+    expect(fs.existsSync(path.join(tmp, 'coderepos.json'))).toBe(false);
+  });
+
   it('깨진 파일이면 골격에서 시작', () => {
     fs.writeFileSync(path.join(tmp, 'coderepos.json'), '{깨진');
     setSearchRoots(tmp, ['C:\\Src']);
