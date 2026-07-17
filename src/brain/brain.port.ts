@@ -19,6 +19,7 @@ export interface CompleteOpts {
   timeoutMs?: number;    // 호출별 타임아웃(코딩은 길다)
   delegate?: DelegateHandle;   // Phase 8d: 있으면 엔그램 하네스가 ask_brain 도구를 노출
   codeGuard?: (absPath: string) => void; // Phase 8b-1: 코딩 쓰기 허용 판정(주입). 있으면 API 두뇌가 코딩 루프.
+  cmdGuard?: (command: string) => void; // Phase 8b-2: 명령 판정(주입). 있으면 coding 루프가 Bash 노출. auto면 무조건 통과.
 }
 
 export interface BrainProvider {
