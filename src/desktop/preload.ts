@@ -5,8 +5,10 @@ contextBridge.exposeInMainWorld('engram', {
   status: () => ipcRenderer.invoke('engram:status'),
   detectClaude: () => ipcRenderer.invoke('engram:detect-claude'),
   detectOllama: () => ipcRenderer.invoke('engram:detect-ollama'),
-  addOllama: (model: string, setDefault: boolean) =>
-    ipcRenderer.invoke('engram:add-ollama', model, setDefault),
+  addOllama: (model: string, name: string, setDefault: boolean) =>
+    ipcRenderer.invoke('engram:add-ollama', model, name, setDefault),
+  removeBrain: (key: string) => ipcRenderer.invoke('engram:remove-brain', key),
+  slugModel: (model: string) => ipcRenderer.invoke('engram:slug-model', model),
   saveToken: (token: string) => ipcRenderer.invoke('engram:save-token', token),
   saveApiKey: (apiKey: string, setDefault: boolean) =>
     ipcRenderer.invoke('engram:save-api-key', apiKey, setDefault),

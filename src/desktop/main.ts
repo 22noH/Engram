@@ -9,7 +9,7 @@ import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
-import { listBrains, setDefaultBrain } from './brains-file';
+import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel } from './brains-file';
 import { getCommandMode, setCommandMode } from './permissions-file';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
@@ -234,6 +234,8 @@ function registerIpc(): void {
   });
   ipcMain.handle('engram:list-brains', () => listBrains(configDir));
   ipcMain.handle('engram:set-default-brain', (_e, key: string) => { setDefaultBrain(configDir, key); });
+  ipcMain.handle('engram:remove-brain', (_e, key: string) => { removeBrainProfile(configDir, key); });
+  ipcMain.handle('engram:slug-model', (_e, model: string) => slugFromModel(model));
   ipcMain.handle('engram:get-command-mode', () => getCommandMode(configDir));
   ipcMain.handle('engram:set-command-mode', (_e, mode: string) => { setCommandMode(configDir, mode as 'auto' | 'allowlist' | 'off'); });
   ipcMain.handle('engram:open-path', (_e, which: string) => {
