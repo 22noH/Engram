@@ -204,6 +204,7 @@
 
     <div class="grp-h" data-t="regGroup"></div>
     <div class="grp" id="brain-details"></div>
+    <p class="cap ok" id="brain-hint" hidden></p>
     <div class="cap" data-t="brainCap"></div>
 
     <div class="grp-h" data-t="addGroup"></div>
@@ -328,6 +329,9 @@
       nameConflict: '같은 이름이 이미 있어요', delBrain: '삭제', cancel: '취소',
       brainCap: '기본 두뇌가 모든 채팅에 답합니다 — 다른 두뇌는 채팅에서 이름으로 부를 수 있어요.',
       addGroup: '추가', regGroup: '등록된 두뇌',
+      fName: '이름', fModel: '모델', fBaseUrl: '베이스 URL', fApiKey: 'API 키',
+      fMaxTokens: '최대 토큰', fSearch: '웹 검색', fSearchKey: '검색 API 키',
+      fUsdIn: '입력 $ / 100만 토큰', fUsdOut: '출력 $ / 100만 토큰',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -364,6 +368,9 @@
       nameConflict: 'That name already exists', delBrain: 'Delete', cancel: 'Cancel',
       brainCap: 'The default brain answers every chat — others can be called by name.',
       addGroup: 'Add', regGroup: 'Registered brains',
+      fName: 'Name', fModel: 'Model', fBaseUrl: 'Base URL', fApiKey: 'API key',
+      fMaxTokens: 'Max tokens', fSearch: 'Web search', fSearchKey: 'Search API key',
+      fUsdIn: '$ / M input tokens', fUsdOut: '$ / M output tokens',
     };
 
     // 섹션 전환
@@ -603,15 +610,15 @@
       outputCostInput.value = b.outputUsdPerMTok === null ? '' : String(b.outputUsdPerMTok);
 
       form.append(
-        frow('Name', nameInput),
-        frow('Model', modelInput),
-        frow('Base URL', baseUrlInput),
-        frow('API key · ' + (b.hasApiKey ? t.keySet : t.keyNotSet), apiKeyInput),
-        frow('Max tokens', maxTokensInput),
-        frow('Web search', searchProviderSel),
-        frow('Search API key · ' + (b.hasSearchApiKey ? t.keySet : t.keyNotSet), searchApiKeyInput),
-        frow('$/M in', inputCostInput),
-        frow('$/M out', outputCostInput),
+        frow(t.fName, nameInput),
+        frow(t.fModel, modelInput),
+        frow(t.fBaseUrl, baseUrlInput),
+        frow(t.fApiKey + ' · ' + (b.hasApiKey ? t.keySet : t.keyNotSet), apiKeyInput),
+        frow(t.fMaxTokens, maxTokensInput),
+        frow(t.fSearch, searchProviderSel),
+        frow(t.fSearchKey + ' · ' + (b.hasSearchApiKey ? t.keySet : t.keyNotSet), searchApiKeyInput),
+        frow(t.fUsdIn, inputCostInput),
+        frow(t.fUsdOut, outputCostInput),
       );
 
       const actions = document.createElement('div');
@@ -644,9 +651,9 @@
         patch.model = modelInput.value.trim();
         patch.baseUrl = baseUrlInput.value.trim();
         patch.searchProvider = searchProviderSel.value;
-        const apiKeyV = apiKeyInput.value;
+        const apiKeyV = apiKeyInput.value.trim();
         if (apiKeyV) patch.apiKey = apiKeyV;
-        const searchApiKeyV = searchApiKeyInput.value;
+        const searchApiKeyV = searchApiKeyInput.value.trim();
         if (searchApiKeyV) patch.searchApiKey = searchApiKeyV;
         collectNum(patch, 'maxTokens', maxTokensInput.value);
         collectNum(patch, 'inputUsdPerMTok', inputCostInput.value);
@@ -660,8 +667,10 @@
           return;
         }
         editingKey = null;
-        setLine($('ollama'), [{ cls: 'ok', text: t.added }]);
         await loadBrains();
+        // 저장 성공 피드백은 그룹 아래 전용 힌트로 — #ollama 상태줄을 덮지 않는다(detect()는 로드 때만 돎).
+        $('brain-hint').textContent = t.saved;
+        $('brain-hint').hidden = false;
       };
       actions.append(delBtn, spacer, cancelBtn, saveBtn, status);
       form.appendChild(actions);
@@ -713,6 +722,7 @@
         row.appendChild(right);
 
         const toggle = () => {
+          $('brain-hint').hidden = true;
           editingKey = editingKey === b.key ? null : b.key;
           renderBrainDetails();
         };
@@ -726,6 +736,7 @@
     }
 
     async function loadBrains() {
+      $('brain-hint').hidden = true;
       const brains = await window.engram.listBrains();
       const sel = $('default-brain');
       sel.textContent = '';
