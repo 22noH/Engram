@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mergeBrainProfile } from './brains-file';
+import { mergeBrainProfile, listBrains, setDefaultBrain } from './brains-file';
 
 describe('mergeBrainProfile', () => {
   let tmp: string;
@@ -39,5 +39,32 @@ describe('mergeBrainProfile', () => {
     fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({ default: 'claude', brains: 'oops' }));
     mergeBrainProfile(tmp, 'x', { provider: 'openai-api' });
     expect(read().brains).toEqual({ x: { provider: 'openai-api' } });
+  });
+});
+
+describe('listBrains / setDefaultBrain', () => {
+  it('두뇌 목록과 기본여부 반환', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-lb-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({
+        default: 'anthropic',
+        brains: { claude: { provider: 'claude-cli', model: '' }, anthropic: { provider: 'anthropic-api', model: 'claude-opus-4-8' } },
+      }));
+      const list = listBrains(dir);
+      expect(list.find((b) => b.key === 'anthropic')).toEqual({ key: 'anthropic', provider: 'anthropic-api', model: 'claude-opus-4-8', isDefault: true });
+      expect(list.find((b) => b.key === 'claude')!.isDefault).toBe(false);
+      expect(listBrains(path.join(dir, 'none'))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('setDefaultBrain은 default만 바꾸고 나머지 보존', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-sd-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'claude', brains: { claude: {}, anthropic: {} } }));
+      setDefaultBrain(dir, 'anthropic');
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, 'brains.json'), 'utf8'));
+      expect(raw.default).toBe('anthropic');
+      expect(Object.keys(raw.brains).sort()).toEqual(['anthropic', 'claude']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
