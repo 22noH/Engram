@@ -19,8 +19,8 @@ export async function detectOllama(
   }
 }
 
-export function addOllamaProfile(configDir: string, model: string, setDefault = false): void {
-  mergeBrainProfile(configDir, 'ollama', {
+export function addOllamaProfile(configDir: string, model: string, name: string, setDefault = false): void {
+  mergeBrainProfile(configDir, name, {
     provider: 'openai-api',
     baseUrl: `${OLLAMA_URL}/v1`,
     model,

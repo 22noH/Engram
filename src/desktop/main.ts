@@ -223,8 +223,8 @@ function registerIpc(): void {
     installCommand: claudeInstallCommand(process.platform),
   }));
   ipcMain.handle('engram:detect-ollama', () => detectOllama());
-  ipcMain.handle('engram:add-ollama', (_e, model: string, setDefault: boolean) => {
-    addOllamaProfile(configDir, model, setDefault);
+  ipcMain.handle('engram:add-ollama', (_e, model: string, name: string, setDefault: boolean) => {
+    addOllamaProfile(configDir, model, name, setDefault);
   });
   ipcMain.handle('engram:save-token', (_e, token: string) => {
     saveDiscordToken(configDir, token);

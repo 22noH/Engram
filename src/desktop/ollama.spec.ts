@@ -39,7 +39,7 @@ describe('addOllamaProfile', () => {
   }
 
   it('brains.json이 없으면 만들고 ollama 프로필을 넣는다(default는 claude 유지)', () => {
-    addOllamaProfile(tmp, 'llama3.3:latest');
+    addOllamaProfile(tmp, 'llama3.3:latest', 'ollama');
     const cfg = readBrains();
     expect(cfg.brains.ollama).toEqual({
       provider: 'openai-api',
@@ -54,7 +54,7 @@ describe('addOllamaProfile', () => {
       path.join(tmp, 'brains.json'),
       JSON.stringify({ default: 'claude', brains: { claude: { model: 'opus' }, judge: {} } }),
     );
-    addOllamaProfile(tmp, 'qwen3:8b');
+    addOllamaProfile(tmp, 'qwen3:8b', 'ollama');
     const cfg = readBrains();
     expect(cfg.brains.claude).toEqual({ model: 'opus' });
     expect(cfg.brains.judge).toEqual({});
@@ -62,13 +62,21 @@ describe('addOllamaProfile', () => {
   });
 
   it('setDefault=true면 default를 ollama로 바꾼다', () => {
-    addOllamaProfile(tmp, 'qwen3:8b', true);
+    addOllamaProfile(tmp, 'qwen3:8b', 'ollama', true);
     expect(readBrains().default).toBe('ollama');
   });
 
   it('깨진 brains.json이면 기본 골격으로 재작성(fault-tolerant)', () => {
     fs.writeFileSync(path.join(tmp, 'brains.json'), '{깨진 JSON');
-    addOllamaProfile(tmp, 'qwen3:8b');
+    addOllamaProfile(tmp, 'qwen3:8b', 'ollama');
     expect(readBrains().brains.ollama.model).toBe('qwen3:8b');
+  });
+
+  it('서로 다른 이름으로 두 모델을 등록하면 둘 다 남는다(이번 작업의 존재 이유)', () => {
+    addOllamaProfile(tmp, 'qwen3:8b', 'qwen3-8b');
+    addOllamaProfile(tmp, 'gemma4:e4b', 'gemma4-e4b');
+    const cfg = readBrains();
+    expect(cfg.brains['qwen3-8b'].model).toBe('qwen3:8b');
+    expect(cfg.brains['gemma4-e4b'].model).toBe('gemma4:e4b');
   });
 });
