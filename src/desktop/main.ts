@@ -321,6 +321,8 @@ if (!gotLock) {
     }
     registerIpc();
     createTray();
+    // dev 스모크 편의: 트레이 조작 없이 설정창 바로 열기 (ENGRAM_OPEN_SETTINGS=1 electron .)
+    if (process.env.ENGRAM_OPEN_SETTINGS === '1') openSettings();
     startChild();
     for (const b of loadLocalBrains(configDir)) startLocalBrain(b); // + 로컬 두뇌 재기동(재시작 감독 없음 — ponytail)
   });
