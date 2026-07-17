@@ -380,7 +380,8 @@
         }
         $('ollama-name').placeholder = t.namePlaceholder;
         if (o.models.length && !nameDirty) {
-          $('ollama-name').value = await window.engram.slugModel(sel.value);
+          const slug = await window.engram.slugModel(sel.value);
+          if (!nameDirty) $('ollama-name').value = slug; // await 사이 타이핑 보호
         }
         $('ollama-name-hint').textContent = t.nameHint;
         $('ollama-name-hint').hidden = o.models.length === 0;
@@ -401,7 +402,10 @@
     $('btn-refresh').onclick = refresh;
     $('ollama-name').oninput = () => { nameDirty = true; updateAddButton(); };
     $('ollama-model').onchange = async () => {
-      if (!nameDirty) $('ollama-name').value = await window.engram.slugModel($('ollama-model').value);
+      if (!nameDirty) {
+        const slug = await window.engram.slugModel($('ollama-model').value);
+        if (!nameDirty) $('ollama-name').value = slug; // await 사이 타이핑 보호
+      }
       updateAddButton();
     };
     $('btn-ollama').onclick = async () => {
