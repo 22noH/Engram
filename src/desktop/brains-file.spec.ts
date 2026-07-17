@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mergeBrainProfile, listBrains, setDefaultBrain, slugFromModel, removeBrainProfile } from './brains-file';
+import { mergeBrainProfile, listBrains, setDefaultBrain, slugFromModel, removeBrainProfile, listBrainDetails, updateBrainProfile } from './brains-file';
 
 describe('mergeBrainProfile', () => {
   let tmp: string;
@@ -114,6 +114,79 @@ describe('removeBrainProfile', () => {
     expect(read().brains.claude).toEqual({});
     fs.writeFileSync(file(), '{깨진');
     expect(() => removeBrainProfile(tmp, 'claude')).not.toThrow();
+    expect(fs.readFileSync(file(), 'utf8')).toBe('{깨진');
+  });
+});
+
+describe('listBrainDetails', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-bd-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it('전 필드 + hasApiKey(원문 미포함) + isDefault', () => {
+    fs.writeFileSync(path.join(tmp, 'brains.json'), JSON.stringify({
+      default: 'q',
+      brains: { q: { provider: 'openai-api', model: 'qwen3:8b', baseUrl: 'http://x/v1', apiKey: 'sk-secret', maxTokens: 8000, inputUsdPerMTok: 1, searchProvider: 'brave', searchApiKey: 'bk' } },
+    }));
+    const [d] = listBrainDetails(tmp);
+    expect(d).toEqual({
+      key: 'q', provider: 'openai-api', model: 'qwen3:8b', baseUrl: 'http://x/v1',
+      maxTokens: 8000, inputUsdPerMTok: 1, outputUsdPerMTok: null,
+      searchProvider: 'brave', hasApiKey: true, hasSearchApiKey: true, isDefault: true,
+    });
+    expect(JSON.stringify(listBrainDetails(tmp))).not.toContain('sk-secret');
+  });
+  it('없는/깨진 파일 → []', () => {
+    expect(listBrainDetails(tmp)).toEqual([]);
+    fs.writeFileSync(path.join(tmp, 'brains.json'), '{깨진');
+    expect(listBrainDetails(tmp)).toEqual([]);
+  });
+});
+
+describe('updateBrainProfile', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-up-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+  const file = () => path.join(tmp, 'brains.json');
+  const read = () => JSON.parse(fs.readFileSync(file(), 'utf8'));
+  const seed = () => fs.writeFileSync(file(), JSON.stringify({
+    default: 'q', brains: { q: { provider: 'openai-api', model: 'qwen3:8b', apiKey: 'OLD' }, c: { provider: 'claude-cli' } },
+  }));
+
+  it('부분 갱신: 정의된 필드만, apiKey 빈문자열은 기존 보존', () => {
+    seed();
+    expect(updateBrainProfile(tmp, 'q', { model: 'qwen3:14b', apiKey: '', maxTokens: 9000 })).toBe(true);
+    const b = read().brains.q;
+    expect(b).toEqual({ provider: 'openai-api', model: 'qwen3:14b', apiKey: 'OLD', maxTokens: 9000 });
+  });
+  it('apiKey 새 값은 교체, 숫자 null은 필드 제거, 문자열 빈값은 필드 제거', () => {
+    seed();
+    fs.writeFileSync(file(), JSON.stringify({ default: 'q', brains: { q: { model: 'm', baseUrl: 'http://x', apiKey: 'OLD', maxTokens: 1 } } }));
+    updateBrainProfile(tmp, 'q', { apiKey: 'NEW', maxTokens: null, baseUrl: '' });
+    expect(read().brains.q).toEqual({ model: 'm', apiKey: 'NEW' });
+  });
+  it('숫자 비정상(0·음수·NaN)은 무시(기존 유지)', () => {
+    seed();
+    updateBrainProfile(tmp, 'q', { maxTokens: -5 });
+    expect(read().brains.q.maxTokens).toBeUndefined();
+    fs.writeFileSync(file(), JSON.stringify({ default: 'q', brains: { q: { maxTokens: 7 } } }));
+    updateBrainProfile(tmp, 'q', { maxTokens: Number.NaN });
+    expect(read().brains.q.maxTokens).toBe(7);
+  });
+  it('이름변경: 이동+default 포인터 이동, 새 이름 충돌은 false(무변경)', () => {
+    seed();
+    expect(updateBrainProfile(tmp, 'q', {}, 'qwen')).toBe(true);
+    const cfg = read();
+    expect(cfg.brains.qwen.model).toBe('qwen3:8b');
+    expect(cfg.brains.q).toBeUndefined();
+    expect(cfg.default).toBe('qwen');
+    expect(updateBrainProfile(tmp, 'qwen', {}, 'c')).toBe(false);
+    expect(read().brains.qwen.model).toBe('qwen3:8b');
+  });
+  it('없는 key·없는/깨진 파일 → false·무변경', () => {
+    expect(updateBrainProfile(tmp, 'ghost', {})).toBe(false);
+    fs.writeFileSync(file(), '{깨진');
+    expect(updateBrainProfile(tmp, 'q', {})).toBe(false);
     expect(fs.readFileSync(file(), 'utf8')).toBe('{깨진');
   });
 });
