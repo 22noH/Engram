@@ -51,8 +51,9 @@ brains.json 자체는 이름만 다르면 여러 프로필을 담을 수 있고(
 - `engram:add-ollama` 핸들러 `(model, name, setDefault)` 3인자로 확장.
 - `engram:remove-brain` 신규 → `removeBrainProfile(configDir, key)`.
 - preload: `addOllama(model, name, setDefault)` 시그니처 갱신, `removeBrain(key)` 신규.
-- preload가 `slugFromModel`을 **IPC 없이 직접 import해 동기 노출** — 순수 문자열
-  함수라 라운드트립이 필요 없고, 로직은 brains-file.ts 한 곳에만 존재(테스트도 거기).
+- `engram:slug-model` 신규 IPC → `slugFromModel`. (preload는 Electron 기본 샌드박스라
+  로컬 모듈 import 불가 — 다른 `engram:*`와 같은 invoke 패턴으로 통일. 로직은
+  brains-file.ts 한 곳에만 존재하고 테스트도 거기.)
 - `listBrains`·`setDefaultBrain` IPC는 8b-2 것 재사용.
 
 ### 3.4 설정창 UI (src/desktop/settings.html)
