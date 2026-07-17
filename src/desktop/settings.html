@@ -73,17 +73,21 @@
     .minus { width: 17px; height: 17px; border-radius: 50%; background: var(--dead); color: #fff; border: none; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: pointer; font-size: 12px; line-height: 1; }
     .add-row { color: var(--accent); cursor: pointer; }
     .chev { color: var(--muted); opacity: .6; }
+    .li-form { background: var(--panel-2); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .li-form .frow { display: flex; align-items: center; gap: 10px; }
+    .li-form .frow label { font-size: 12.5px; color: var(--muted); width: 120px; flex: none; }
+    .li-form .frow input, .li-form .frow select { flex: 1; }
+    .li-form .actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+    .li-form .actions button.danger { background: var(--dead); border-color: var(--dead); color: #fff; }
+    .li-form .actions button.danger:disabled { opacity: 0.4; cursor: default; }
+    .li-form .actions button.danger:disabled:hover { border-color: var(--dead); }
+    .li-form .status { font-size: 12px; color: var(--dead); }
+    .brain-li { cursor: pointer; }
 
     .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
     /* hidden 속성이 .row(display:flex)에 눌리지 않도록 — author 규칙이 UA [hidden]을 이겨서 안 숨던 걸 고침. */
     [hidden] { display: none !important; }
     .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
-    .brain-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; font-size: 13px; }
-    .brain-row .meta2 { color: var(--muted); font-size: 12px; }
-    .brain-row .badge { margin-left: auto; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 11px; padding: 2px 8px; border-radius: 20px; }
-    .brain-row button { padding: 4px 10px; font-size: 12px; }
-    .brain-row button:disabled { opacity: 0.4; cursor: default; }
-    .brain-row button:disabled:hover { border-color: var(--line); }
 
     /* signature: the heartbeat pulse */
     .pulse-line { display: flex; align-items: center; gap: 12px; }
@@ -197,24 +201,34 @@
       <button id="btn-copy-install" data-t="copyCmd"></button>
     </div>
     <div id="ollama" style="margin-top:10px"></div>
-    <div class="row" id="ollama-add" hidden>
-      <select id="ollama-model"></select>
-      <input id="ollama-name" class="mono" style="width:150px" />
-      <label style="font-size:13px"><input type="checkbox" id="ollama-default" /> <span data-t="setDefault"></span></label>
-      <button class="primary" id="btn-ollama" data-t="addBrain"></button>
+
+    <div class="grp-h" data-t="regGroup"></div>
+    <div class="grp" id="brain-details"></div>
+    <div class="cap" data-t="brainCap"></div>
+
+    <div class="grp-h" data-t="addGroup"></div>
+    <div class="grp">
+      <div class="li" id="ollama-add" hidden>
+        <select id="ollama-model"></select>
+        <input id="ollama-name" class="mono" style="width:150px" />
+        <label style="font-size:13px"><input type="checkbox" id="ollama-default" /> <span data-t="setDefault"></span></label>
+        <button class="primary" id="btn-ollama" data-t="addBrain"></button>
+      </div>
+      <div class="li" id="api-add">
+        <input id="apikey" type="password" placeholder="sk-ant-…" />
+        <label style="font-size:13px"><input type="checkbox" id="api-default" /> <span data-t="setDefault"></span></label>
+        <button class="primary" id="btn-apikey" data-t="saveKey"></button>
+      </div>
     </div>
-    <div class="hint" id="ollama-name-hint" hidden></div>
-    <div class="row" id="api-add" style="margin-top:14px">
-      <input id="apikey" type="password" placeholder="sk-ant-…" />
-      <label style="font-size:13px"><input type="checkbox" id="api-default" /> <span data-t="setDefault"></span></label>
-      <button class="primary" id="btn-apikey" data-t="saveKey"></button>
+    <div class="cap" id="ollama-name-hint" hidden></div>
+    <div class="cap" id="api-note"></div>
+
+    <div class="grp" style="margin-top:16px">
+      <div class="li" id="default-brain-row" hidden>
+        <label for="default-brain" style="font-size:13px" data-t="defaultBrain"></label>
+        <select id="default-brain" style="margin-left:auto"></select>
+      </div>
     </div>
-    <div id="brain-list" style="margin-top:14px" hidden></div>
-    <div class="row" id="default-brain-row" style="margin-top:14px" hidden>
-      <label for="default-brain" style="font-size:13px" data-t="defaultBrain"></label>
-      <select id="default-brain"></select>
-    </div>
-    <div id="api-note" style="font-size:12px;margin-top:4px;opacity:.75"></div>
   </section>
 
   <section id="sec-coding">
@@ -268,6 +282,8 @@
 
     let nameDirty = false;
     let brainKeys = [];
+    let brainDetailsList = [];
+    let editingKey = null;
     function updateAddButton() {
       const name = $('ollama-name').value.trim();
       $('btn-ollama').disabled = !name;
@@ -308,6 +324,10 @@
       namePlaceholder: '두뇌 이름', nameHint: '채팅에서 이 이름으로 부릅니다 — 예: "qwen3-8b한테 물어봐"',
       overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
       defaultLocked: '기본 두뇌는 먼저 다른 두뇌를 기본으로 지정한 뒤 삭제할 수 있어요',
+      keepBlank: '비워두면 기존 키 유지', keySet: '설정됨', keyNotSet: '없음',
+      nameConflict: '같은 이름이 이미 있어요', delBrain: '삭제', cancel: '취소',
+      brainCap: '기본 두뇌가 모든 채팅에 답합니다 — 다른 두뇌는 채팅에서 이름으로 부를 수 있어요.',
+      addGroup: '추가', regGroup: '등록된 두뇌',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -340,6 +360,10 @@
       namePlaceholder: 'Brain name', nameHint: 'This is how you call it in chat — e.g. "ask qwen3-8b"',
       overwrite: 'Overwrite', del: 'Delete', defaultBadge: 'default',
       defaultLocked: 'Set another brain as default first',
+      keepBlank: 'Leave blank to keep', keySet: 'set', keyNotSet: 'not set',
+      nameConflict: 'That name already exists', delBrain: 'Delete', cancel: 'Cancel',
+      brainCap: 'The default brain answers every chat — others can be called by name.',
+      addGroup: 'Add', regGroup: 'Registered brains',
     };
 
     // 섹션 전환
@@ -353,7 +377,8 @@
     // 검색: 섹션명+설정 라벨 부분일치 → 일치 섹션만 표시
     const SECTION_LABELS = {
       'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
-      'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey],
+      'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
+        t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel],
       'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist],
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots],
       'sec-sched': [t.secSched, 'cron'],
@@ -498,6 +523,208 @@
       b.onclick = () => window.engram.openPath(b.dataset.open);
     });
 
+    // 사이드바 Brain 타일과 같은 cpu-chip 글리프 — innerHTML 없이 SVG 노드 조립(두뇌 키·모델은 사용자가 고친 파일에서 옴).
+    function cpuChipSvg() {
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 16 16');
+      svg.setAttribute('width', '13');
+      svg.setAttribute('height', '13');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', '#fff');
+      svg.setAttribute('stroke-width', '1.8');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.setAttribute('aria-hidden', 'true');
+      const rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', '3.5');
+      rect.setAttribute('y', '3.5');
+      rect.setAttribute('width', '9');
+      rect.setAttribute('height', '9');
+      rect.setAttribute('rx', '1.5');
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', 'M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2');
+      svg.append(rect, path);
+      return svg;
+    }
+
+    function frow(labelText, input) {
+      const div = document.createElement('div');
+      div.className = 'frow';
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      div.append(label, input);
+      return div;
+    }
+
+    // 숫자 필드 하나를 patch에 반영: ''→null(제거), 유한 양수→Number, 그 외(비정상)는 필드 자체를 생략.
+    function collectNum(patch, field, raw) {
+      const v = raw.trim();
+      if (v === '') { patch[field] = null; return; }
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) patch[field] = n;
+    }
+
+    function buildEditForm(b) {
+      const form = document.createElement('div');
+      form.className = 'li-form';
+
+      const nameInput = document.createElement('input');
+      nameInput.className = 'mono';
+      nameInput.value = b.key;
+      const modelInput = document.createElement('input');
+      modelInput.className = 'mono';
+      modelInput.value = b.model;
+      const baseUrlInput = document.createElement('input');
+      baseUrlInput.className = 'mono';
+      baseUrlInput.value = b.baseUrl;
+      const apiKeyInput = document.createElement('input');
+      apiKeyInput.type = 'password';
+      apiKeyInput.placeholder = t.keepBlank;
+      const maxTokensInput = document.createElement('input');
+      maxTokensInput.type = 'number';
+      maxTokensInput.value = b.maxTokens === null ? '' : String(b.maxTokens);
+      const searchProviderSel = document.createElement('select');
+      for (const [value, label] of [['', 'default'], ['duckduckgo', 'duckduckgo'], ['brave', 'brave'], ['tavily', 'tavily']]) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        if (b.searchProvider === value) opt.selected = true;
+        searchProviderSel.appendChild(opt);
+      }
+      const searchApiKeyInput = document.createElement('input');
+      searchApiKeyInput.type = 'password';
+      searchApiKeyInput.placeholder = t.keepBlank;
+      const inputCostInput = document.createElement('input');
+      inputCostInput.type = 'number';
+      inputCostInput.value = b.inputUsdPerMTok === null ? '' : String(b.inputUsdPerMTok);
+      const outputCostInput = document.createElement('input');
+      outputCostInput.type = 'number';
+      outputCostInput.value = b.outputUsdPerMTok === null ? '' : String(b.outputUsdPerMTok);
+
+      form.append(
+        frow('Name', nameInput),
+        frow('Model', modelInput),
+        frow('Base URL', baseUrlInput),
+        frow('API key · ' + (b.hasApiKey ? t.keySet : t.keyNotSet), apiKeyInput),
+        frow('Max tokens', maxTokensInput),
+        frow('Web search', searchProviderSel),
+        frow('Search API key · ' + (b.hasSearchApiKey ? t.keySet : t.keyNotSet), searchApiKeyInput),
+        frow('$/M in', inputCostInput),
+        frow('$/M out', outputCostInput),
+      );
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const delBtn = document.createElement('button');
+      delBtn.className = 'danger';
+      delBtn.textContent = t.delBrain;
+      if (b.isDefault) {
+        delBtn.disabled = true;
+        delBtn.title = t.defaultLocked;
+      } else {
+        delBtn.onclick = async () => {
+          await window.engram.removeBrain(b.key);
+          editingKey = null;
+          await loadBrains();
+        };
+      }
+      const spacer = document.createElement('span');
+      spacer.style.marginLeft = 'auto';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = t.cancel;
+      cancelBtn.onclick = () => { editingKey = null; renderBrainDetails(); };
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'primary';
+      saveBtn.textContent = t.save;
+      const status = document.createElement('span');
+      status.className = 'status';
+      saveBtn.onclick = async () => {
+        const patch = {};
+        patch.model = modelInput.value.trim();
+        patch.baseUrl = baseUrlInput.value.trim();
+        patch.searchProvider = searchProviderSel.value;
+        const apiKeyV = apiKeyInput.value;
+        if (apiKeyV) patch.apiKey = apiKeyV;
+        const searchApiKeyV = searchApiKeyInput.value;
+        if (searchApiKeyV) patch.searchApiKey = searchApiKeyV;
+        collectNum(patch, 'maxTokens', maxTokensInput.value);
+        collectNum(patch, 'inputUsdPerMTok', inputCostInput.value);
+        collectNum(patch, 'outputUsdPerMTok', outputCostInput.value);
+
+        const newName = nameInput.value.trim();
+        const newKey = newName && newName !== b.key ? newName : undefined;
+        const ok = await window.engram.updateBrainProfile(b.key, patch, newKey);
+        if (!ok) {
+          status.textContent = t.nameConflict;
+          return;
+        }
+        editingKey = null;
+        setLine($('ollama'), [{ cls: 'ok', text: t.added }]);
+        await loadBrains();
+      };
+      actions.append(delBtn, spacer, cancelBtn, saveBtn, status);
+      form.appendChild(actions);
+      return form;
+    }
+
+    function renderBrainDetails() {
+      const grp = $('brain-details');
+      grp.textContent = '';
+      for (const b of brainDetailsList) {
+        const row = document.createElement('div');
+        row.className = 'li brain-li';
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+
+        const tile = document.createElement('span');
+        tile.className = 'tile';
+        tile.style.background = /api$/.test(b.provider) ? '#3aa5de' : '#888780';
+        tile.appendChild(cpuChipSvg());
+        row.appendChild(tile);
+
+        const name = document.createElement('span');
+        name.className = 'mono';
+        name.textContent = b.key;
+        row.appendChild(name);
+
+        const meta = document.createElement('span');
+        meta.style.color = 'var(--muted)';
+        meta.style.fontSize = '11.5px';
+        meta.textContent = b.model || b.provider;
+        row.appendChild(meta);
+
+        const right = document.createElement('span');
+        right.style.marginLeft = 'auto';
+        if (b.isDefault) {
+          right.style.display = 'flex';
+          right.style.alignItems = 'center';
+          right.style.gap = '4px';
+          right.style.color = 'var(--accent)';
+          const check = document.createElement('span');
+          check.textContent = '✓';
+          const label = document.createElement('span');
+          label.textContent = t.defaultBadge;
+          right.append(check, label);
+        } else {
+          right.className = 'chev';
+          right.textContent = '›';
+        }
+        row.appendChild(right);
+
+        const toggle = () => {
+          editingKey = editingKey === b.key ? null : b.key;
+          renderBrainDetails();
+        };
+        row.onclick = toggle;
+        row.onkeydown = (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        };
+        grp.appendChild(row);
+        if (editingKey === b.key) grp.appendChild(buildEditForm(b));
+      }
+    }
+
     async function loadBrains() {
       const brains = await window.engram.listBrains();
       const sel = $('default-brain');
@@ -522,33 +749,9 @@
       $('default-brain-row').hidden = brains.length === 0;
 
       brainKeys = brains.map((b) => b.key);
-      const list = $('brain-list');
-      list.textContent = '';
-      for (const b of brains) {
-        const row = document.createElement('div');
-        row.className = 'brain-row';
-        const name = document.createElement('span');
-        name.className = 'mono';
-        name.textContent = b.key;
-        const meta = document.createElement('span');
-        meta.className = 'meta2';
-        meta.textContent = b.model ? `${b.provider} · ${b.model}` : b.provider;
-        row.append(name, meta);
-        if (b.isDefault) {
-          const badge = document.createElement('span');
-          badge.className = 'badge';
-          badge.textContent = t.defaultBadge;
-          row.appendChild(badge);
-        }
-        const del = document.createElement('button');
-        del.textContent = t.del;
-        if (!b.isDefault) del.style.marginLeft = 'auto';
-        if (b.isDefault) { del.disabled = true; del.title = t.defaultLocked; }
-        else del.onclick = async () => { await window.engram.removeBrain(b.key); await loadBrains(); };
-        row.appendChild(del);
-        list.appendChild(row);
-      }
-      list.hidden = brains.length === 0;
+      brainDetailsList = await window.engram.listBrainDetails();
+      if (editingKey && !brainDetailsList.some((b) => b.key === editingKey)) editingKey = null;
+      renderBrainDetails();
       updateAddButton();
     }
     $('default-brain').onchange = async () => {
