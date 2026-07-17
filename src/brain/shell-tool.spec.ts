@@ -50,6 +50,14 @@ describe('runShellTool (never-throw)', () => {
     expect(r).toContain('[timeout]');
   });
 
+  it('진입 시 이미 aborted면 즉시 종료 + 문자열 resolve(크래시 아님)', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort(); // 호출 전에 이미 abort
+    const r = await runShellTool({ command: `node -e "console.log('x')"` }, cwd, allow, ctrl.signal);
+    expect(typeof r).toBe('string');
+    expect(r).toContain('[timeout]');
+  });
+
   // spawn()은 동기 throw 가능(Windows ENAMETOOLONG 등) — executor 안에서 안 잡으면 Promise가 reject되어
   // never-throw가 깨진다. 계약(=reject 안 하고 문자열 resolve)을 OS 무관하게 고정(Win은 'Bash error', 그 외는 정상실행).
   it('매우 긴 명령에도 reject 아님(never-throw)', async () => {

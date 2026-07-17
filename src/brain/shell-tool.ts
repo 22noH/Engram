@@ -62,13 +62,16 @@ export function runShellTool(input: unknown, cwd: string, guard: CommandGuard, s
     };
     const onAbort = (): void => { if (child.pid) killTree(child.pid); finish('[timeout] aborted'); };
     const timer = setTimeout(() => { if (child.pid) killTree(child.pid); finish(`[timeout] exceeded ${MAX_SHELL_TIMEOUT_MS}ms`); }, MAX_SHELL_TIMEOUT_MS);
-    if (signal.aborted) { onAbort(); return; }
-    signal.addEventListener('abort', onAbort);
+    // ★자식 리스너를 abort 체크보다 먼저 붙인다 — 리스너 없는 'error'는 호스트를 크래시시킨다(aborted-at-entry 경로 포함).
     // 출력은 증분 상한(메모리 보호) — 마지막 SHELL_OUTPUT_LIMIT만 유지, 2배 넘으면 잘라냄.
     const append = (d: Buffer): void => { out += d.toString(); if (out.length > SHELL_OUTPUT_LIMIT * 2) out = out.slice(-SHELL_OUTPUT_LIMIT); };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
+    child.stdout?.on('error', () => { /* 스트림 에러 흡수(never-throw) */ });
+    child.stderr?.on('error', () => { /* 스트림 에러 흡수(never-throw) */ });
     child.on('error', (e) => finish(`Bash error: ${String(e)}`));
     child.on('close', (code) => finish(`[exit ${code ?? 1}]\n${out.slice(-SHELL_OUTPUT_LIMIT)}`));
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener('abort', onAbort);
   });
 }
