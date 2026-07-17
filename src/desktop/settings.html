@@ -67,6 +67,8 @@
       color: var(--muted);
     }
     .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
+    /* hidden 속성이 .row(display:flex)에 눌리지 않도록 — author 규칙이 UA [hidden]을 이겨서 안 숨던 걸 고침. */
+    [hidden] { display: none !important; }
     .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
 
     /* signature: the heartbeat pulse */
@@ -180,7 +182,7 @@
       <button class="primary" id="btn-apikey" data-t="saveKey"></button>
     </div>
     <div class="row" id="default-brain-row" style="margin-top:14px" hidden>
-      <label style="font-size:13px" data-t="defaultBrain"></label>
+      <label for="default-brain" style="font-size:13px" data-t="defaultBrain"></label>
       <select id="default-brain"></select>
     </div>
     <div id="api-note" style="font-size:12px;margin-top:4px;opacity:.75"></div>
@@ -189,7 +191,7 @@
   <section id="sec-coding">
     <h2 data-t="secCoding"></h2>
     <div class="row">
-      <label style="font-size:13px" data-t="cmdMode"></label>
+      <label for="cmd-mode" style="font-size:13px" data-t="cmdMode"></label>
       <select id="cmd-mode">
         <option value="auto" data-t="cmdAuto"></option>
         <option value="allowlist" data-t="cmdAllow"></option>
