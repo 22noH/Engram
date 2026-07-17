@@ -48,6 +48,9 @@ export function getPermissionDetails(configDir: string): PermissionDetails {
 
 // 목록 필드 부분 갱신. commands에만 null 허용 = 필드 삭제(내장 DEFAULT_COMMANDS 복귀).
 export function setPermissionList(configDir: string, field: 'writePaths' | 'denyPaths' | 'commands', values: string[] | null): void {
+  // IPC 경계로 노출되는 원시함수 — 타입은 컴파일타임뿐이라 런타임 화이트리스트 필수
+  // (아니면 렌더러가 commandMode/tools/__proto__를 덮어쓸 수 있음).
+  if (field !== 'writePaths' && field !== 'denyPaths' && field !== 'commands') return;
   const file = path.join(configDir, 'permissions.json');
   let cfg: { default: string; allow: Record<string, unknown> } = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
   try {

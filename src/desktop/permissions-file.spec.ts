@@ -66,4 +66,13 @@ describe('getPermissionDetails / setPermissionList', () => {
     setPermissionList(tmp, 'denyPaths', ['C:\\Windows']);
     expect(read().allow.denyPaths).toEqual(['C:\\Windows']);
   });
+
+  it('허용 외 field는 런타임 no-op (IPC 경계 — commandMode/tools 덮어쓰기 차단)', () => {
+    fs.writeFileSync(file(), JSON.stringify({ default: 'deny', allow: { tools: { dev: ['Bash'] }, writePaths: [], denyPaths: [], commandMode: 'off' } }));
+    setPermissionList(tmp, 'commandMode' as never, ['auto']);
+    setPermissionList(tmp, 'tools' as never, null);
+    const cfg = read();
+    expect(cfg.allow.commandMode).toBe('off');
+    expect(cfg.allow.tools).toEqual({ dev: ['Bash'] });
+  });
 });
