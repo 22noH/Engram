@@ -174,4 +174,34 @@ describe('OpenAiApiBrain', () => {
     expect(r.isError).toBe(true);
     expect((fetchFn as jest.Mock)).not.toHaveBeenCalled();
   });
+
+  it('coding + cmdGuard면 Bash 도구 노출 + 실행', async () => {
+    const BASH_CHUNKS = [
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'b1', type: 'function', function: { name: 'Bash', arguments: '' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: `{"command":"node -e \\"console.log('ran')\\""}` } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 1 } },
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-obash-'));
+    try {
+      let call = 0;
+      const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(BASH_CHUNKS) : sse(TEXT_CHUNKS); }) as unknown as typeof fetch;
+      const seen: string[] = [];
+      const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('do', undefined, {
+        cwd: dir, codeGuard: () => {}, cmdGuard: (c: string) => { seen.push(c); },
+      });
+      expect(r.isError).toBe(false);
+      expect(seen.length).toBe(1);
+      const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+      expect(body.tools.map((t: { function: { name: string } }) => t.function.name)).toContain('Bash');
+      expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('ran');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('coding인데 cmdGuard 없으면 Bash 미노출', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_CHUNKS)) as unknown as typeof fetch;
+    await new OpenAiApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: 'C:/x', codeGuard: () => {} });
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+  });
 });
