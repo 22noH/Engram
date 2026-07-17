@@ -29,3 +29,34 @@ export function setCommandMode(configDir: string, mode: CommandMode): void {
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
 }
+
+export interface PermissionDetails { writePaths: string[]; denyPaths: string[]; commands: string[] | null }
+
+export function getPermissionDetails(configDir: string): PermissionDetails {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'permissions.json'), 'utf8'));
+    const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((s) => typeof s === 'string') : []);
+    return {
+      writePaths: strArr(raw?.allow?.writePaths),
+      denyPaths: strArr(raw?.allow?.denyPaths),
+      commands: Array.isArray(raw?.allow?.commands) ? raw.allow.commands.filter((s: unknown) => typeof s === 'string') : null,
+    };
+  } catch {
+    return { writePaths: [], denyPaths: [], commands: null };
+  }
+}
+
+// 목록 필드 부분 갱신. commands에만 null 허용 = 필드 삭제(내장 DEFAULT_COMMANDS 복귀).
+export function setPermissionList(configDir: string, field: 'writePaths' | 'denyPaths' | 'commands', values: string[] | null): void {
+  const file = path.join(configDir, 'permissions.json');
+  let cfg: { default: string; allow: Record<string, unknown> } = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw && typeof raw === 'object') cfg = raw;
+  } catch { /* 없거나 깨짐 → 골격 */ }
+  if (!cfg.allow || typeof cfg.allow !== 'object') cfg.allow = { tools: {}, writePaths: [], denyPaths: [] };
+  if (values === null) delete cfg.allow[field];
+  else cfg.allow[field] = values;
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+}
