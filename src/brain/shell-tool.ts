@@ -23,7 +23,11 @@ export const BASH_TOOL_DEF: WebToolDef = {
 // 프로세스 트리 강제종료(자식까지). Win=taskkill /T /F, POSIX=프로세스그룹 kill(detached로 그룹 생성).
 function killTree(pid: number): void {
   if (process.platform === 'win32') {
-    try { spawn('taskkill', ['/pid', String(pid), '/T', '/F']); } catch { /* best effort */ }
+    try {
+      // ★ taskkill 자식에 'error' 리스너 필수 — cross-spawn은 spawn 실패(AV·축소 PATH 등)를 비동기 'error'로
+      //   재방출하고, 리스너 없는 'error'는 호스트 프로세스를 크래시시킨다. 안전장치가 앱을 죽이면 안 됨.
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F']).on('error', () => { /* best effort */ });
+    } catch { /* best effort */ }
   } else {
     try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* 이미 종료 */ } }
   }
@@ -60,8 +64,10 @@ export function runShellTool(input: unknown, cwd: string, guard: CommandGuard, s
     const timer = setTimeout(() => { if (child.pid) killTree(child.pid); finish(`[timeout] exceeded ${MAX_SHELL_TIMEOUT_MS}ms`); }, MAX_SHELL_TIMEOUT_MS);
     if (signal.aborted) { onAbort(); return; }
     signal.addEventListener('abort', onAbort);
-    child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-    child.stderr?.on('data', (d: Buffer) => { out += d.toString(); });
+    // 출력은 증분 상한(메모리 보호) — 마지막 SHELL_OUTPUT_LIMIT만 유지, 2배 넘으면 잘라냄.
+    const append = (d: Buffer): void => { out += d.toString(); if (out.length > SHELL_OUTPUT_LIMIT * 2) out = out.slice(-SHELL_OUTPUT_LIMIT); };
+    child.stdout?.on('data', append);
+    child.stderr?.on('data', append);
     child.on('error', (e) => finish(`Bash error: ${String(e)}`));
     child.on('close', (code) => finish(`[exit ${code ?? 1}]\n${out.slice(-SHELL_OUTPUT_LIMIT)}`));
   });

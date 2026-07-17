@@ -50,10 +50,11 @@ describe('runShellTool (never-throw)', () => {
     expect(r).toContain('[timeout]');
   });
 
-  // spawn() 자체가 동기 throw 가능(예: 명령이 너무 길면 Windows ENAMETOOLONG) — Promise executor 안에서
-  // 잡지 않으면 반환 Promise가 reject되어 never-throw 계약이 깨진다. 회귀 고정.
-  it('spawn 동기 throw(예: 매우 긴 명령) → reject 대신 에러 텍스트', async () => {
+  // spawn()은 동기 throw 가능(Windows ENAMETOOLONG 등) — executor 안에서 안 잡으면 Promise가 reject되어
+  // never-throw가 깨진다. 계약(=reject 안 하고 문자열 resolve)을 OS 무관하게 고정(Win은 'Bash error', 그 외는 정상실행).
+  it('매우 긴 명령에도 reject 아님(never-throw)', async () => {
     const hugeCommand = `node -e "1" ` + '#'.repeat(60_000);
-    await expect(runShellTool({ command: hugeCommand }, cwd, allow, NO_ABORT)).resolves.toContain('Bash error');
+    const r = await runShellTool({ command: hugeCommand }, cwd, allow, NO_ABORT);
+    expect(typeof r).toBe('string');
   });
 });
