@@ -7,6 +7,7 @@ import { runToolLoop, ToolCall, TurnResult, MAX_TOOL_ITERATIONS } from './tool-l
 import { WEB_TOOL_DEFS, WebToolDef, executeWebTool } from './web-tools';
 import { askBrainDef, runAskBrain } from './brain-tools';
 import { CODING_TOOL_DEFS, executeCodingTool, MAX_CODING_ITERATIONS } from './coding-tools';
+import { BASH_TOOL_DEF, runShellTool } from './shell-tool';
 
 // Anthropic Messages API 직접 호출 하네스(스펙 §2.1). 공식 SDK 미도입 — HTTP+SSE 직접.
 // ponytail: SDK의 재시도·타이핑이 필요해지면 도입 재검토.
@@ -41,10 +42,12 @@ export class AnthropicApiBrain implements BrainProvider {
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
       const history: AnthropicMsg[] = [{ role: 'user', content: prompt }];
       const toolDefs: WebToolDef[] = coding
-        ? CODING_TOOL_DEFS
+        ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
         : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : [])];
       const executor = coding
-        ? (name: string, input: unknown) => executeCodingTool(name, input, opts!.cwd!, opts!.codeGuard!, ctrl.signal)
+        ? (name: string, input: unknown) => name === 'Bash'
+            ? runShellTool(input, opts!.cwd!, opts!.cmdGuard!, ctrl.signal)
+            : executeCodingTool(name, input, opts!.cwd!, opts!.codeGuard!, ctrl.signal)
         : (name: string, input: unknown) =>
             name === 'ask_brain' ? runAskBrain(input, opts?.delegate) : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal);
       try {

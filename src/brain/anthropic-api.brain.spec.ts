@@ -185,4 +185,34 @@ describe('AnthropicApiBrain', () => {
     expect(r.isError).toBe(true);
     expect((fetchFn as jest.Mock)).not.toHaveBeenCalled();
   });
+
+  it('coding + cmdGuard면 Bash 도구 노출 + 실행', async () => {
+    const BASH_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'b1', name: 'Bash' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: `{"command":"node -e \\"console.log('ran')\\""}` } },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-abash-'));
+    try {
+      let call = 0;
+      const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(BASH_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+      const seen: string[] = [];
+      const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('do', undefined, {
+        cwd: dir, codeGuard: () => {}, cmdGuard: (c: string) => { seen.push(c); },
+      });
+      expect(r.isError).toBe(false);
+      expect(seen.length).toBe(1); // cmdGuard 호출됨
+      const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+      expect(body.tools.map((t: { name: string }) => t.name)).toContain('Bash');
+      expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('ran'); // 실행 결과 되먹임
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('coding인데 cmdGuard 없으면 Bash 미노출(파일도구만)', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: 'C:/x', codeGuard: () => {} });
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+  });
 });
