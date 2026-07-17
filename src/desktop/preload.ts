@@ -13,4 +13,8 @@ contextBridge.exposeInMainWorld('engram', {
   openPath: (which: string) => ipcRenderer.invoke('engram:open-path', which),
   restart: () => ipcRenderer.invoke('engram:restart'),
   logTail: () => ipcRenderer.invoke('engram:log-tail'),
+  listBrains: () => ipcRenderer.invoke('engram:list-brains'),
+  setDefaultBrain: (key: string) => ipcRenderer.invoke('engram:set-default-brain', key),
+  getCommandMode: () => ipcRenderer.invoke('engram:get-command-mode'),
+  setCommandMode: (mode: string) => ipcRenderer.invoke('engram:set-command-mode', mode),
 });
