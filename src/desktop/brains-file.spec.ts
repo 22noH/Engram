@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mergeBrainProfile, listBrains, setDefaultBrain } from './brains-file';
+import { mergeBrainProfile, listBrains, setDefaultBrain, slugFromModel, removeBrainProfile } from './brains-file';
 
 describe('mergeBrainProfile', () => {
   let tmp: string;
@@ -66,5 +66,49 @@ describe('listBrains / setDefaultBrain', () => {
       expect(raw.default).toBe('anthropic');
       expect(Object.keys(raw.brains).sort()).toEqual(['anthropic', 'claude']);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('slugFromModel', () => {
+  it('콜론을 -로: qwen3:8b → qwen3-8b', () => {
+    expect(slugFromModel('qwen3:8b')).toBe('qwen3-8b');
+  });
+  it('슬래시·점 등 영숫자 외 문자 전부 -로, 소문자화, 연속 - 축약', () => {
+    expect(slugFromModel('hf.co/Org/Model.Q4_K_M')).toBe('hf-co-org-model-q4_k_m');
+  });
+  it('양끝 - 제거', () => {
+    expect(slugFromModel(':qwen:')).toBe('qwen');
+  });
+  it('빈 결과면 ollama 폴백', () => {
+    expect(slugFromModel('::')).toBe('ollama');
+    expect(slugFromModel('')).toBe('ollama');
+  });
+});
+
+describe('removeBrainProfile', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brains-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+  const file = () => path.join(tmp, 'brains.json');
+  const read = () => JSON.parse(fs.readFileSync(file(), 'utf8'));
+
+  it('기본이 아닌 프로필을 지운다(나머지 보존)', () => {
+    fs.writeFileSync(file(), JSON.stringify({ default: 'claude', brains: { claude: {}, gemma: { model: 'gemma4:e4b' } } }));
+    removeBrainProfile(tmp, 'gemma');
+    expect(read()).toEqual({ default: 'claude', brains: { claude: {} } });
+  });
+  it('default 프로필이면 no-op(서버 기동 안전선)', () => {
+    fs.writeFileSync(file(), JSON.stringify({ default: 'claude', brains: { claude: {}, gemma: {} } }));
+    removeBrainProfile(tmp, 'claude');
+    expect(read().brains.claude).toEqual({});
+  });
+  it('없는 key·파일 없음·깨진 파일 전부 no-op', () => {
+    expect(() => removeBrainProfile(tmp, 'ghost')).not.toThrow();
+    fs.writeFileSync(file(), JSON.stringify({ default: 'claude', brains: { claude: {} } }));
+    removeBrainProfile(tmp, 'ghost');
+    expect(read().brains.claude).toEqual({});
+    fs.writeFileSync(file(), '{깨진');
+    expect(() => removeBrainProfile(tmp, 'claude')).not.toThrow();
+    expect(fs.readFileSync(file(), 'utf8')).toBe('{깨진');
   });
 });

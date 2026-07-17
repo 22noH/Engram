@@ -47,3 +47,21 @@ export function setDefaultBrain(configDir: string, key: string): void {
   raw.default = key;
   fs.writeFileSync(file, JSON.stringify(raw, null, 2));
 }
+
+// 모델명 → 두뇌 이름 제안 (qwen3:8b → qwen3-8b). 위임 때 채팅에서 이름으로 부르므로 부르기 쉬운 형태.
+export function slugFromModel(model: string): string {
+  const s = model.toLowerCase().replace(/[^a-z0-9_]+/g, '-').replace(/^-+|-+$/g, '');
+  return s || 'ollama';
+}
+
+// 프로필 삭제. default면 no-op — 기본 두뇌가 사라지면 서버가 시작을 못 하므로 파일 계층이 최종 안전선.
+export function removeBrainProfile(configDir: string, key: string): void {
+  const file = path.join(configDir, 'brains.json');
+  let raw: { default?: string; brains?: Record<string, unknown> };
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+  if (!raw || typeof raw !== 'object' || !raw.brains || typeof raw.brains !== 'object') return;
+  if (raw.default === key) return;
+  if (!(key in raw.brains)) return;
+  delete raw.brains[key];
+  fs.writeFileSync(file, JSON.stringify(raw, null, 2));
+}
