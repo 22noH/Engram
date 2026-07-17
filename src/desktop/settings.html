@@ -276,10 +276,32 @@
 
   <section id="sec-sched">
     <h2 data-t="secSched"></h2>
+    <div class="grp" id="sched-grp"></div>
+    <div class="cap" data-t="schedCap"></div>
+    <p class="cap" id="sched-hint" style="color:var(--accent)" hidden></p>
   </section>
 
   <section id="sec-wiki">
     <h2 data-t="secWiki"></h2>
+    <div class="grp">
+      <div class="li">
+        <label for="wiki-remote-input" style="font-size:13px" data-t="wikiRemote"></label>
+        <span class="val"><input id="wiki-remote-input" class="mono" style="width:260px" /></span>
+      </div>
+      <div class="li">
+        <label for="wiki-branch-input" style="font-size:13px" data-t="wikiBranch"></label>
+        <span class="val"><input id="wiki-branch-input" class="mono" /></span>
+      </div>
+      <div class="li">
+        <label for="wiki-interval-input" style="font-size:13px" data-t="wikiInterval"></label>
+        <span class="val"><input id="wiki-interval-input" type="number" /></span>
+      </div>
+      <div class="li">
+        <span class="val" style="margin-left:auto"><button class="primary" id="btn-wiki-save" data-t="save"></button></span>
+      </div>
+    </div>
+    <div class="cap" data-t="wikiCap"></div>
+    <p class="cap ok" id="wiki-hint" hidden></p>
   </section>
 
   <section id="sec-messenger">
@@ -364,6 +386,10 @@
       fName: '이름', fModel: '모델', fBaseUrl: '베이스 URL', fApiKey: 'API 키',
       fMaxTokens: '최대 토큰', fSearch: '웹 검색', fSearchKey: '검색 API 키',
       fUsdIn: '입력 $ / 100만 토큰', fUsdOut: '출력 $ / 100만 토큰',
+      schedEmpty: '예약이 없어요',
+      schedCap: "새 예약은 채팅에서 — '매일 아침 9시에 브리핑해줘'",
+      schedRestart: '삭제는 재시작해야 완전히 적용돼요',
+      wikiCap: '비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) · ENGRAM_WIKI_REMOTE 환경변수가 있으면 그게 우선이에요',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -410,6 +436,10 @@
       fName: 'Name', fModel: 'Model', fBaseUrl: 'Base URL', fApiKey: 'API key',
       fMaxTokens: 'Max tokens', fSearch: 'Web search', fSearchKey: 'Search API key',
       fUsdIn: '$ / M input tokens', fUsdOut: '$ / M output tokens',
+      schedEmpty: 'No schedules',
+      schedCap: 'Create schedules in chat — "brief me every morning at 9"',
+      schedRestart: 'Deletion fully applies after a restart',
+      wikiCap: 'Empty = local only · auth is standard git (SSH/token) · the ENGRAM_WIKI_REMOTE env var wins if set',
     };
 
     // 섹션 전환
@@ -424,11 +454,12 @@
     const SECTION_LABELS = {
       'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
       'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
-        t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel],
+        t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel,
+        t.fName, t.fModel, t.fBaseUrl, t.fApiKey, t.fMaxTokens, t.fSearch, t.fSearchKey, t.fUsdIn, t.fUsdOut],
       'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist, t.autoModeHint, t.cmdListCap, t.cmdBuiltin, t.resetDefault],
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
-      'sec-sched': [t.secSched, 'cron'],
-      'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval],
+      'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
+      'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -1058,10 +1089,63 @@
       renderSearchRoots();
     }
 
+    // ---- Schedules: 읽기전용 목록 + 삭제(재시작 강조) ----
+    async function loadSchedules() {
+      $('sched-hint').hidden = true;
+      const entries = await window.engram.listSchedules();
+      const grp = $('sched-grp');
+      grp.textContent = '';
+      if (entries.length === 0) {
+        const row = document.createElement('div'); row.className = 'li';
+        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.schedEmpty;
+        row.appendChild(label); grp.appendChild(row);
+        return;
+      }
+      for (const e of entries) {
+        const row = document.createElement('div'); row.className = 'li';
+        const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
+        minus.setAttribute('aria-label', t.remove + ' ' + e.task);
+        minus.onclick = async () => {
+          await window.engram.removeSchedule(e.id);
+          await loadSchedules();
+          $('sched-hint').textContent = t.schedRestart;
+          $('sched-hint').hidden = false;
+        };
+        const cron = document.createElement('span'); cron.className = 'mono'; cron.style.color = 'var(--accent)'; cron.textContent = e.cron;
+        const task = document.createElement('span');
+        task.style.flex = '1'; task.style.minWidth = '0'; task.style.overflow = 'hidden'; task.style.textOverflow = 'ellipsis'; task.style.whiteSpace = 'nowrap';
+        task.textContent = e.task;
+        const right = document.createElement('span');
+        right.style.color = 'var(--muted)'; right.style.fontSize = '11.5px'; right.style.flex = 'none';
+        right.textContent = e.channelId + (e.once ? ' · once' : '');
+        row.append(minus, cron, task, right); grp.appendChild(row);
+      }
+    }
+
+    // ---- Wiki sync: remote/branch/interval 폼 ----
+    async function loadWikiRemote() {
+      $('wiki-hint').hidden = true;
+      const cfg = await window.engram.getWikiRemote();
+      $('wiki-remote-input').value = cfg.remote;
+      $('wiki-branch-input').value = cfg.branch;
+      $('wiki-interval-input').value = String(cfg.syncIntervalSec);
+    }
+    $('btn-wiki-save').onclick = async () => {
+      const remote = $('wiki-remote-input').value.trim();
+      const branch = $('wiki-branch-input').value.trim();
+      const syncIntervalSec = Number($('wiki-interval-input').value);
+      await window.engram.setWikiRemote({ remote, branch, syncIntervalSec });
+      await loadWikiRemote();
+      $('wiki-hint').textContent = t.saved;
+      $('wiki-hint').hidden = false;
+    };
+
     loadBrains();
     loadCmdMode();
     loadPermissions();
     loadCodeRepos();
+    loadSchedules();
+    loadWikiRemote();
 
     refresh();
     detect();
