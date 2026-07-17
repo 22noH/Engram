@@ -828,45 +828,62 @@
       add.onclick = onAdd; grp.appendChild(add);
     }
 
+    // 벌크 교체 API(setPermissionList/setSearchRoots)의 lost-update 방지 — 그룹별 쓰기 직렬화 + 체인 안에서 최신 재조회.
+    const writeChains = {};
+    function chained(chainKey, fn) {
+      writeChains[chainKey] = (writeChains[chainKey] || Promise.resolve()).then(fn, fn);
+      return writeChains[chainKey];
+    }
+
     // ---- Coding: 권한 상세(writePaths/denyPaths/commands) ----
     let permDetails = { writePaths: [], denyPaths: [], commands: null };
 
     function showPermHint() { $('perm-hint').textContent = t.saved; $('perm-hint').hidden = false; }
 
     function renderWritePaths() {
-      renderListGroup('write-paths-grp', permDetails.writePaths, async (item) => {
-        const next = permDetails.writePaths.filter((p) => p !== item);
+      $('perm-hint').hidden = true;
+      renderListGroup('write-paths-grp', permDetails.writePaths, (item) => chained('perm', async () => {
+        const cur = await window.engram.getPermissionDetails();
+        const next = cur.writePaths.filter((p) => p !== item);
         await window.engram.setPermissionList('writePaths', next);
         permDetails.writePaths = next;
         renderWritePaths();
         showPermHint();
-      }, t.addFolder, async () => {
+      }), t.addFolder, async () => {
         const p = await window.engram.pickFolder();
         if (!p) return;
-        const next = permDetails.writePaths.concat(p);
-        await window.engram.setPermissionList('writePaths', next);
-        permDetails.writePaths = next;
-        renderWritePaths();
-        showPermHint();
+        await chained('perm', async () => {
+          const cur = await window.engram.getPermissionDetails();
+          const next = cur.writePaths.includes(p) ? cur.writePaths : cur.writePaths.concat(p);
+          await window.engram.setPermissionList('writePaths', next);
+          permDetails.writePaths = next;
+          renderWritePaths();
+          showPermHint();
+        });
       });
       $('write-paths-cap').textContent = permDetails.writePaths.length === 0 ? t.autoModeHint : '';
     }
 
     function renderDenyPaths() {
-      renderListGroup('deny-paths-grp', permDetails.denyPaths, async (item) => {
-        const next = permDetails.denyPaths.filter((p) => p !== item);
+      $('perm-hint').hidden = true;
+      renderListGroup('deny-paths-grp', permDetails.denyPaths, (item) => chained('perm', async () => {
+        const cur = await window.engram.getPermissionDetails();
+        const next = cur.denyPaths.filter((p) => p !== item);
         await window.engram.setPermissionList('denyPaths', next);
         permDetails.denyPaths = next;
         renderDenyPaths();
         showPermHint();
-      }, t.addFolder, async () => {
+      }), t.addFolder, async () => {
         const p = await window.engram.pickFolder();
         if (!p) return;
-        const next = permDetails.denyPaths.concat(p);
-        await window.engram.setPermissionList('denyPaths', next);
-        permDetails.denyPaths = next;
-        renderDenyPaths();
-        showPermHint();
+        await chained('perm', async () => {
+          const cur = await window.engram.getPermissionDetails();
+          const next = cur.denyPaths.includes(p) ? cur.denyPaths : cur.denyPaths.concat(p);
+          await window.engram.setPermissionList('denyPaths', next);
+          permDetails.denyPaths = next;
+          renderDenyPaths();
+          showPermHint();
+        });
       });
     }
 
@@ -881,13 +898,16 @@
         if (done) return;
         done = true;
         const v = input.value.trim();
-        if (v) {
-          const next = (permDetails.commands === null ? [] : permDetails.commands).concat(v);
+        if (!v) { renderCommands(); return; }
+        await chained('perm', async () => {
+          const cur = await window.engram.getPermissionDetails();
+          const list = cur.commands === null ? [] : cur.commands;
+          const next = list.includes(v) ? list : list.concat(v);
           await window.engram.setPermissionList('commands', next);
           permDetails.commands = next;
+          renderCommands();
           showPermHint();
-        }
-        renderCommands();
+        });
       };
       const cancel = () => { if (done) return; done = true; renderCommands(); };
       input.onkeydown = (e) => {
@@ -898,6 +918,7 @@
     }
 
     function renderCommands() {
+      $('perm-hint').hidden = true;
       const grp = $('cmd-list-grp');
       grp.textContent = '';
       const commands = permDetails.commands;
@@ -906,23 +927,27 @@
           const row = document.createElement('div'); row.className = 'li';
           const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
           minus.setAttribute('aria-label', t.remove + ' ' + cmd);
-          minus.onclick = async () => {
-            const next = commands.filter((c) => c !== cmd);
+          minus.onclick = () => chained('perm', async () => {
+            const cur = await window.engram.getPermissionDetails();
+            const list = cur.commands === null ? [] : cur.commands;
+            const next = list.filter((c) => c !== cmd);
             await window.engram.setPermissionList('commands', next);
             permDetails.commands = next;
             renderCommands();
             showPermHint();
-          };
+          });
           const label = document.createElement('span'); label.className = 'mono'; label.style.fontSize = '12.5px'; label.textContent = cmd;
           row.append(minus, label); grp.appendChild(row);
         }
-        const reset = document.createElement('div'); reset.className = 'li add-row'; reset.textContent = t.resetDefault;
-        reset.onclick = async () => {
+        // 파괴적 행위라 add-row의 accent 색 대신 위험색 — ＋추가 줄과 시각적으로 구분.
+        const reset = document.createElement('div'); reset.className = 'li'; reset.textContent = t.resetDefault;
+        reset.style.color = 'var(--dead)'; reset.style.cursor = 'pointer';
+        reset.onclick = () => chained('perm', async () => {
           await window.engram.setPermissionList('commands', null);
           permDetails.commands = null;
           renderCommands();
           showPermHint();
-        };
+        });
         grp.appendChild(reset);
       }
       const addRow = document.createElement('div'); addRow.className = 'li add-row'; addRow.textContent = '＋ ' + t.addCommand;
@@ -979,6 +1004,7 @@
     }
 
     function renderAliases() {
+      $('repos-hint').hidden = true;
       const grp = $('aliases-grp');
       grp.textContent = '';
       for (const alias of Object.keys(codeRepos.aliases)) {
@@ -1004,20 +1030,25 @@
     }
 
     function renderSearchRoots() {
-      renderListGroup('search-roots-grp', codeRepos.searchRoots, async (item) => {
-        const next = codeRepos.searchRoots.filter((r) => r !== item);
+      $('repos-hint').hidden = true;
+      renderListGroup('search-roots-grp', codeRepos.searchRoots, (item) => chained('roots', async () => {
+        const cur = await window.engram.getCodeRepos();
+        const next = cur.searchRoots.filter((r) => r !== item);
         await window.engram.setSearchRoots(next);
         codeRepos.searchRoots = next;
         renderSearchRoots();
         showReposHint();
-      }, t.addFolder, async () => {
+      }), t.addFolder, async () => {
         const p = await window.engram.pickFolder();
         if (!p) return;
-        const next = codeRepos.searchRoots.concat(p);
-        await window.engram.setSearchRoots(next);
-        codeRepos.searchRoots = next;
-        renderSearchRoots();
-        showReposHint();
+        await chained('roots', async () => {
+          const cur = await window.engram.getCodeRepos();
+          const next = cur.searchRoots.includes(p) ? cur.searchRoots : cur.searchRoots.concat(p);
+          await window.engram.setSearchRoots(next);
+          codeRepos.searchRoots = next;
+          renderSearchRoots();
+          showReposHint();
+        });
       });
     }
 
