@@ -1,7 +1,7 @@
 # 설정 전면 UI화 — 설계
 
 날짜: 2026-07-17
-상태: 승인됨 (브레인스토밍 완료 — 목업 확정)
+상태: 승인됨 (브레인스토밍 완료 — 애플 스타일 목업 확정, 검색 포함)
 
 ## 1. 문제
 
@@ -44,13 +44,30 @@
 - i18n: 영어 기본 + ko, 기존 `t` 객체 확장.
 - 각 config 함수는 깨진/없는 파일 fault-tolerant(기존 결) + **부분 갱신**(다른 필드 보존).
 
-### 3.2 사이드바 (settings.html 골격)
+### 3.2 사이드바 + 스타일 가이드 (settings.html 골격 — 애플 시스템 설정 문법)
 
-- `<nav>`(좌, 고정폭 ~150px) + 콘텐츠 영역. nav 버튼 클릭 → 해당 `<section>`만 표시
-  (나머지 `hidden` — `[hidden]{display:none!important}` 이미 있음). 기본 선택 Status.
-- 기존 섹션(Status·Brain·Coding·Discord·Advanced)은 내용 무변경 이사. 창 최소 크기
-  상향(사이드바+폼 감안, main.ts BrowserWindow 옵션).
-- 프레임워크·라이브러리 추가 없음.
+- `<nav>`(좌, 고정폭 ~170px, `--panel-2` 배경) + 콘텐츠 영역(`--bg`). nav 버튼 클릭 →
+  해당 `<section>`만 표시(나머지 `hidden`). 기본 선택 Status.
+- **색깔 아이콘 타일**: nav 항목마다 22px 둥근 사각(radius 6) 타일+흰 글리프 —
+  Status=초록, Brain=하늘(#3aa5de), Coding=보라, Code repos=주황, Schedules=핑크,
+  Wiki sync=청록, Discord=#5865f2, Advanced=회색. 선택 줄은 악센트 채움+흰 글자.
+  아이콘은 인라인 SVG(외부 아이콘 폰트·라이브러리 금지 — 8개 글리프만 직접 삽입).
+- **검색(상시)**: 사이드바 최상단 검색 필드. 동작 = 섹션명 + 그 섹션의 설정 라벨
+  문자열(i18n `t` 기준, 현재 로케일)을 부분일치(대소문자 무시)로 매칭해 **일치하는
+  섹션만 사이드바에 표시**, 클릭 시 이동. 비우면 전체 복귀. 행 하이라이트는 비범위
+  (후속 신호). 검색 인덱스는 섹션 id→라벨 배열의 정적 매핑 하나(순수 데이터).
+- **그룹 인셋 리스트 문법(전 섹션 공통)**: 설정 = "줄" — 라벨 왼쪽·컨트롤/값 오른쪽
+  끝 정렬, 줄 사이 0.5px 헤어라인, 그룹 = 둥근(11px) 카드(`--panel`). 그룹 위 작은
+  머리글(12px muted), 그룹 아래 회색 캡션 설명문. 인라인 입력은 테두리 없이 오른쪽
+  정렬(포커스 시 기존 악센트 링). 목록형(경로·명령·별칭·예약)은 줄마다 왼쪽 빨간
+  ⊖ 제거 버튼 + 마지막 줄 "＋ Add…"(악센트 색).
+- **생존 신호 상주(시그니처)**: 사이드바 하단에 펄스 점+Running+가동시간 — 기존
+  Status 섹션의 pulse 스타일(beat keyframes·reduced-motion 대응) 재사용, 어느 섹션에
+  있든 항상 표시. 상태 데이터는 기존 `engram:status` 폴링 재사용.
+- 기존 섹션(Status·Brain·Coding·Discord·Advanced)은 이 문법으로 **재스킨**하되 동작
+  무변경. 창 크기 상향(사이드바+인셋 리스트 감안, main.ts BrowserWindow 옵션).
+- 폰트 = 기존(Segoe UI Variable·Cascadia Mono), 팔레트 = 기존(하늘 악센트·다크모드
+  자동). 프레임워크·외부 리소스 추가 없음.
 
 ### 3.3 Brain 편집 (brains-file.ts 확장)
 
@@ -65,9 +82,12 @@
   newKey가 이미 존재하면 no-op 반환 false(UI에서 이름 충돌 안내) — 조용한 덮어쓰기 금지.
 - 숫자 필드는 유한 양수만 채택(brain.config의 posIntEnv 결), 빈 입력 = 필드 제거(기본값
   복귀).
-- UI: 등록 목록 각 줄 Edit → 줄 아래 인라인 패널(목업 확정 모양, 2열 grid). Save 시
-  updateBrainProfile → 목록·드롭다운 갱신. Cancel로 닫기. Delete·추가·default
-  드롭다운은 기존 그대로.
+- UI(애플 문법): "Registered brains" 그룹 — 줄마다 타일 아이콘+이름/모델, 오른쪽에
+  default 체크마크 또는 체브론(›). 줄 클릭(또는 체브론) → 줄 아래로 인셋 편집 폼
+  펼침(라벨 왼쪽·입력 오른쪽 정렬, Editing ⌄ 표시) — Save/Cancel 줄로 닫음. 삭제·
+  이름변경은 펼친 폼 안(Delete는 default면 비활성). "Add" 그룹 — Ollama 모델 줄
+  (셀렉트+이름+Add)과 Anthropic API key 줄(기존 saveApiKey 재사용)을 같은 그룹으로
+  이사. Default brain 줄(셀렉트) 유지. 그룹 캡션: default 두뇌 설명 한 줄.
 
 ### 3.4 Coding 권한 상세 (permissions-file.ts 확장)
 
@@ -77,8 +97,10 @@
   'commands' 부분 갱신. commands는 빈 배열과 미지정(null=필드 삭제)을 구분 —
   빈 배열=전부 거부, 미지정=내장 기본. UI에는 "비우면 내장 기본목록 사용" 안내와
   "기본값으로 되돌리기" 버튼(=필드 삭제).
-- UI: 칩 + [+ Add] (경로는 Browse=pick-folder, 명령은 텍스트 입력). commands 영역엔
-  "Restricted 모드일 때만 적용" 힌트. writePaths 칩 비면 "자동모드(백스톱 밖 허용)" 힌트.
+- UI(애플 문법): writePaths·denyPaths·commands 각각 그룹 — 줄마다 ⊖ 제거 + 마지막
+  "＋ Add…" 줄(경로는 Browse=pick-folder, 명령은 인라인 텍스트 입력). 그룹 캡션:
+  commands="Restricted 모드일 때만 적용·비우면 내장 기본목록", writePaths 빈 상태=
+  "자동모드(백스톱 밖 허용)". commands 그룹에 "기본값으로 되돌리기" 줄(=필드 삭제).
 
 ### 3.5 Code repos (신규 desktop/coderepos-file.ts)
 
@@ -88,8 +110,8 @@
   `setSearchRoots(configDir, roots)` (부분 갱신, 나머지 보존).
 - alias 유효성: 빈 문자열 거부·trim. 경로는 존재 확인은 안 함(없는 경로 등록 허용 —
   resolveRepo가 어차피 매칭 실패로 처리, 서버 로직 무변경 원칙).
-- UI: 목업 확정 — 표(별칭·경로·Delete) + 추가 행(alias 입력·경로 입력·Browse·Add) +
-  searchRoots 칩.
+- UI(애플 문법): Aliases 그룹 — 줄마다 ⊖ + 별칭(mono)+경로(muted), "＋ Add…" 줄은
+  alias 입력+Browse+Add. Search roots 그룹 — 같은 ⊖/＋ 문법.
 
 ### 3.6 Schedules (신규 desktop/schedules-file.ts)
 
@@ -101,8 +123,8 @@
   "Restart to apply" 강조 표시. 서버 경유(ws 프레임)로 바꾸는 건 설정창-서버 채널
   신설이 필요해 이번 비범위(후속 신호 오면 그때). // ponytail: 낮은 확률 경합 수용,
   업그레이드 경로 = ws admin 프레임.
-- UI: 목업 확정 — 줄(cron mono·task·channelId·once 뱃지·Delete), 빈 목록 문구,
-  "새 예약은 채팅에서" 안내.
+- UI(애플 문법): 그룹 안 줄마다 ⊖ + cron(mono·악센트)+task+channelId/once(muted),
+  빈 목록 문구. 그룹 캡션: "새 예약은 채팅에서 — '매일 아침 9시에 브리핑해줘'".
 
 ### 3.7 Wiki sync (신규 desktop/wiki-remote-file.ts)
 
@@ -111,9 +133,9 @@
   폼 초기값용으로 부적합, 파일을 직접 읽어 기본값 채움: branch 'main'·interval 60).
 - `saveWikiRemote(configDir, cfg)`: wiki-remote.json 저장. remote 빈 문자열 허용
   (=동기화 끔). interval은 유한 양수만, 아니면 60.
-- UI: 목업 확정 — remote(비우면 로컬 전용 힌트)·branch·interval·Save·"인증은 git
-  표준(SSH/토큰)" 안내. ENGRAM_WIKI_REMOTE env가 파일보다 우선한다는 힌트 한 줄
-  (env 설정 시 폼 값이 무시될 수 있음).
+- UI(애플 문법): 그룹 하나 — Remote·Branch·Sync interval 줄(라벨 왼쪽·입력 오른쪽)+
+  Save 줄. 그룹 캡션: "비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) ·
+  ENGRAM_WIKI_REMOTE env가 설정되면 파일 값보다 우선".
 
 ### 3.8 IPC + preload
 
