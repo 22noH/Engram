@@ -43,14 +43,6 @@
     }
     .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
 
-    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 22px; }
-    header h1 {
-      margin: 0;
-      font: 600 20px/1 "Segoe UI Variable Display", "Segoe UI", "Malgun Gothic", sans-serif;
-      letter-spacing: 0.4px;
-    }
-    header .tagline { color: var(--muted); font-size: 12.5px; }
-
     /* 사이드바(애플 시스템 설정 스타일): 색 타일 아이콘 + 검색 + 상주 펄스 */
     #side { width: 170px; flex: none; background: var(--panel-2); border-right: 1px solid var(--line); padding: 14px 8px 10px; display: flex; flex-direction: column; }
     .side-head { padding: 0 10px 10px; }
@@ -285,7 +277,6 @@
     // 영어 기본, 시스템 언어가 한국어면 한국어 (메인 프로세스 트레이 메뉴와 같은 판정).
     const KO = navigator.language.toLowerCase().startsWith('ko');
     const t = KO ? {
-      tagline: '기억을 가진 팀 동료',
       tagline2: '설정', search: '검색',
       secStatus: '상태', secBrain: '두뇌', secAdvanced: '고급',
       secRepos: '코딩 프로젝트', secSched: '예약', secWiki: '위키 동기화',
@@ -318,7 +309,6 @@
       overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
       defaultLocked: '기본 두뇌는 먼저 다른 두뇌를 기본으로 지정한 뒤 삭제할 수 있어요',
     } : {
-      tagline: 'A teammate with memory',
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
       secRepos: 'Code repos', secSched: 'Schedules', secWiki: 'Wiki sync',
