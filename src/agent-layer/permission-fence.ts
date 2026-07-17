@@ -148,7 +148,8 @@ export class PermissionFence {
     const mode = this.cfg.allow.commandMode ?? 'auto';
     if (mode === 'auto') return;
     if (mode === 'off') throw new Error('셸이 비활성화됨(commandMode: off)');
-    if (/[&|;<>`]|\$\(/.test(command)) throw new Error(`allowlist 모드에선 셸 연산자 금지: ${command}`);
+    // 셸 연산자·개행 거부(단일 명령만). Bash 도구는 shell:true라 개행(\n)도 POSIX에선 명령 구분자 → 반드시 차단.
+    if (/[&|;<>`\r\n]|\$\(/.test(command)) throw new Error(`allowlist 모드에선 셸 연산자 금지: ${command}`);
     const exe = command.trim().split(/\s+/)[0];
     const base = exe.replace(/.*[\\/]/, '').replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase();
     const allow = (this.cfg.allow.commands ?? DEFAULT_COMMANDS).map((c) => c.toLowerCase());
@@ -156,5 +157,4 @@ export class PermissionFence {
       throw new Error(`허용되지 않은 명령: ${command} (permissions.json allow.commands에 "${base}" 추가 필요)`);
     }
   }
-
 }

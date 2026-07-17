@@ -176,8 +176,11 @@ describe('commandMode / assertCommandAllowed (Phase 8b-2)', () => {
     await fence.load();
     expect(() => fence.assertCommandAllowed('npm test')).not.toThrow(); // 기본목록에 npm
     expect(() => fence.assertCommandAllowed('curl http://x')).toThrow(); // 목록 밖
-    expect(() => fence.assertCommandAllowed('npm test && rm -rf /')).toThrow('연산자'); // 체이닝 금지
     expect(() => fence.assertCommandAllowed('msbuild.exe App.sln')).not.toThrow(); // .exe 정규화
+    // 체이닝/치환/개행 전부 거부(shell:true라 개행도 POSIX 명령 구분자).
+    for (const bad of ['npm test && x', 'npm test | x', 'npm test ; x', 'npm test > f', 'npm test `x`', 'npm test $(x)', 'npm test\ncurl evil']) {
+      expect(() => fence.assertCommandAllowed(bad)).toThrow('연산자');
+    }
   });
 
   it('allowlist + 사용자 지정 commands → 그것만', async () => {
