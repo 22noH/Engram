@@ -115,6 +115,8 @@ export function updateBrainProfile(configDir: string, key: string, patch: BrainP
   let raw: { default?: string; brains?: Record<string, Record<string, unknown>> };
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return false; }
   if (!raw || typeof raw !== 'object' || !raw.brains || typeof raw.brains !== 'object') return false;
+  // own property만 — raw.brains['__proto__']는 상속 접근자라 Object.prototype을 돌려줘 전역 오염됨.
+  if (!Object.prototype.hasOwnProperty.call(raw.brains, key)) return false;
   const profile = raw.brains[key];
   if (!profile || typeof profile !== 'object') return false;
 
@@ -140,7 +142,7 @@ export function updateBrainProfile(configDir: string, key: string, patch: BrainP
   setNum('maxTokens'); setNum('inputUsdPerMTok'); setNum('outputUsdPerMTok');
 
   if (newKey !== undefined && newKey !== key) {
-    if (!newKey.trim() || newKey in raw.brains) return false;
+    if (!newKey.trim() || Object.prototype.hasOwnProperty.call(raw.brains, newKey)) return false;
     Object.defineProperty(raw.brains, newKey, { value: profile, enumerable: true, writable: true, configurable: true });
     delete raw.brains[key];
     if (raw.default === key) raw.default = newKey;

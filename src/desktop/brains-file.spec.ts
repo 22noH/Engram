@@ -183,6 +183,18 @@ describe('updateBrainProfile', () => {
     expect(updateBrainProfile(tmp, 'qwen', {}, 'c')).toBe(false);
     expect(read().brains.qwen.model).toBe('qwen3:8b');
   });
+  it("key '__proto__'는 프로토타입 오염 없이 false (own property 아님)", () => {
+    seed();
+    expect(updateBrainProfile(tmp, '__proto__', { model: 'PWNED' })).toBe(false);
+    expect(({} as Record<string, unknown>).model).toBeUndefined();
+    expect(read().brains.q.model).toBe('qwen3:8b');
+  });
+  it("이름변경 newKey 'toString'은 상속 프로퍼티와 충돌로 오인하지 않는다", () => {
+    seed();
+    expect(updateBrainProfile(tmp, 'q', {}, 'toString')).toBe(true);
+    expect(read().brains.toString.model).toBe('qwen3:8b');
+    expect(read().default).toBe('toString');
+  });
   it('없는 key·없는/깨진 파일 → false·무변경', () => {
     expect(updateBrainProfile(tmp, 'ghost', {})).toBe(false);
     fs.writeFileSync(file(), '{깨진');
