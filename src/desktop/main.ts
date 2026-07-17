@@ -129,7 +129,9 @@ function openSettings(): void {
   }
   settingsWin = new BrowserWindow({
     width: 760,
-    height: 680,
+    height: 560,
+    minWidth: 640,
+    minHeight: 480,
     title: 'Engram 설정',
     icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     webPreferences: { preload: path.join(__dirname, 'preload.js') },

@@ -38,8 +38,8 @@
       background: var(--bg);
       color: var(--text);
       font: 14px/1.6 "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", sans-serif;
-      padding: 28px 32px 40px;
       -webkit-font-smoothing: antialiased;
+      display: flex; padding: 0; height: 100vh; overflow: hidden;
     }
     .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
 
@@ -51,21 +51,37 @@
     }
     header .tagline { color: var(--muted); font-size: 12.5px; }
 
-    section {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 18px 20px;
-      margin-bottom: 16px;
-    }
-    section h2 {
-      margin: 0 0 12px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 1.6px;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
+    /* 사이드바(애플 시스템 설정 스타일): 색 타일 아이콘 + 검색 + 상주 펄스 */
+    #side { width: 170px; flex: none; background: var(--panel-2); border-right: 1px solid var(--line); padding: 14px 8px 10px; display: flex; flex-direction: column; }
+    .side-head { padding: 0 10px 10px; }
+    .wordmark { font: 600 15px "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: .3px; display: block; }
+    .side-sub { font-size: 11px; color: var(--muted); }
+    #nav-search { width: 100%; font-size: 12px; padding: 5px 9px; border-radius: 7px; margin-bottom: 10px; }
+    #nav-items { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+    .nav-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; font-size: 13px; color: var(--text); width: 100%; }
+    .nav-item:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+    .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .nav-item.on { background: var(--accent); color: var(--accent-text); }
+    .tile { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+    .side-foot { margin-top: auto; padding: 8px 10px 0; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted); }
+    .side-foot .pulse { width: 8px; height: 8px; }
+    .side-foot #side-up { margin-left: auto; font-size: 10.5px; }
+    #content { flex: 1; overflow-y: auto; padding: 22px 26px; min-width: 0; }
+    #content > section { display: none; background: none; border: none; padding: 0; margin: 0 0 8px; }
+    #content > section.on { display: block; }
+    section h2 { font: 500 19px "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: .2px; text-transform: none; color: var(--text); margin: 0 0 14px; }
+    .grp-h { font-size: 12px; color: var(--muted); margin: 16px 14px 6px; }
+    .grp { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+    .li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+    .li + .li, .li + .li-form, .li-form + .li { border-top: 1px solid var(--line); }
+    .li .val { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .li .val input, .li .val select { border: none; background: transparent; text-align: right; padding: 3px 4px; }
+    .li .val input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+    .cap { font-size: 12px; color: var(--muted); margin: 6px 14px 0; line-height: 1.5; }
+    .minus { width: 17px; height: 17px; border-radius: 50%; background: var(--dead); color: #fff; border: none; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: pointer; font-size: 12px; line-height: 1; }
+    .add-row { color: var(--accent); cursor: pointer; }
+    .chev { color: var(--muted); opacity: .6; }
+
     .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
     /* hidden 속성이 .row(display:flex)에 눌리지 않도록 — author 규칙이 UA [hidden]을 이겨서 안 숨던 걸 고침. */
     [hidden] { display: none !important; }
@@ -138,15 +154,27 @@
     }
 
     .saved { color: var(--alive); font-size: 12.5px; }
-    @media (max-width: 560px) { body { padding: 18px; } input#token { width: 100%; } }
+    @media (max-width: 560px) { input#token { width: 100%; } }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Engram</h1>
-    <span class="tagline" data-t="tagline"></span>
-  </header>
+  <nav id="side">
+    <div class="side-head"><span class="wordmark">Engram</span><span class="side-sub" data-t="tagline2"></span></div>
+    <input id="nav-search" type="search" />
+    <div id="nav-items">
+      <button class="nav-item on" data-sec="sec-status"><span class="tile" style="background:#56d364"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg></span><span data-t="secStatus"></span></button>
+      <button class="nav-item" data-sec="sec-brain"><span class="tile" style="background:#3aa5de"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"/></svg></span><span data-t="secBrain"></span></button>
+      <button class="nav-item" data-sec="sec-coding"><span class="tile" style="background:#7f77dd"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 4-3.5 4L5 12M11 4l3.5 4L11 12"/></svg></span><span data-t="secCoding"></span></button>
+      <button class="nav-item" data-sec="sec-repos"><span class="tile" style="background:#ba7517"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 2h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10.5a1 1 0 0 1-1-1z"/></svg></span><span data-t="secRepos"></span></button>
+      <button class="nav-item" data-sec="sec-sched"><span class="tile" style="background:#d4537e"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></span><span data-t="secSched"></span></button>
+      <button class="nav-item" data-sec="sec-wiki"><span class="tile" style="background:#1d9e75"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 11.5a3 3 0 1 1 .4-5.97 4 4 0 0 1 7.6 1.2 2.5 2.5 0 0 1-.5 4.77z"/><path d="M8 13.5V9m0 0-1.8 1.8M8 9l1.8 1.8"/></svg></span><span data-t="secWiki"></span></button>
+      <button class="nav-item" data-sec="sec-messenger"><span class="tile" style="background:#5865f2"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5h12v8H6l-3 2.5v-2.5H2z"/></svg></span><span>Discord</span></button>
+      <button class="nav-item" data-sec="sec-advanced"><span class="tile" style="background:#888780"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h12M2 11h12"/><circle cx="6" cy="5" r="1.6" fill="#fff"/><circle cx="10" cy="11" r="1.6" fill="#fff"/></svg></span><span data-t="secAdvanced"></span></button>
+    </div>
+    <div class="side-foot"><span class="pulse" id="side-pulse"></span><span id="side-status"></span><span id="side-up" class="mono"></span></div>
+  </nav>
 
+  <main id="content">
   <section id="sec-status">
     <h2 data-t="secStatus"></h2>
     <div class="pulse-line">
@@ -210,6 +238,18 @@
     <div class="hint" data-t="cmdHint"></div>
   </section>
 
+  <section id="sec-repos">
+    <h2 data-t="secRepos"></h2>
+  </section>
+
+  <section id="sec-sched">
+    <h2 data-t="secSched"></h2>
+  </section>
+
+  <section id="sec-wiki">
+    <h2 data-t="secWiki"></h2>
+  </section>
+
   <section id="sec-messenger">
     <h2>Discord</h2>
     <div class="row">
@@ -229,6 +269,7 @@
     </div>
     <div class="hint" data-t="advancedHint"></div>
   </section>
+  </main>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -245,7 +286,9 @@
     const KO = navigator.language.toLowerCase().startsWith('ko');
     const t = KO ? {
       tagline: '기억을 가진 팀 동료',
+      tagline2: '설정', search: '검색',
       secStatus: '상태', secBrain: '두뇌', secAdvanced: '고급',
+      secRepos: '코딩 프로젝트', secSched: '예약', secWiki: '위키 동기화',
       checking: '확인 중…', running: '정상 동작 중', notResponding: '응답 없음', restarting: '재시작 중…',
       warnBadge: '재시작이 계속 실패하고 있어요 — 로그를 확인하세요',
       lastBeat: '마지막 생존 신호', embedModel: '임베딩 모델', dataFolder: '데이터 위치',
@@ -268,12 +311,17 @@
       defaultBrain: '기본 두뇌', harnessCli: 'CLI 하네스', harnessEngram: '엔그램 하네스',
       secCoding: '코딩', cmdMode: '명령 실행', cmdAuto: '자동', cmdAllow: '제한', cmdOff: '끔',
       cmdHint: '자동 = 아무 명령이나 실행(클로드코드처럼). 제한 = 승인 목록만. 끔 = 파일만, 명령 없음.',
+      writePaths: '쓰기 허용 경로', denyPaths: '거부 경로', cmdAllowlist: '명령 허용 목록',
+      aliases: '별칭', searchRoots: '검색 루트',
+      wikiRemote: '원격 주소', wikiBranch: '브랜치', wikiInterval: '동기화 주기(초)',
       namePlaceholder: '두뇌 이름', nameHint: '채팅에서 이 이름으로 부릅니다 — 예: "qwen3-8b한테 물어봐"',
       overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
       defaultLocked: '기본 두뇌는 먼저 다른 두뇌를 기본으로 지정한 뒤 삭제할 수 있어요',
     } : {
       tagline: 'A teammate with memory',
+      tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
+      secRepos: 'Code repos', secSched: 'Schedules', secWiki: 'Wiki sync',
       checking: 'Checking…', running: 'Running', notResponding: 'Not responding', restarting: 'Restarting…',
       warnBadge: 'Restarts keep failing — check the logs',
       lastBeat: 'Last heartbeat', embedModel: 'Embedding model', dataFolder: 'Data folder',
@@ -296,9 +344,40 @@
       defaultBrain: 'Default brain', harnessCli: 'CLI harness', harnessEngram: 'Engram harness',
       secCoding: 'Coding', cmdMode: 'Command execution', cmdAuto: 'Auto', cmdAllow: 'Restricted', cmdOff: 'Off',
       cmdHint: 'Auto = run any command (like Claude Code). Restricted = allowlist only. Off = files only, no commands.',
+      writePaths: 'Write paths', denyPaths: 'Deny paths', cmdAllowlist: 'Command allowlist',
+      aliases: 'Aliases', searchRoots: 'Search roots',
+      wikiRemote: 'Remote', wikiBranch: 'Branch', wikiInterval: 'Sync interval (sec)',
       namePlaceholder: 'Brain name', nameHint: 'This is how you call it in chat — e.g. "ask qwen3-8b"',
       overwrite: 'Overwrite', del: 'Delete', defaultBadge: 'default',
       defaultLocked: 'Set another brain as default first',
+    };
+
+    // 섹션 전환
+    function showSection(id) {
+      document.querySelectorAll('#content > section').forEach((s) => s.classList.toggle('on', s.id === id));
+      document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('on', b.dataset.sec === id));
+    }
+    document.querySelectorAll('.nav-item').forEach((b) => { b.onclick = () => showSection(b.dataset.sec); });
+    showSection('sec-status');
+
+    // 검색: 섹션명+설정 라벨 부분일치 → 일치 섹션만 표시
+    const SECTION_LABELS = {
+      'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
+      'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey],
+      'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist],
+      'sec-repos': [t.secRepos, t.aliases, t.searchRoots],
+      'sec-sched': [t.secSched, 'cron'],
+      'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval],
+      'sec-messenger': ['Discord', t.save],
+      'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
+    };
+    $('nav-search').placeholder = t.search;
+    $('nav-search').oninput = () => {
+      const q = $('nav-search').value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach((b) => {
+        const hit = !q || (SECTION_LABELS[b.dataset.sec] || []).some((l) => String(l).toLowerCase().includes(q));
+        b.hidden = !hit;
+      });
     };
 
     document.documentElement.lang = KO ? 'ko' : 'en';
@@ -345,6 +424,9 @@
       $('datadir').textContent = s.dataDir;
       const log = await window.engram.logTail();
       $('log').textContent = log || t.logEmpty;
+      $('side-pulse').classList.toggle('alive', s.alive);
+      $('side-status').textContent = s.alive ? t.running : t.notResponding;
+      $('side-up').textContent = s.lastBeat ? new Date(s.lastBeat).toLocaleTimeString() : '';
     }
 
     async function detect() {
