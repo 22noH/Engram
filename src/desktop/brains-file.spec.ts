@@ -22,6 +22,11 @@ describe('mergeBrainProfile', () => {
     expect(cfg.default).toBe('api');
   });
 
+  it("이름이 '__proto__'여도 조용히 유실되지 않고 own property로 저장", () => {
+    mergeBrainProfile(tmp, '__proto__', { provider: 'openai-api' });
+    expect(read().brains['__proto__']).toEqual({ provider: 'openai-api' });
+  });
+
   it('깨진 파일은 기본 골격으로 재작성', () => {
     fs.writeFileSync(path.join(tmp, 'brains.json'), '{{{');
     mergeBrainProfile(tmp, 'x', { provider: 'openai-api' });

@@ -15,7 +15,8 @@ export function mergeBrainProfile(configDir: string, name: string, profile: Reco
   } catch {
     // 없거나 깨짐 → 기본 골격
   }
-  cfg.brains[name] = profile;
+  // ponytail: defineProperty — '__proto__' 같은 이름도 own property로(브래킷 대입은 프로토타입을 건드려 조용히 유실).
+  Object.defineProperty(cfg.brains, name, { value: profile, enumerable: true, writable: true, configurable: true });
   if (setDefault) cfg.default = name;
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
