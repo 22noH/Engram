@@ -70,6 +70,12 @@
     /* hidden 속성이 .row(display:flex)에 눌리지 않도록 — author 규칙이 UA [hidden]을 이겨서 안 숨던 걸 고침. */
     [hidden] { display: none !important; }
     .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+    .brain-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; font-size: 13px; }
+    .brain-row .meta2 { color: var(--muted); font-size: 12px; }
+    .brain-row .badge { margin-left: auto; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 11px; padding: 2px 8px; border-radius: 20px; }
+    .brain-row button { padding: 4px 10px; font-size: 12px; }
+    .brain-row button:disabled { opacity: 0.4; cursor: default; }
+    .brain-row button:disabled:hover { border-color: var(--line); }
 
     /* signature: the heartbeat pulse */
     .pulse-line { display: flex; align-items: center; gap: 12px; }
@@ -173,14 +179,17 @@
     <div id="ollama" style="margin-top:10px"></div>
     <div class="row" id="ollama-add" hidden>
       <select id="ollama-model"></select>
+      <input id="ollama-name" class="mono" style="width:150px" />
       <label style="font-size:13px"><input type="checkbox" id="ollama-default" /> <span data-t="setDefault"></span></label>
       <button class="primary" id="btn-ollama" data-t="addBrain"></button>
     </div>
+    <div class="hint" id="ollama-name-hint" hidden></div>
     <div class="row" id="api-add" style="margin-top:14px">
       <input id="apikey" type="password" placeholder="sk-ant-…" />
       <label style="font-size:13px"><input type="checkbox" id="api-default" /> <span data-t="setDefault"></span></label>
       <button class="primary" id="btn-apikey" data-t="saveKey"></button>
     </div>
+    <div id="brain-list" style="margin-top:14px" hidden></div>
     <div class="row" id="default-brain-row" style="margin-top:14px" hidden>
       <label for="default-brain" style="font-size:13px" data-t="defaultBrain"></label>
       <select id="default-brain"></select>
@@ -224,6 +233,14 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
+    let nameDirty = false;
+    let brainKeys = [];
+    function updateAddButton() {
+      const name = $('ollama-name').value.trim();
+      $('btn-ollama').disabled = !name;
+      $('btn-ollama').textContent = brainKeys.includes(name) ? t.overwrite : t.addBrain;
+    }
+
     // 영어 기본, 시스템 언어가 한국어면 한국어 (메인 프로세스 트레이 메뉴와 같은 판정).
     const KO = navigator.language.toLowerCase().startsWith('ko');
     const t = KO ? {
@@ -251,6 +268,9 @@
       defaultBrain: '기본 두뇌', harnessCli: 'CLI 하네스', harnessEngram: '엔그램 하네스',
       secCoding: '코딩', cmdMode: '명령 실행', cmdAuto: '자동', cmdAllow: '제한', cmdOff: '끔',
       cmdHint: '자동 = 아무 명령이나 실행(클로드코드처럼). 제한 = 승인 목록만. 끔 = 파일만, 명령 없음.',
+      namePlaceholder: '두뇌 이름', nameHint: '채팅에서 이 이름으로 부릅니다 — 예: "qwen3-8b한테 물어봐"',
+      overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
+      defaultLocked: '기본 두뇌는 먼저 다른 두뇌를 기본으로 지정한 뒤 삭제할 수 있어요',
     } : {
       tagline: 'A teammate with memory',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -276,6 +296,9 @@
       defaultBrain: 'Default brain', harnessCli: 'CLI harness', harnessEngram: 'Engram harness',
       secCoding: 'Coding', cmdMode: 'Command execution', cmdAuto: 'Auto', cmdAllow: 'Restricted', cmdOff: 'Off',
       cmdHint: 'Auto = run any command (like Claude Code). Restricted = allowlist only. Off = files only, no commands.',
+      namePlaceholder: 'Brain name', nameHint: 'This is how you call it in chat — e.g. "ask qwen3-8b"',
+      overwrite: 'Overwrite', del: 'Delete', defaultBadge: 'default',
+      defaultLocked: 'Set another brain as default first',
     };
 
     document.documentElement.lang = KO ? 'ko' : 'en';
@@ -355,10 +378,18 @@
           opt.textContent = m;
           sel.appendChild(opt);
         }
+        $('ollama-name').placeholder = t.namePlaceholder;
+        if (o.models.length && !nameDirty) {
+          $('ollama-name').value = await window.engram.slugModel(sel.value);
+        }
+        $('ollama-name-hint').textContent = t.nameHint;
+        $('ollama-name-hint').hidden = o.models.length === 0;
+        updateAddButton();
         $('ollama-add').hidden = o.models.length === 0;
       } else {
         setLine($('ollama'), [t.ollamaMissing]);
         $('ollama-add').hidden = true;
+        $('ollama-name-hint').hidden = true;
       }
     }
 
@@ -368,9 +399,18 @@
       setTimeout(refresh, 2000);
     };
     $('btn-refresh').onclick = refresh;
+    $('ollama-name').oninput = () => { nameDirty = true; updateAddButton(); };
+    $('ollama-model').onchange = async () => {
+      if (!nameDirty) $('ollama-name').value = await window.engram.slugModel($('ollama-model').value);
+      updateAddButton();
+    };
     $('btn-ollama').onclick = async () => {
-      await window.engram.addOllama($('ollama-model').value, $('ollama-default').checked);
+      const name = $('ollama-name').value.trim();
+      if (!name) return;
+      await window.engram.addOllama($('ollama-model').value, name, $('ollama-default').checked);
       setLine($('ollama'), [{ cls: 'ok', text: t.added }]);
+      nameDirty = false;
+      await loadBrains();
     };
     $('btn-token').onclick = async () => {
       const v = $('token').value.trim();
@@ -404,8 +444,41 @@
       addGroup(t.harnessCli, cli);
       addGroup(t.harnessEngram, engram);
       $('default-brain-row').hidden = brains.length === 0;
+
+      brainKeys = brains.map((b) => b.key);
+      const list = $('brain-list');
+      list.textContent = '';
+      for (const b of brains) {
+        const row = document.createElement('div');
+        row.className = 'brain-row';
+        const name = document.createElement('span');
+        name.className = 'mono';
+        name.textContent = b.key;
+        const meta = document.createElement('span');
+        meta.className = 'meta2';
+        meta.textContent = b.model ? `${b.provider} · ${b.model}` : b.provider;
+        row.append(name, meta);
+        if (b.isDefault) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = t.defaultBadge;
+          row.appendChild(badge);
+        }
+        const del = document.createElement('button');
+        del.textContent = t.del;
+        if (!b.isDefault) del.style.marginLeft = 'auto';
+        if (b.isDefault) { del.disabled = true; del.title = t.defaultLocked; }
+        else del.onclick = async () => { await window.engram.removeBrain(b.key); await loadBrains(); };
+        row.appendChild(del);
+        list.appendChild(row);
+      }
+      list.hidden = brains.length === 0;
+      updateAddButton();
     }
-    $('default-brain').onchange = async () => { await window.engram.setDefaultBrain($('default-brain').value); };
+    $('default-brain').onchange = async () => {
+      await window.engram.setDefaultBrain($('default-brain').value);
+      await loadBrains();
+    };
 
     async function loadCmdMode() { $('cmd-mode').value = await window.engram.getCommandMode(); }
     $('cmd-mode').onchange = async () => { await window.engram.setCommandMode($('cmd-mode').value); };
