@@ -25,8 +25,10 @@
 - `PermissionFence`에 `commandMode`(auto/allowlist/off) + `assertCommandAllowed`(auto면 통과). opt-in allowlist용 `commands`(내장 기본목록 있음).
 - `CompleteOpts.cmdGuard` 주입 필드. coding 루프가 `cmdGuard` 있을 때만 `Bash` 노출(=`off`면 미노출).
 - `CodingSpecialist`가 `codeGuard`와 함께 `cmdGuard`도 전달(모드 `off`가 아니면).
+- **설정창 UI**(§9): 코딩 명령 모드 토글(자동/제한/끔) + 기본 두뇌(하네스) 드롭다운 + 낡은 "코딩 CLI 필요" 문구 수정.
 
 **비포함**
+- **설정 전면 UI화**(권한 상세·coderepos·schedules·wiki-remote·두뇌 세부 등 나머지 config) → **별도 페이즈**("설정 전면 UI화"). 8b-2는 자기 설정(셸)+두뇌 드롭다운만.
 - 네트워크 하드 차단·OS 샌드박스(AppContainer/컨테이너/VM) → full-C, 후속.
 - Job Object 자원상한(메모리/CPU) → 네이티브, 후속.
 - 사람 승인 경로(명령을 "승인함"에 쌓기) → 대화형 코딩 UI 필요, 후속.
@@ -183,7 +185,28 @@ const executor = coding
 - `Orchestrator` — 코딩 재시도 루프. 무변경.
 - CLI 두뇌 3종 — 무변경.
 
-## 9. 테스트 전략
+## 9. UI 설정 (설정창)
+
+`src/desktop/settings.html` + 데스크톱 메인 IPC/preload에 추가. 적용은 기존 방식대로 **설정 파일 쓰기 → 재시작**(설정창의 "재시작" 버튼). "설정 전면 UI화"의 나머지는 별도 페이즈 — 여기선 8b-2 자기 설정(셸) + 이왕 UI 손대는 김에 반쪽이던 기본 두뇌 선택만.
+
+### 9.1 코딩 명령 모드 (신규)
+"코딩" 섹션에 세그먼트 **자동 / 제한 / 끔** → `permissions.json`의 `allow.commandMode` 쓰기(기본 자동).
+- IPC/preload: `getCommandMode()`(현재 모드) · `setCommandMode(mode)`(파일 부분 갱신).
+- i18n(ko/en). 힌트: 자동=아무 명령이나(클로드코드처럼)·제한=승인 목록만·끔=파일만.
+
+### 9.2 기본 두뇌(하네스) 드롭다운 (신규 — 반쪽 완성)
+"두뇌" 섹션에 드롭다운. `brains.json`의 모든 두뇌를 **하네스별(CLI 하네스 / 엔그램 하네스)로 묶어** 표시, 현재 `default` 표시, 선택 시 `default` 필드 쓰기.
+- IPC/preload: `listBrains()`(→ `[{ key, provider, model, isDefault }]`) · `setDefaultBrain(key)`.
+- 하네스 라벨: `*-cli` → "CLI 하네스", `anthropic-api`/`openai-api` → "엔그램 하네스". 각 항목에 "누가 코딩하나"(claude CLI냐 엔그램이냐) 부기.
+- 기존 "추가 시 기본으로" 체크박스는 유지(중복 아님 — 추가 흐름 vs 전환 흐름).
+
+### 9.3 낡은 문구 수정 (버그)
+`settings.html`의 `apiKeyNote`(ko·en 둘 다): "코딩 기능은 아직 CLI 두뇌가 필요…(Phase 8b)" → 8b-1 반영으로 갱신("엔그램 하네스 두뇌도 코딩 가능; 하네스는 기본 두뇌 선택으로").
+
+### 9.4 검증
+설정창은 Electron 메인 HTML이라 단위 테스트 대상 아님. **파일 읽기/쓰기 로직은 순수 함수로 분리해 유닛 테스트**(brains.json `default` 갱신·`permissions.json` `commandMode` 부분 갱신·listBrains 파싱). UI 자체는 수동 스모크(실 Electron).
+
+## 10. 테스트 전략
 
 실 위험 명령 금지. 크로스플랫폼 안전 명령만(예: `node -e "..."`).
 
@@ -200,7 +223,7 @@ const executor = coding
 - **API 두뇌 Bash 경로**(anthropic·openai 각): `fetchFn` 주입 SSE로 Bash tool_use + auto `cmdGuard` 스텁 + 안전 명령 → 실행·되먹임. `cmdGuard` 없으면(off) Bash 미노출. 채팅 회귀 0.
 - **CodingSpecialist**: shellEnabled=true면 cmdGuard 주입, false면 미주입(스텁 fence로 opts 캡처).
 
-## 10. 불변식
+## 11. 불변식
 
 1. **기본 auto** — 기본값에선 두뇌가 아무 명령이나 실행(Claude Code 자동모드 parity). 제한은 opt-in.
 2. **타임아웃 관통** — 하나의 AbortController가 모델 호출과 명령 실행까지 커버, 초과 시 트리 강제종료.
@@ -210,7 +233,7 @@ const executor = coding
 6. **게이트 불신 유지** — 최종 검증은 VerificationGate가 직접(Bash는 두뇌 보조용).
 7. **되돌림은 git** — 주 안전망은 CodingGit 격리 브랜치(무변경 재사용).
 
-## 11. 비범위 (후속)
+## 12. 비범위 (후속)
 
 - **네트워크 하드 차단·OS 샌드박스**(AppContainer/컨테이너/VM) = full-C. untrusted 코드 격리 실행 시.
 - **Job Object 자원상한**(메모리/CPU).
