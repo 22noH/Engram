@@ -155,3 +155,35 @@ describe('assertCodingWrite (API 코딩 쓰기 판정)', () => {
     } finally { fs.rmSync(proj, { recursive: true, force: true }); }
   });
 });
+
+describe('commandMode / assertCommandAllowed (Phase 8b-2)', () => {
+  it('기본(미지정) = auto → 아무 명령이나 통과 + shellEnabled true', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } }));
+    await fence.load();
+    expect(fence.shellEnabled()).toBe(true);
+    expect(() => fence.assertCommandAllowed('rm -rf /')).not.toThrow(); // auto=제한 안 함
+  });
+
+  it('off → shellEnabled false + assertCommandAllowed throw', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'off' } }));
+    await fence.load();
+    expect(fence.shellEnabled()).toBe(false);
+    expect(() => fence.assertCommandAllowed('npm test')).toThrow();
+  });
+
+  it('allowlist → 기본목록 통과·목록 밖 throw·연산자 throw', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'allowlist' } }));
+    await fence.load();
+    expect(() => fence.assertCommandAllowed('npm test')).not.toThrow(); // 기본목록에 npm
+    expect(() => fence.assertCommandAllowed('curl http://x')).toThrow(); // 목록 밖
+    expect(() => fence.assertCommandAllowed('npm test && rm -rf /')).toThrow('연산자'); // 체이닝 금지
+    expect(() => fence.assertCommandAllowed('msbuild.exe App.sln')).not.toThrow(); // .exe 정규화
+  });
+
+  it('allowlist + 사용자 지정 commands → 그것만', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'allowlist', commands: ['pytest'] } }));
+    await fence.load();
+    expect(() => fence.assertCommandAllowed('pytest -q')).not.toThrow();
+    expect(() => fence.assertCommandAllowed('npm test')).toThrow(); // 지정 목록에 npm 없음
+  });
+});

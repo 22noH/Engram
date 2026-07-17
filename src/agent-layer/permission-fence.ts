@@ -5,10 +5,22 @@ import { Persona } from './persona-registry';
 
 export interface FenceConfig {
   default: 'deny';
-  allow: { tools: Record<string, string[]>; writePaths: string[]; denyPaths: string[] };
+  allow: {
+    tools: Record<string, string[]>;
+    writePaths: string[];
+    denyPaths: string[];
+    commandMode?: 'auto' | 'allowlist' | 'off'; // Phase 8b-2: 기본 auto
+    commands?: string[];                         // allowlist 모드용(없으면 DEFAULT_COMMANDS)
+  };
 }
 
 const EMPTY = (): FenceConfig => ({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } });
+
+// allowlist 모드에서 쓰는 내장 기본 허용목록(사용자가 allow.commands 지정 안 하면 이걸 씀).
+export const DEFAULT_COMMANDS = [
+  'npm', 'pnpm', 'yarn', 'npx', 'node', 'deno', 'bun', 'python', 'python3', 'pytest', 'go', 'cargo', 'rustc',
+  'dotnet', 'msbuild', 'cmake', 'make', 'nmake', 'qmake', 'tsc', 'jest', 'vitest', 'eslint', 'prettier', 'gradle', 'mvn',
+];
 
 // 시스템 디렉터리(설정·writePaths 무관 항상 거부 백스톱). env에서 실제 경로를 해소하고
 // (다른 드라이브·로캘 대비) 하드코딩 폴백을 더한다. isWithin이 슬래시/대소문자 정규화하므로 백슬래시 값도 OK.
@@ -123,6 +135,25 @@ export class PermissionFence {
       !projectWritePaths.some((w) => PermissionFence.isWithin(targetPath, w))
     ) {
       throw new Error(`프로젝트 쓰기 스코프 밖: ${targetPath}`);
+    }
+  }
+
+  // 셸 켜짐 여부(off면 Bash 도구 미노출). CodingSpecialist가 cmdGuard 주입 판단에 사용.
+  shellEnabled(): boolean {
+    return (this.cfg.allow.commandMode ?? 'auto') !== 'off';
+  }
+
+  // 명령 판정(스펙 §6.3). auto=무조건 통과, off=거부, allowlist=연산자 거부+실행파일 목록 검사.
+  assertCommandAllowed(command: string): void {
+    const mode = this.cfg.allow.commandMode ?? 'auto';
+    if (mode === 'auto') return;
+    if (mode === 'off') throw new Error('셸이 비활성화됨(commandMode: off)');
+    if (/[&|;<>`]|\$\(/.test(command)) throw new Error(`allowlist 모드에선 셸 연산자 금지: ${command}`);
+    const exe = command.trim().split(/\s+/)[0];
+    const base = exe.replace(/.*[\\/]/, '').replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase();
+    const allow = (this.cfg.allow.commands ?? DEFAULT_COMMANDS).map((c) => c.toLowerCase());
+    if (!allow.includes(base)) {
+      throw new Error(`허용되지 않은 명령: ${command} (permissions.json allow.commands에 "${base}" 추가 필요)`);
     }
   }
 
