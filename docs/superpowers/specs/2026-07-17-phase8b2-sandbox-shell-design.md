@@ -18,7 +18,7 @@
 
 **포함(8b-2)**
 - 새 `Run` 도구(coding 모드): `{ command, args? }`를 `shell:false`로 cwd에서 실행, 타임아웃 트리종료·출력상한·never-throw.
-- `PermissionFence`에 명령 허용목록(기본 거부) + `assertCommandAllowed`.
+- `PermissionFence`에 명령 허용목록(내장 curated 기본값 — 미지정 시 자동 적용) + `assertCommandAllowed`.
 - `CompleteOpts.cmdGuard` 주입 필드. API 두뇌 coding 루프가 `cmdGuard` 있을 때만 `Run` 도구 노출.
 - `CodingSpecialist`가 `codeGuard`와 함께 `cmdGuard`도 전달.
 
@@ -48,7 +48,10 @@ shell-tool.ts (src/brain, 신규): 프로세스 spawn(shell:false)·타임아웃
 
 ## 5. 안전 모델
 
-- **기본 거부 허용목록**: `Run`의 `command`(실행파일)가 fence 허용목록에 없으면 거부(에러 텍스트로 되먹임). config 비면 전부 거부(안전 기본). 허용목록은 사람이 permissions.json에 넣는다(예: `npm`·`pnpm`·`yarn`·`node`·`pytest`·`go`·`cargo`·`tsc`). `curl`·`wget`·`git` 등은 기본 미포함(사용자가 원하면 추가).
+- **허용목록(내장 기본값으로 바로 사용 가능)**: `Run`의 `command`(실행파일)가 허용목록에 없으면 거부(에러 텍스트로 되먹임). ★사용자가 `permissions.json`에 `allow.commands`를 **지정하지 않으면 내장 curated 기본목록**을 쓴다 — 설치 직후 손 안 대도 흔한 빌드/테스트 도구가 동작(빈 목록부터 시작=아무도 안 쓰는 문제 회피). 사용자가 `allow.commands`를 명시하면(추가·삭제·`[]`) 그게 대체한다.
+  - **내장 기본목록**(`DEFAULT_COMMANDS`): `npm` `pnpm` `yarn` `npx` `node` `deno` `bun` `python` `python3` `pytest` `go` `cargo` `rustc` `dotnet` `msbuild` `cmake` `make` `nmake` `qmake` `tsc` `jest` `vitest` `eslint` `prettier` `gradle` `mvn` — JS·Python·Go·Rust·.NET·C++/Qt·Java 커버.
+  - **의도적으로 뺀 것**(사용자가 원하면 명시 추가): 범용 셸(`cmd`·`powershell`·`pwsh`·`bash`·`sh`·`zsh`), 네트워크(`curl`·`wget`·`ssh`·`scp`·`nc`), 파괴(`rm`·`del`·`rmdir`·`rd`·`format`), 시스템(`reg`·`netsh`·`sc`·`schtasks`·`wmic`), 승격(`runas`).
+- **명단은 철벽이 아니라 한 겹**: `node`·`python` 같은 범용 인터프리터가 기본에 있어 두뇌가 스크립트를 짜 실행할 수 있다(코딩엔 필요). 진짜 되돌림은 **git 브랜치 격리**(아래)가, 주입 차단은 **셸 없음**이, 폭주 차단은 **타임아웃**이 맡는다. 허용목록의 역할 = 대놓고 위험한 툴·오타 차단 + 조이고 싶을 때의 잠금 레버.
 - **셸 없음(구조적 주입 차단)**: `spawn(command, args, { shell: false, cwd })`. 셸 미개입 → `&&`/`|`/리다이렉트 불가. `command`에 공백·연산자를 욱여넣어도 그런 이름의 실행파일이 없어 실패(무해).
 - **타임아웃 트리 강제종료**: 명령별 타임아웃(상수, 기본 120s) + 루프의 `AbortSignal`. 둘 중 먼저 발동 시 **프로세스 트리 전체**를 죽인다(Win=`taskkill /T /F /PID`, POSIX=프로세스그룹 kill). → 폭주·행 방지. 8a 교훈대로 도구 실행이 루프 타임아웃을 무시하지 않는다.
 - **출력 상한**: stdout+stderr 합쳐 마지막 N자(예: 20k)만 반환(컨텍스트 폭발 방지). 종료코드도 함께.
@@ -107,13 +110,22 @@ export interface CompleteOpts {
 
 ### 6.3 `PermissionFence` 추가 (`permission-fence.ts`)
 
-`FenceConfig.allow`에 `commands: string[]` 추가(기본 `[]`). `EMPTY()`도 `commands: []`.
+`FenceConfig.allow`에 `commands?: string[]` 추가(**옵셔널** — 없으면 내장 기본목록 사용). `EMPTY()`는 `commands`를 넣지 않는다(undefined → 기본목록).
 
 ```ts
-// 명령 실행 허용 판정(기본 거부). command의 실행파일 이름(basename, 확장자 무시)이 허용목록에 있어야 함.
+// 내장 curated 기본 허용목록 — 사용자가 allow.commands를 지정 안 하면 이걸 쓴다(설치 직후 바로 동작).
+export const DEFAULT_COMMANDS = [
+  'npm', 'pnpm', 'yarn', 'npx', 'node', 'deno', 'bun',
+  'python', 'python3', 'pytest', 'go', 'cargo', 'rustc',
+  'dotnet', 'msbuild', 'cmake', 'make', 'nmake', 'qmake',
+  'tsc', 'jest', 'vitest', 'eslint', 'prettier', 'gradle', 'mvn',
+];
+
+// 명령 실행 허용 판정. command의 실행파일 이름(basename, 확장자 무시)이 허용목록에 있어야 함.
+// allow.commands 미지정(undefined) → DEFAULT_COMMANDS. 명시 []  → 전부 거부(사용자가 잠금). 명시 목록 → 그것만.
 assertCommandAllowed(command: string): void {
   const exe = path.basename(command).replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase();
-  const allow = (this.cfg.allow.commands ?? []).map((c) => c.toLowerCase());
+  const allow = (this.cfg.allow.commands ?? DEFAULT_COMMANDS).map((c) => c.toLowerCase());
   if (!allow.includes(exe)) {
     throw new Error(`허용되지 않은 명령: ${command} (permissions.json allow.commands에 "${exe}" 추가 필요)`);
   }
@@ -172,13 +184,13 @@ const executor = coding
   - 오염 인자(command 누락·args 비배열) → 에러 텍스트.
   - 셸 없음 확인: `command`에 `"node -e x && whatever"` 통짜 → 그런 실행파일 없어 spawn 실패(체이닝 안 됨).
   - 출력 상한: 큰 출력 → 마지막 N자만.
-- **PermissionFence.assertCommandAllowed**: 허용목록 안 통과·밖 throw·빈 목록 전부 throw·basename/확장자 정규화(`npm.cmd`→`npm`).
+- **PermissionFence.assertCommandAllowed**: allow.commands 미지정 → 기본목록 통과(`npm` 등)·기본목록 밖(`curl`) throw·명시 `[]` → 전부 throw(잠금)·명시 목록 → 그것만·basename/확장자 정규화(`msbuild.exe`→`msbuild`, `npm.cmd`→`npm`).
 - **API 두뇌 Run 경로**(anthropic·openai 각): `fetchFn` 주입 SSE로 Run tool_use 흘림 + `cmdGuard` 스텁 + 안전 명령 → 실제 실행되고 결과 되먹임. `cmdGuard` 없으면 Run 미노출(도구목록에 파일도구만). 채팅 회귀 0.
 - **CodingSpecialist**: complete에 `cmdGuard`가 `codeGuard`와 함께 넘어가는지(스텁 두뇌 opts 캡처).
 
 ## 10. 불변식
 
-1. **기본 거부** — 허용목록에 없는 명령은 안 돈다(config 비면 전부 거부).
+1. **허용목록 게이트** — 목록에 없는 명령은 안 돈다(미지정 시 내장 curated 기본값, 명시 `[]` 시 전부 거부).
 2. **셸 없음** — 파이프/리다이렉트/체이닝 구조적 불가(shell:false + 구조적 입력).
 3. **타임아웃 관통** — 하나의 AbortController가 모델 호출과 명령 실행까지 커버, 초과 시 트리 강제종료.
 4. **never-throw** — 명령 실행은 어떤 입력·실패에도 예외 대신 텍스트 반환.
