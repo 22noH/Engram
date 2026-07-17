@@ -9,8 +9,12 @@ import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
-import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel } from './brains-file';
-import { getCommandMode, setCommandMode } from './permissions-file';
+import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
+import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList } from './permissions-file';
+import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
+import { listSchedules, removeScheduleFromFile } from './schedules-file';
+import { readWikiRemoteFile, saveWikiRemote, WikiRemoteForm } from './wiki-remote-file';
+import { loadCodeRepos } from '../agent-layer/coderepos';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
 import { resolveLanguage } from '../agent-layer/language';
@@ -236,6 +240,21 @@ function registerIpc(): void {
   ipcMain.handle('engram:set-default-brain', (_e, key: string) => { setDefaultBrain(configDir, key); });
   ipcMain.handle('engram:remove-brain', (_e, key: string) => { removeBrainProfile(configDir, key); });
   ipcMain.handle('engram:slug-model', (_e, model: string) => slugFromModel(model));
+  ipcMain.handle('engram:list-brain-details', () => listBrainDetails(configDir));
+  ipcMain.handle('engram:update-brain-profile', (_e, key: string, patch: BrainPatch, newKey?: string) =>
+    updateBrainProfile(configDir, key, patch, newKey));
+  ipcMain.handle('engram:get-permission-details', () => getPermissionDetails(configDir));
+  ipcMain.handle('engram:set-permission-list', (_e, field: 'writePaths' | 'denyPaths' | 'commands', values: string[] | null) => {
+    setPermissionList(configDir, field, values);
+  });
+  ipcMain.handle('engram:get-coderepos', () => loadCodeRepos(configDir));
+  ipcMain.handle('engram:set-code-alias', (_e, alias: string, targetPath: string) => setAlias(configDir, alias, targetPath));
+  ipcMain.handle('engram:remove-code-alias', (_e, alias: string) => { removeAlias(configDir, alias); });
+  ipcMain.handle('engram:set-search-roots', (_e, roots: string[]) => { setSearchRoots(configDir, roots); });
+  ipcMain.handle('engram:list-schedules', () => listSchedules(configDir));
+  ipcMain.handle('engram:remove-schedule', (_e, id: string) => removeScheduleFromFile(configDir, id));
+  ipcMain.handle('engram:get-wiki-remote', () => readWikiRemoteFile(configDir));
+  ipcMain.handle('engram:set-wiki-remote', (_e, cfg: WikiRemoteForm) => { saveWikiRemote(configDir, cfg); });
   ipcMain.handle('engram:get-command-mode', () => getCommandMode(configDir));
   ipcMain.handle('engram:set-command-mode', (_e, mode: string) => { setCommandMode(configDir, mode as 'auto' | 'allowlist' | 'off'); });
   ipcMain.handle('engram:open-path', (_e, which: string) => {
