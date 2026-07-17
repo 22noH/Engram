@@ -2,7 +2,7 @@ import { CodingSpecialist, CODING_RULES_DEFAULT } from './coding-specialist';
 
 describe('CodingSpecialist', () => {
   const registry = { get: (n: string) => n === 'Dev' ? { name: 'Dev', brain: 'claude', tools: ['Bash','Edit','Write'], prompt: 'You code.' } : undefined } as any;
-  const fence = { codingAutoFlags: () => ['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj'] } as any;
+  const fence = { codingAutoFlags: () => ['--allowedTools', 'Bash,Edit,Write', '--add-dir', 'C:/proj'], shellEnabled: () => false } as any;
   const project = { targetPath: 'C:/proj', writePaths: ['C:/proj'] } as any;
   const logger = { warn() {}, log() {} } as any;
 
@@ -46,7 +46,7 @@ describe('CodingSpecialist', () => {
     let captured = '';
     const brain2 = { complete: async (p: string) => { captured = p; return { text: 'x', costUsd: 0 }; } };
     const registry2 = { get: () => ({ prompt: 'PERSONA', brain: 'claude' }) };
-    const fence2 = { codingAutoFlags: () => [] };
+    const fence2 = { codingAutoFlags: () => [], shellEnabled: () => false };
     const resolveBrain2 = () => brain2;
     const cs = new CodingSpecialist(registry2 as any, fence2 as any, resolveBrain2 as any, { error(){} } as any);
     await cs.work('Coder', { id: 't', area: 'a', instruction: 'do' } as any, { targetPath: 'C:/x', writePaths: [] } as any);
@@ -59,6 +59,7 @@ describe('CodingSpecialist', () => {
     const fence2 = {
       codingAutoFlags: () => ['--allowedTools', 'Edit', '--add-dir', 'C:/proj'],
       assertCodingWrite: (target: string, scope: string[]) => { calls.push({ target, scope }); },
+      shellEnabled: () => false,
     } as any;
     const captured: any = {};
     const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
@@ -69,5 +70,31 @@ describe('CodingSpecialist', () => {
     expect(captured.opts.extraArgs).toContain('--allowedTools'); // CLI용도 그대로
     captured.opts.codeGuard('C:/proj/a.ts'); // 호출 시 fence.assertCodingWrite로 위임
     expect(calls).toEqual([{ target: 'C:/proj/a.ts', scope: ['C:/proj'] }]);
+  });
+
+  it('shellEnabled면 cmdGuard(=fence.assertCommandAllowed)도 전달', async () => {
+    const calls: string[] = [];
+    const fence2 = {
+      codingAutoFlags: () => ['--allowedTools', 'Edit'],
+      assertCodingWrite: () => {},
+      shellEnabled: () => true,
+      assertCommandAllowed: (cmd: string) => { calls.push(cmd); },
+    } as any;
+    const captured: any = {};
+    const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+    const spec = new CodingSpecialist(registry, fence2, () => brain as any, logger);
+    await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }, project);
+    expect(typeof captured.opts.cmdGuard).toBe('function');
+    captured.opts.cmdGuard('npm test');
+    expect(calls).toEqual(['npm test']);
+  });
+
+  it('shellEnabled=false면 cmdGuard 미전달(off)', async () => {
+    const fence2 = { codingAutoFlags: () => [], assertCodingWrite: () => {}, shellEnabled: () => false, assertCommandAllowed: () => {} } as any;
+    const captured: any = {};
+    const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+    const spec = new CodingSpecialist(registry, fence2, () => brain as any, logger);
+    await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }, project);
+    expect(captured.opts.cmdGuard).toBeUndefined();
   });
 });

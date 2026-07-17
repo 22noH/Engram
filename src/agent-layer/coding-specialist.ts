@@ -48,6 +48,8 @@ export class CodingSpecialist {
       cwd: project.targetPath,
       extraArgs: flags, // CLI 두뇌용(무변경)
       codeGuard: (p) => this.fence.assertCodingWrite(p, project.writePaths), // API 두뇌용(Phase 8b-1)
+      // 셸 켜짐(off 아님)일 때만 주입 → off면 Bash 도구 미노출. auto/allowlist는 assertCommandAllowed가 판정.
+      ...(this.fence.shellEnabled() ? { cmdGuard: (cmd: string) => this.fence.assertCommandAllowed(cmd) } : {}),
     });
     if (r.isError) throw new Error(`코딩 두뇌 호출 실패: ${personaName}/${ticket.id}`);
     return r.text;
