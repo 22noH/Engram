@@ -36,10 +36,17 @@ export function runShellTool(input: unknown, cwd: string, guard: CommandGuard, s
   try { guard(arg.command); } catch (e) { return Promise.resolve(`Bash blocked: ${String(e)}`); }
 
   return new Promise<string>((resolve) => {
-    const child = spawn(arg.command as string, [], {
-      cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32', // POSIX: 자기 프로세스그룹 → -pid로 트리 kill
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(arg.command as string, [], {
+        cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32', // POSIX: 자기 프로세스그룹 → -pid로 트리 kill
+      });
+    } catch (e) {
+      // spawn()은 동기 throw 가능(예: 명령 과다 길이 → Windows ENAMETOOLONG). never-throw 유지 위해 여기서 흡수.
+      resolve(`Bash error: ${String(e)}`);
+      return;
+    }
     let out = '';
     let done = false;
     const finish = (text: string): void => {

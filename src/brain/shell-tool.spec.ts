@@ -49,4 +49,11 @@ describe('runShellTool (never-throw)', () => {
     const r = await p;
     expect(r).toContain('[timeout]');
   });
+
+  // spawn() 자체가 동기 throw 가능(예: 명령이 너무 길면 Windows ENAMETOOLONG) — Promise executor 안에서
+  // 잡지 않으면 반환 Promise가 reject되어 never-throw 계약이 깨진다. 회귀 고정.
+  it('spawn 동기 throw(예: 매우 긴 명령) → reject 대신 에러 텍스트', async () => {
+    const hugeCommand = `node -e "1" ` + '#'.repeat(60_000);
+    await expect(runShellTool({ command: hugeCommand }, cwd, allow, NO_ABORT)).resolves.toContain('Bash error');
+  });
 });
