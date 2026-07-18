@@ -1,4 +1,5 @@
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
 import { McpDeps, buildMcpServer } from './engram-mcp';
 
@@ -318,5 +319,46 @@ describe('buildMcpServer', () => {
     const writeDef = defs.find((d) => d.name === T('wiki_write'));
     expect(writeDef?.description?.toLowerCase()).toMatch(/no.*approval|no human approval|without approval/);
     await s.close();
+  });
+});
+
+describe('prompts (슬래시 명령 노출)', () => {
+  async function rawClient(deps: McpDeps): Promise<Client> {
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: 'test', version: '1.0.0' });
+    await c.connect(clientT);
+    return c;
+  }
+
+  it('proposals 미주입 → wiki-search·wiki-save만(승인 계열 제외)', async () => {
+    const c = await rawClient(makeDeps());
+    const { prompts } = await c.listPrompts();
+    expect(prompts.map((p) => p.name).sort()).toEqual(['wiki-save', 'wiki-search']);
+    await c.close();
+  });
+
+  it('proposals 주입 → 4종(proposals·approve 포함), approve는 id 필수 인자', async () => {
+    const c = await rawClient(makeDeps({ proposals: { list: jest.fn(), approve: jest.fn(), reject: jest.fn() } }));
+    const { prompts } = await c.listPrompts();
+    expect(prompts.map((p) => p.name).sort()).toEqual(['approve', 'proposals', 'wiki-save', 'wiki-search']);
+    const approve = prompts.find((p) => p.name === 'approve');
+    expect(approve?.arguments?.[0]).toMatchObject({ name: 'id', required: true });
+    await c.close();
+  });
+
+  it('getPrompt: 인자가 지시문에 치환되고 해당 도구 이름을 언급한다', async () => {
+    const c = await rawClient(makeDeps());
+    const r = await c.getPrompt({ name: 'wiki-search', arguments: { query: 'deploy-steps' } });
+    const text = (r.messages[0].content as { text: string }).text;
+    expect(text).toContain('deploy-steps');
+    expect(text).toContain('wiki_search');
+    await c.close();
+  });
+
+  it('getPrompt: 없는 이름 → 에러', async () => {
+    const c = await rawClient(makeDeps());
+    await expect(c.getPrompt({ name: 'nope', arguments: {} })).rejects.toThrow();
+    await c.close();
   });
 });

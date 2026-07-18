@@ -1,5 +1,5 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { McpProposalsDeps } from './mcp-proposals';
 
 // 주입 의존성(§3.1) — main이 실 WikiEngine/ProposalStore/BrainDelegator를 배선, 테스트는 가짜 주입.
@@ -216,8 +216,58 @@ async function callAskBrain(deps: McpDeps, args: Record<string, unknown>): Promi
   return ok(result);
 }
 
+// MCP 프롬프트 — 클라이언트(Claude Code 등)의 `/` 메뉴에 슬래시 명령으로 뜬다
+// (도구는 모델이 알아서 쓰는 것, 프롬프트는 사람이 `/`로 부르는 진입점 — 둘 다 노출해야 발견성이 산다).
+// 내용은 "이 도구를 이렇게 써라"는 지시문(도구 정의는 위에 이미 있음). 지시문은 영어(모델 대상 관례).
+interface EngramPrompt { name: string; description: string; args: Array<{ name: string; description: string; required: boolean }>; text: (a: Record<string, string>) => string }
+
+const PROMPTS: EngramPrompt[] = [
+  {
+    name: 'wiki-search', description: 'Search the Engram wiki and summarize what it knows',
+    args: [{ name: 'query', description: 'what to look for', required: true }],
+    text: (a) => `Search the Engram wiki using the wiki_search tool with query: ${a.query ?? ''}. Read the most relevant hits with wiki_read if needed, then answer based on what the wiki actually says. If nothing relevant is found, say so.`,
+  },
+  {
+    name: 'wiki-save', description: 'Save knowledge from this conversation to the Engram wiki (as a proposal — a human approves)',
+    args: [{ name: 'topic', description: 'optional — what to save; defaults to the key insight of the conversation', required: false }],
+    text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body), then submit it with the wiki_propose tool. Tell the user the proposal id and that a human must approve it before it appears in the wiki.`,
+  },
+  {
+    name: 'proposals', description: 'Show pending Engram wiki proposals awaiting human review',
+    args: [],
+    text: () => 'Call the list_proposals tool and present the pending Engram wiki proposals as a numbered list (id, title, what it changes). Ask the user which to approve or reject — do NOT approve or reject anything without their explicit instruction.',
+  },
+  {
+    name: 'approve', description: 'Approve a pending Engram wiki proposal (human decision)',
+    args: [{ name: 'id', description: 'proposal id (or number from /proposals)', required: true }],
+    text: (a) => `The user explicitly asked to approve the Engram wiki proposal: ${a.id ?? ''}. If this is a number from a previous list_proposals call, resolve it to the full proposal id (call list_proposals again if needed). Then call approve_proposal with that id and report the result.`,
+  },
+];
+
 export function buildMcpServer(deps: McpDeps): Server {
-  const server = new Server({ name: 'engram', version: '1.0.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'engram', version: '1.0.0' }, { capabilities: { tools: {}, prompts: {} } });
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    // 승인 계열 프롬프트는 승인 어댑터가 있을 때만(도구 노출 조건과 일치).
+    const prompts = PROMPTS.filter((p) => (p.name === 'proposals' || p.name === 'approve' ? !!deps.proposals : true));
+    return {
+      prompts: prompts.map((p) => ({
+        name: p.name,
+        description: p.description,
+        arguments: p.args.map((x) => ({ name: x.name, description: x.description, required: x.required })),
+      })),
+    };
+  });
+
+  server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+    const p = PROMPTS.find((x) => x.name === req.params.name);
+    if (!p) throw new Error(`unknown prompt: ${req.params.name}`);
+    const args = (req.params.arguments ?? {}) as Record<string, string>;
+    return {
+      description: p.description,
+      messages: [{ role: 'user' as const, content: { type: 'text' as const, text: p.text(args) } }],
+    };
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools: Tool[] = [WIKI_SEARCH_TOOL, WIKI_READ_TOOL, WIKI_LIST_TOOL, WIKI_PROPOSE_TOOL];
