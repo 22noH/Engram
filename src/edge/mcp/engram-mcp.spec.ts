@@ -1,7 +1,7 @@
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
-import { McpDeps, buildMcpServer } from './engram-mcp';
+import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS } from './engram-mcp';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}test__${bare}`;
 
@@ -28,6 +28,16 @@ async function connectedSession(deps: McpDeps): Promise<McpSession> {
 }
 
 describe('buildMcpServer', () => {
+  it('initialize: instructions로 선제 저장 제안 안내를 클라이언트에 전달', async () => {
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(makeDeps()).connect(serverT);
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    await client.connect(clientT);
+    expect(client.getInstructions()).toBe(ENGRAM_MCP_INSTRUCTIONS);
+    expect(ENGRAM_MCP_INSTRUCTIONS).toContain('wiki_propose');
+    await client.close();
+  });
+
   it('tools/list: askBrain 미주입 → 4종(ask_brain 제외)', async () => {
     const s = await connectedSession(makeDeps({ askBrain: null }));
     const defs = await s.listToolDefs();

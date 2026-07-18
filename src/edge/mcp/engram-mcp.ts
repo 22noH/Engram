@@ -244,8 +244,19 @@ const PROMPTS: EngramPrompt[] = [
   },
 ];
 
+// MCP initialize 결과의 instructions — 연결한 클라이언트의 시스템 프롬프트에 주입되는 사용 안내
+// (context7·supabase 등과 같은 관례). 설치만 하면 "먼저 저장 제안→채팅 동의=승인" 흐름이 기본이 된다.
+export const ENGRAM_MCP_INSTRUCTIONS = [
+  "Engram is the user's personal knowledge wiki. When a question may be covered by it, search first (wiki_search, then wiki_read) and answer from what the wiki actually says.",
+  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), proactively offer to save it: "Save this to the Engram wiki?". If the user agrees in chat, that agreement IS the human approval: call wiki_propose, then immediately approve_proposal with the returned proposal id in the same turn. Never save anything without the user\'s explicit consent.',
+  'If approve_proposal is not available, still submit with wiki_propose and tell the user to approve the proposal in the Engram app.',
+].join('\n\n');
+
 export function buildMcpServer(deps: McpDeps): Server {
-  const server = new Server({ name: 'engram', version: '1.0.0' }, { capabilities: { tools: {}, prompts: {} } });
+  const server = new Server(
+    { name: 'engram', version: '1.0.0' },
+    { capabilities: { tools: {}, prompts: {} }, instructions: ENGRAM_MCP_INSTRUCTIONS },
+  );
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
     // 승인 계열 프롬프트는 승인 어댑터가 있을 때만(도구 노출 조건과 일치).

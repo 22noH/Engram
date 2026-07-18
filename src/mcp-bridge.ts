@@ -4,6 +4,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListTool
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
+import { ENGRAM_MCP_INSTRUCTIONS } from './edge/mcp/engram-mcp';
 
 // 독립 stdio↔HTTP 브리지 엔트리(설계 §3.3). 구형(stdio 전용) MCP 클라이언트가 상주의
 // /mcp(HTTP, Task 1·2)에 접속할 수 있게 해준다: `node dist/src/mcp-bridge.js [--port N]`.
@@ -46,7 +47,11 @@ async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>, 
 // 핸들러가 그때그때 상주 /mcp에 연결해 그대로 패스스루. never-throw: 실패해도 stdio 프로토콜은
 // 죽지 않는다(CallTool→isError 텍스트, ListTools→빈 목록+stderr 로그, 절대 stdout 아님).
 export function makeBridgeServer(url: string): Server {
-  const server = new Server({ name: 'engram-bridge', version: '1.0.0' }, { capabilities: { tools: {} } });
+  // 브리지는 도구만 패스스루라 상주의 instructions가 전달되지 않는다 — 같은 안내문을 직접 싣는다.
+  const server = new Server(
+    { name: 'engram-bridge', version: '1.0.0' },
+    { capabilities: { tools: {} }, instructions: ENGRAM_MCP_INSTRUCTIONS },
+  );
 
   server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
     try {
