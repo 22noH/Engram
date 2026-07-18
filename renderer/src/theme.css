@@ -29,7 +29,9 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 #dot { width:8px; height:8px; border-radius:50%; background:#f26d6d; }
 #dot.on { background:#56d364; }
 #channels { flex:1; overflow-y:auto; }
-.ch { padding:8px 16px; cursor:pointer; color:var(--dim); display:flex; justify-content:space-between; }
+.ch { padding:8px 16px; cursor:pointer; color:var(--dim); display:flex; align-items:center; gap:6px; }
+/* 이름이 남는 폭을 차지 — 자물쇠·두뇌 배지·⋯가 오른쪽에 모임(4자식 space-between 산개 방지) */
+.ch > span:first-child { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ch:hover { background:var(--hover); }
 .ch.sel { color:var(--text); background:var(--accent-soft); border-right:2px solid var(--accent); }
 .ch .menu { visibility:hidden; }
