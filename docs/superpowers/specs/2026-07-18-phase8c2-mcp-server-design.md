@@ -81,6 +81,11 @@ export function buildMcpServer(deps: McpDeps): Server; // tools/list·tools/call
 - 루프백 전용 = 같은 PC의 프로세스만. 위키 게시본 읽기·검색은 기존 ws 무게이트 관성과
   동일 수준. 쓰기는 propose뿐(승인 게이트). ask_brain은 두뇌 비용 소모 가능 — 같은 PC
   사용자의 도구 호출 = 본인 사용으로 간주(현행 신뢰 모델). 원격 노출 시 토큰은 후속.
+- ★알려진 풋건(최종리뷰 승인·수용): 사용자가 어떤 두뇌의 mcp.json에 엔그램 자신의
+  /mcp(브리지)를 등록하면, ask_brain→두뇌→8c-1 MCP 클라이언트→다시 /mcp의 ask_brain으로
+  8d 깊이1 가드를 넘는 홉 체인이 구성 가능하다. 기본 설정으론 불가(의도적 자기참조
+  등록 필요)·루프백 한정·홉마다 실 API 비용+반복 상한이라 자기제한적 — 수용. 후속
+  완화 후보: 홉 예산 또는 ask_brain 경유 요청에 ask_brain 재노출 억제.
 
 ## 4. 테스트
 
