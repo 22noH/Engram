@@ -1,0 +1,157 @@
+import 'reflect-metadata';
+import * as os from 'os';
+import * as path from 'path';
+import * as http from 'http';
+import { NestFactory } from '@nestjs/core';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { AppModule } from './app.module';
+import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
+import { ProposalStore } from './knowledge-core/proposal-store';
+import { ProposalApplier } from './edge/proposal-applier';
+import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
+import { makeMcpProposals } from './edge/mcp/mcp-proposals';
+import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
+import { makeBridgeServer } from './mcp-bridge';
+import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
+
+// 헤드리스 엔트리(설계 §3.1-3.2) — `node dist/src/mcp-headless.js [--data-dir D] [--write-mode] [--port N]`.
+// 앱(Electron) 없이 엔그램 지식 코어(위키+의미검색+제안 대기열)를 stdio MCP 서버로 노출한다.
+// 상주 앱이 이미 떠 있으면(§3.2 공존) 직접 코어를 열지 않고 기존 mcp-bridge로 자동 전환한다
+// (LanceDB 동시 접근 위험 회피 — 데이터는 항상 앱과 같은 한 곳).
+//
+// stdout은 MCP 와이어 전용 — 이 파일·이 파일이 부팅하는 AppModule 경로에서 절대 console.log/
+// process.stdout.write를 쓰지 않는다(모든 로그는 stderr 또는 PinoLogger 파일). Nest는
+// { logger: false }로 부팅해 자체 콘솔 로그를 끈다.
+
+// Electron app.getPath('userData')와 동일 규칙(설치형 앱과 데이터 경로 일치 — 헤드리스로 먼저
+// 써도 나중에 앱을 깔면 위키·제안이 그대로 이어진다). win=%APPDATA%\Engram·mac=~/Library/
+// Application Support/Engram·기타(linux)=$XDG_CONFIG_HOME||~/.config/Engram.
+export function defaultDataDir(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
+  if (platform === 'win32') {
+    const appData = env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, 'Engram');
+  }
+  if (platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'Engram');
+  }
+  const xdgConfig = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdgConfig, 'Engram');
+}
+
+function isValidPort(n: number): boolean {
+  return Number.isInteger(n) && n > 0 && n <= 65535;
+}
+
+export interface HeadlessArgs {
+  dataDir: string;
+  writeMode: boolean;
+  port: number;
+}
+
+// 인자 파싱 — 우선순위: --data-dir/--port > ENGRAM_DATA_DIR/ENGRAM_PORT > 기본값.
+export function parseHeadlessArgs(argv: string[], env: NodeJS.ProcessEnv): HeadlessArgs {
+  const dataDirIdx = argv.indexOf('--data-dir');
+  const argDataDir = dataDirIdx !== -1 ? argv[dataDirIdx + 1] : undefined;
+  const dataDir = argDataDir || env.ENGRAM_DATA_DIR || defaultDataDir(process.platform, env);
+
+  const writeMode = argv.includes('--write-mode');
+
+  const portIdx = argv.indexOf('--port');
+  const argPort = portIdx !== -1 ? Number(argv[portIdx + 1]) : NaN;
+  const envPort = env.ENGRAM_PORT !== undefined ? Number(env.ENGRAM_PORT) : NaN;
+  const port = isValidPort(argPort) ? argPort : isValidPort(envPort) ? envPort : DEFAULT_CHAT_PORT;
+
+  return { dataDir, writeMode, port };
+}
+
+// 공존 감지(§3.2) — 상주 앱의 채팅 서버가 그 포트에서 응답하면(GET / → 200 + {ok:true}) 'bridge',
+// 아니면(연결거부·타임아웃·형식 불일치 등 전부) 'core'. never-throw — 실패는 전부 'core' 폴백이 아니라
+// "상주 없음"으로 해석해 코어를 직접 연다(상주가 진짜 없을 때의 정상 경로이기도 함).
+export function chooseMode(port: number): Promise<'bridge' | 'core'> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 2000 }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body) as unknown;
+          const ok = res.statusCode === 200 && !!parsed && typeof parsed === 'object' && (parsed as { ok?: unknown }).ok === true;
+          resolve(ok ? 'bridge' : 'core');
+        } catch {
+          resolve('core');
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve('core'); });
+    req.on('error', () => resolve('core'));
+  });
+}
+
+async function runBridge(port: number): Promise<void> {
+  process.stderr.write(
+    "[mcp-headless] Engram app is running — bridging to its /mcp (approval tools follow the app; write mode follows the app's setting)\n",
+  );
+  const server = makeBridgeServer(`http://127.0.0.1:${port}/mcp`);
+  server.onerror = (e) => console.error('[mcp-headless] bridge server error:', e);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
+  // Nest 부팅 이전에 데이터 경로를 스스로 설정(§3.1) — PathResolver가 DI 해소 시점에 1회 읽는다.
+  // ★ENGRAM_RESIDENT는 세팅하지 않는다 — 헤드리스는 상주가 아니다(하트비트·watchdog 오판 방지,
+  // src/pal/heartbeat.ts 참조). 이미 설정돼 있으면(사용자 env) 존중 — 강제 덮어쓰기 안 함.
+  process.env.ENGRAM_DATA_DIR ??= dataDir;
+
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  await app.init();
+
+  const wiki = app.get(WikiEngine);
+  const proposals = app.get(ProposalStore);
+  const applier = app.get(ProposalApplier);
+
+  const deps: McpDeps = {
+    ...makeWikiMcpDeps(wiki, proposals),
+    askBrain: null, // 헤드리스에 두뇌(위임) 없음(설계 §3.1 — 비범위)
+    brainNames: () => [],
+    proposals: makeMcpProposals(proposals, applier), // 헤드리스 자체 in-flight Set(앱 ws와 별개 프로세스)
+    write: writeMode ? makeWikiWrite(wiki) : null,
+  };
+
+  const server = buildMcpServer(deps);
+  server.onerror = (e) => console.error('[mcp-headless] core server error:', e);
+  const transport = new StdioServerTransport();
+
+  let closed = false;
+  const shutdown = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    try {
+      await app.close();
+    } catch (e) {
+      console.error('[mcp-headless] app.close 실패(무해 — 프로세스는 종료):', e instanceof Error ? e.message : String(e));
+    }
+  };
+  server.onclose = () => { void shutdown(); };
+  process.on('SIGINT', () => { void shutdown().then(() => process.exit(0)); });
+
+  await server.connect(transport);
+}
+
+async function main(): Promise<void> {
+  const { dataDir, writeMode, port } = parseHeadlessArgs(process.argv, process.env);
+  const mode = await chooseMode(port);
+  if (mode === 'bridge') {
+    await runBridge(port);
+    return;
+  }
+  await runCore(dataDir, writeMode);
+}
+
+// 엔트리(직접 실행될 때만) — require.main===module로 테스트 임포트 시 자동실행 방지(mcp-bridge.ts와 동형).
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[mcp-headless] fatal:', e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  });
+}

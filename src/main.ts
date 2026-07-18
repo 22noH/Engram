@@ -36,7 +36,7 @@ import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
 import { ensureSetupCode } from './edge/auth/setup-code';
 import type { AuthDeps } from './edge/messenger/self.adapter';
 import type { McpDeps } from './edge/mcp/engram-mcp';
-import { makeMcpPropose, slugifyMcpTitle } from './edge/mcp/mcp-propose';
+import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import * as fs from 'fs';
 import { listBrainNames } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
@@ -116,20 +116,9 @@ async function bootstrap(): Promise<void> {
       // Phase 8c-2: /mcp(외부 MCP 클라이언트)용 실 배선. 메인 서버에만(brain 모드는 미주입 → /mcp 404).
       const wiki = app.get(WikiEngine);
       const proposals = app.get(ProposalStore);
+      // search/read/list/propose 조립은 mcp-headless.ts와 공유(src/edge/mcp/mcp-wiring.ts, 동작 무변경).
       mcpDeps = {
-        search: async (query, limit) =>
-          (await wiki.search(query, limit)).map((h) => ({ slug: h.slug, title: h.title, snippet: h.text })),
-        read: async (slug) => {
-          const page = await wiki.getPage(slug);
-          if (!page || page.frontmatter.status !== 'published') return null;
-          return { title: page.frontmatter.title, content: page.body };
-        },
-        list: async () =>
-          (await wiki.listPages({ status: 'published' })).map((p) => ({
-            slug: p.slug, title: p.frontmatter.title, category: p.frontmatter.category,
-          })),
-        // targetSlug 선확정 → 그 slug로 존재 검사(한글 제목 slugify 폴백 충돌 봉쇄 — mcp-propose.ts).
-        propose: makeMcpPropose(wiki, proposals),
+        ...makeWikiMcpDeps(wiki, proposals),
         askBrain: null, // 아래에서 BrainDelegator가 해소되면 채운다(8d 위임 계약 재사용).
         brainNames: () => listBrainNames(paths.getConfigDir()),
       };
@@ -141,19 +130,8 @@ async function bootstrap(): Promise<void> {
       }
 
       // §3.4 직접쓰기 모드: permissions.json allow.mcpWriteMode: 'write'일 때만 wiki_write 노출.
-      // 기존 slug면 editPage(★게시본 전용 — draft면 throw→isError로 정직하게 실패, updatePage는
-      // draft를 조용히 미게시 상태로 두는 무효 쓰기가 됨[리뷰 적발])·없으면 createPage(published).
       if (readMcpWriteMode(paths.getConfigDir()) === 'write') {
-        mcpDeps.write = async ({ slug, title, content }) => {
-          const target = slug ?? slugifyMcpTitle(title);
-          const existing = await wiki.getPage(target);
-          if (existing) {
-            await wiki.editPage(target, content);
-            return `updated ${target}`;
-          }
-          await wiki.createPage({ slug: target, title, category: 'external', body: content, sources: ['mcp'], status: 'published' });
-          return `created ${target}`;
-        };
+        mcpDeps.write = makeWikiWrite(wiki);
       }
     }
     self = new SelfMessenger(chatCfg, chatStore, { logger },
