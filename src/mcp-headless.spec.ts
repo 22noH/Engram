@@ -126,4 +126,19 @@ describe('chooseMode', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it('행(hung) 서버 — 접속은 받되 영원히 무응답 → 타임아웃 후 "core"(멈춘 상주에 안 매달림)', async () => {
+    // 요청 핸들러가 아무것도 안 함 = 응답을 영원히 안 보내는 서버(8a 교훈의 "스톨" 클래스).
+    const server = http.createServer(() => { /* never respond */ });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      // 테스트 속도를 위해 짧은 타임아웃 — 프로덕션 기본값(2000ms)과 같은 코드 경로.
+      expect(await chooseMode(port, 300)).toBe('core');
+    } finally {
+      // 행 중인 소켓이 close를 막지 않게 강제 정리.
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });

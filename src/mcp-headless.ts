@@ -67,9 +67,9 @@ export function parseHeadlessArgs(argv: string[], env: NodeJS.ProcessEnv): Headl
 // 공존 감지(§3.2) — 상주 앱의 채팅 서버가 그 포트에서 응답하면(GET / → 200 + {ok:true}) 'bridge',
 // 아니면(연결거부·타임아웃·형식 불일치 등 전부) 'core'. never-throw — 실패는 전부 'core' 폴백이 아니라
 // "상주 없음"으로 해석해 코어를 직접 연다(상주가 진짜 없을 때의 정상 경로이기도 함).
-export function chooseMode(port: number): Promise<'bridge' | 'core'> {
+export function chooseMode(port: number, timeoutMs = 2000): Promise<'bridge' | 'core'> {
   return new Promise((resolve) => {
-    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 2000 }, (res) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: timeoutMs }, (res) => {
       let body = '';
       res.on('data', (chunk) => { body += chunk; });
       res.on('end', () => {
@@ -87,6 +87,25 @@ export function chooseMode(port: number): Promise<'bridge' | 'core'> {
   });
 }
 
+// ★종료 보장(리뷰 Important 반영): 이 Node/Windows 조합에선 호스트(MCP 클라이언트)가 stdio 파이프를
+// 닫아도 SDK의 server.onclose가 발화하지 않는 경우가 실측됨(파일 stdin EOF·MSYS 파이프 닫힘·
+// PowerShell 리다이렉트·initialize 후 disconnect 전부) — 프로세스가 LanceDB/git 핸들을 쥔 채
+// 고아로 남는다. 그래서 SDK에 의존하지 않고 process.stdin의 'end'/'close'를 직접 구독해 같은
+// 종료 루틴으로 라우팅하고, 종료 루틴 끝에 반드시 process.exit(0)를 호출한다(Nest teardown이
+// 라이브 핸들을 남겨도 종료가 보장되도록 — belt+braces). once-플래그로 다중 트리거(둘 다 발화·
+// SIGINT 병행)에 안전.
+function exitOnStdinClosed(cleanup: () => Promise<void>): void {
+  let triggered = false;
+  const finish = (): void => {
+    if (triggered) return;
+    triggered = true;
+    void cleanup().then(() => process.exit(0));
+  };
+  process.stdin.on('end', finish);
+  process.stdin.on('close', finish);
+  process.on('SIGINT', finish);
+}
+
 async function runBridge(port: number): Promise<void> {
   process.stderr.write(
     "[mcp-headless] Engram app is running — bridging to its /mcp (approval tools follow the app; write mode follows the app's setting)\n",
@@ -94,6 +113,9 @@ async function runBridge(port: number): Promise<void> {
   const server = makeBridgeServer(`http://127.0.0.1:${port}/mcp`);
   server.onerror = (e) => console.error('[mcp-headless] bridge server error:', e);
   const transport = new StdioServerTransport();
+  // 브리지 모드도 동일한 종료 보장 — 정리할 Nest 앱이 없으므로 cleanup은 no-op.
+  exitOnStdinClosed(async () => { /* no resources to release */ });
+  server.onclose = () => process.exit(0);
   await server.connect(transport);
 }
 
@@ -132,8 +154,11 @@ async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
       console.error('[mcp-headless] app.close 실패(무해 — 프로세스는 종료):', e instanceof Error ? e.message : String(e));
     }
   };
-  server.onclose = () => { void shutdown(); };
-  process.on('SIGINT', () => { void shutdown().then(() => process.exit(0)); });
+  // ★stdin 'end'/'close' 직접 구독이 주 종료 경로(위 exitOnStdinClosed 주석 — SDK onclose는
+  // 이 환경에서 발화 안 함이 실측됨). onclose도 발화한다면 같은 shutdown 후 명시적 exit(belt+braces
+  // — shutdown의 closed 플래그가 이중 실행을 막고, exit는 Nest teardown의 잔여 핸들에 안 막힌다).
+  server.onclose = () => { void shutdown().then(() => process.exit(0)); };
+  exitOnStdinClosed(shutdown);
 
   await server.connect(transport);
 }
