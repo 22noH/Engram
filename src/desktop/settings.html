@@ -310,6 +310,8 @@
     <div class="grp" id="mcp-grp"></div>
     <div class="cap" data-t="mcpCap"></div>
     <p class="cap ok" id="mcp-hint" hidden></p>
+    <div class="grp-h" id="mcp-presets-h" data-t="mcpPresets"></div>
+    <div class="grp" id="mcp-presets"></div>
   </section>
 
   <section id="sec-messenger">
@@ -403,6 +405,9 @@
       mcpNameRule: '이름은 영소문자·숫자·-·_만, 중복 불가',
       mcpCmdRequired: '실행 명령을 입력하세요 (예: npx)',
       addServer: '서버 추가',
+      mcpPresets: '추천 서버 — 클릭하면 등록돼요 (첫 사용 때 자동으로 내려받음)',
+      addManual: '직접 입력', addBtn: '추가',
+      mcpCmd: '실행 명령', mcpArgs: '인자',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -458,6 +463,9 @@
       mcpNameRule: 'Lowercase letters, digits, - and _ only; no duplicates',
       mcpCmdRequired: 'Enter a command to run (e.g. npx)',
       addServer: 'Add server',
+      mcpPresets: 'Recommended servers — click to register (downloaded on first use)',
+      addManual: 'Add manually', addBtn: 'Add',
+      mcpCmd: 'Command', mcpArgs: 'Arguments',
     };
 
     // 섹션 전환
@@ -478,7 +486,7 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
-      'sec-mcp': ['MCP', t.addServer, t.mcpCap, t.mcpEmpty],
+      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7'],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -1164,14 +1172,53 @@
 
     function showMcpHint() { $('mcp-hint').textContent = t.saved; $('mcp-hint').hidden = false; }
 
+    // 미리 정의된 인기 서버 — 클릭 한 번으로 등록(실 다운로드는 npx가 첫 사용 때).
+    const MCP_PRESETS = [
+      { name: 'playwright', command: 'npx', args: '-y @playwright/mcp@latest', ko: '브라우저 조작 — 열기·클릭·스크린샷', en: 'Browser automation — open, click, screenshot' },
+      { name: 'context7', command: 'npx', args: '-y @upstash/context7-mcp', ko: '라이브러리 최신 문서 검색', en: 'Up-to-date library docs lookup' },
+      { name: 'memory', command: 'npx', args: '-y @modelcontextprotocol/server-memory', ko: '지식 그래프 메모리', en: 'Knowledge-graph memory' },
+      { name: 'sequential-thinking', command: 'npx', args: '-y @modelcontextprotocol/server-sequential-thinking', ko: '단계적 사고 보조', en: 'Step-by-step reasoning aid' },
+      { name: 'github', command: 'npx', args: '-y @modelcontextprotocol/server-github', ko: 'GitHub 이슈·PR — 토큰은 mcp.json의 env로', en: 'GitHub issues & PRs — token via env in mcp.json' },
+      { name: 'everything', command: 'npx', args: '-y @modelcontextprotocol/server-everything', ko: '테스트용 데모 도구 모음', en: 'Demo tools for testing' },
+    ];
+
+    function renderMcpPresets() {
+      const grp = $('mcp-presets');
+      grp.textContent = '';
+      const registered = new Set(mcpServers.map((s) => s.name));
+      const remaining = MCP_PRESETS.filter((p) => !registered.has(p.name));
+      $('mcp-presets-h').hidden = remaining.length === 0;
+      grp.hidden = remaining.length === 0;
+      for (const p of remaining) {
+        const row = document.createElement('div'); row.className = 'li';
+        const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.style.flex = 'none'; name.textContent = p.name;
+        const desc = document.createElement('span');
+        desc.style.color = 'var(--muted)'; desc.style.fontSize = '11.5px'; desc.style.flex = '1'; desc.style.minWidth = '0';
+        desc.style.overflow = 'hidden'; desc.style.textOverflow = 'ellipsis'; desc.style.whiteSpace = 'nowrap';
+        desc.textContent = KO ? p.ko : p.en;
+        const btn = document.createElement('button'); btn.style.flex = 'none'; btn.style.fontSize = '12px'; btn.style.padding = '4px 12px'; btn.textContent = t.addBtn;
+        btn.onclick = async () => {
+          btn.disabled = true;
+          const ok = await window.engram.addMcpServer(p.name, p.command, p.args);
+          if (ok) { await loadMcpServers(); showMcpHint(); } else btn.disabled = false;
+        };
+        row.append(name, desc, btn); grp.appendChild(row);
+      }
+    }
+
     function startMcpForm(addRow) {
       const form = document.createElement('div'); form.className = 'li-form';
-      const nameInput = document.createElement('input'); nameInput.className = 'mono'; nameInput.placeholder = 'github'; nameInput.style.flex = '1';
-      const cmdInput = document.createElement('input'); cmdInput.className = 'mono'; cmdInput.placeholder = 'npx'; cmdInput.style.flex = '1';
-      const argsInput = document.createElement('input'); argsInput.className = 'mono'; argsInput.placeholder = '-y @modelcontextprotocol/server-github'; argsInput.style.flex = '2';
-      const inputsRow = document.createElement('div'); inputsRow.className = 'frow';
-      inputsRow.append(nameInput, cmdInput, argsInput);
-      form.appendChild(inputsRow);
+      // 세로 스택(라벨+입력 한 줄씩) — 가로 3연속 입력이 창 폭을 넘던 잘림 픽스.
+      const frow = (labelText, placeholder) => {
+        const row = document.createElement('div'); row.className = 'frow';
+        const label = document.createElement('label'); label.textContent = labelText;
+        const input = document.createElement('input'); input.className = 'mono'; input.placeholder = placeholder;
+        row.append(label, input); form.appendChild(row);
+        return input;
+      };
+      const nameInput = frow(t.fName, 'github');
+      const cmdInput = frow(t.mcpCmd, 'npx');
+      const argsInput = frow(t.mcpArgs, '-y @modelcontextprotocol/server-github');
 
       const actions = document.createElement('div'); actions.className = 'actions';
       const cancelBtn = document.createElement('button'); cancelBtn.textContent = t.cancel;
@@ -1219,9 +1266,10 @@
         summary.textContent = s.args && s.args.length ? s.command + ' ' + s.args.join(' ') : s.command;
         row.append(minus, name, summary); grp.appendChild(row);
       }
-      const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + t.addServer;
+      const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + t.addManual;
       add.onclick = () => startMcpForm(add);
       grp.appendChild(add);
+      renderMcpPresets();
     }
 
     async function loadMcpServers() {
