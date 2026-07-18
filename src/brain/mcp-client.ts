@@ -87,6 +87,10 @@ export class McpSession {
       let text = parts
         .map((p) => (p.type === 'text' && typeof p.text === 'string' ? p.text : `[${p.type ?? 'unknown'}]`))
         .join('\n');
+      // SDK 반환 union의 task-based 분기(content 없이 toolResult만) — 조용히 버리지 않고 직렬화.
+      if (!Array.isArray(res.content) && 'toolResult' in res) {
+        try { text = JSON.stringify((res as { toolResult: unknown }).toolResult) ?? ''; } catch { text = String((res as { toolResult: unknown }).toolResult); }
+      }
       if (res.isError) text = `tool error: ${text}`;
       if (text.length > MAX_OUTPUT) text = text.slice(0, MAX_OUTPUT) + '\n…(truncated)';
       return text;

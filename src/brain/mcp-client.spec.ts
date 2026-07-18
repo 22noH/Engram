@@ -94,8 +94,7 @@ describe('McpSession', () => {
     await s.close();
     await expect(s.close()).resolves.toBeUndefined();
     const out = await s.callTool(`${MCP_TOOL_PREFIX}test__echo`, {});
-    expect(typeof out).toBe('string');
-    expect(out.length).toBeGreaterThan(0);
+    expect(out).toMatch(/mcp error|not connected/); // 막연한 truthy가 아니라 에러 표식 자체를 단언
   });
 
   it('connect 실패(링크 안 된/닫힌 transport) → false', async () => {
