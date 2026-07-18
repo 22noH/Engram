@@ -352,8 +352,13 @@ export class SelfMessenger implements MessengerPort {
             if (this.canAdminChannel(ws, ch)) {
               if (f.brain === null) {
                 this.store.setChannelBrain(f.id, null);
-              } else if (this.brainNames().includes(f.brain)) {
-                this.store.setChannelBrain(f.id, f.brain);
+              } else {
+                // chat-store.setChannelBrain은 저장 시 trim한다 — 여기 검증도 trim된 값으로 대조해야
+                // 앞뒤 공백이 섞인 값(예: ' qwen ')이 store엔 저장될 값인데 ws에서만 미등록으로 오판되지 않는다.
+                const trimmed = f.brain.trim();
+                if (this.brainNames().includes(trimmed)) {
+                  this.store.setChannelBrain(f.id, trimmed);
+                }
               }
             }
           }

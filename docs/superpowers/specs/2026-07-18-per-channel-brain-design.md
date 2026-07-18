@@ -41,7 +41,7 @@
 
 ### 3.3 ws 프레임 (self.adapter)
 
-- `setChannelBrain { channelId, brain: string | null }`: 권한은 setRespondMode와 동일
+- `setChannelBrain { id, brain: string | null }`: 권한은 setRespondMode와 동일
   게이트(자기 채널 creatorId 또는 channels.manage — 16b 관성). brain이 null 아니면
   **등록 이름 목록에 있는지 검증**(무효면 조용히 무시 — 위반 무시 관성). 성공 시
   channels 브로드캐스트(기존 채널 변경 통지 재사용).

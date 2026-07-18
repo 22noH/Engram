@@ -62,7 +62,10 @@ export class ReaderAgent {
       // 지휘자 활성 조건: 위임기 주입됨 + 이 두뇌가 위임 지원(엔그램 하네스) + 위임 가능한 두뇌가 실재.
       // CLI 두뇌(canDelegate 없음)면 지휘자 오프 → 프롬프트·opts.delegate 모두 8d 이전과 동일(회귀 0).
       // 게이트는 해소된(채널) 두뇌의 canDelegate 기준 — 기본 두뇌가 아니라 이 요청이 실제로 쓰는 두뇌.
-      const session = this.delegator && brain.canDelegate ? this.delegator.handle() : undefined;
+      // msg.brain을 selfName으로 넘긴다(최종 리뷰 지적 — 자기위임 데드락 차단): 채널 두뇌가 지정돼 있으면
+      // 그 이름이 곧 지휘자 자신이 resolve된 인스턴스 이름 — 목록에서 빼야 자기 자신에게 위임해 세마포어
+      // 재진입으로 데드락하지 않는다. 기본 지휘자(msg.brain 미설정)는 undefined → 전 목록 그대로(회귀 0).
+      const session = this.delegator && brain.canDelegate ? this.delegator.handle(msg.brain) : undefined;
       const handle = session && session.brains.length > 0 ? session : undefined;
       const result = await brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle),

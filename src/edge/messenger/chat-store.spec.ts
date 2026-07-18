@@ -250,3 +250,35 @@ describe('ChatStore.setChannelBrain (Task 1)', () => {
     expect(again.listChannels().find((c) => c.id === ch.id)?.brain).toBe('qwen');
   });
 });
+
+// Minor 1(최종 리뷰): listChannels 정규화는 필드 화이트리스트라 ChatChannel에 필드를 늘리고 여기
+// 손대지 않으면 조용히 소실된다 — 전 필드가 채워진 채널이 listChannels→save→listChannels를
+// 왕복해도 그대로 남는지 지키는 가드.
+describe('ChatStore listChannels 정규화 왕복(Minor 1 가드)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-roundtrip-')); });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('모든 필드가 채워진 채널이 왕복(listChannels→save→listChannels) 후에도 그대로', () => {
+    const full = {
+      id: 'full-ch',
+      name: 'Full Channel',
+      respondMode: 'mention' as const,
+      mode: 'code' as const,
+      repoPath: 'C:/repo/full',
+      creatorId: 'user-1',
+      ownerId: 'owner-1',
+      visibility: 'private' as const,
+      memberIds: ['user-1', 'user-2'],
+      brain: 'claude-opus',
+    };
+    fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([full]));
+    const store = new ChatStore(dir);
+    expect(store.listChannels().find((c) => c.id === 'full-ch')).toEqual(full);
+    // setRespondMode('mention')은 값이 이미 mention이라 실질 변경은 없지만 내부적으로
+    // listChannels()(정규화)→save(list)를 거쳐 다시 디스크에 쓴다 — 이게 왕복 지점.
+    expect(store.setRespondMode('full-ch', 'mention')).toBe(true);
+    const reloaded = new ChatStore(dir).listChannels().find((c) => c.id === 'full-ch');
+    expect(reloaded).toEqual(full);
+  });
+});

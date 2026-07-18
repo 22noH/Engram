@@ -56,6 +56,8 @@ export class ChatStore {
       if (Array.isArray(raw)) {
         // respondMode는 손수정 channels.json 등으로 오염될 수 있어 값을 정규화(드롭 대신 안전값으로 교정).
         // brain도 마찬가지로 정규화: 비문자열/빈문자열이면 필드 자체 드롭.
+        // 새 ChatChannel 필드는 여기에도 추가(누락 시 저장 때 소실) — 이 map은 명시적 필드 화이트리스트라
+        // ChatChannel에 필드를 늘려도 여기 손대지 않으면 listChannels()가 조용히 걸러 그 필드가 없던 일이 된다.
         list = raw
           .filter((c) => c && safeId(c.id) && typeof c.name === 'string')
           .map((c) => {

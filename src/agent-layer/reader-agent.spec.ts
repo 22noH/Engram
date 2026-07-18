@@ -283,4 +283,80 @@ describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
     expect(out).toContain('기본답');
     expect(calls).toHaveLength(1);
   });
+
+  // 최종 리뷰 Important: 자기위임 데드락 회귀 테스트. 채널 두뇌가 이름 지정 인스턴스(canDelegate=true,
+  // concurrency:1 세마포어를 통째로 감싸는 실 하네스 상황을 흉내)일 때, 모델이 자기 자신의 이름으로
+  // ask_brain을 부르면 그 이름이 애초에 도구 설명/목록에 없어야 한다 — 있으면 자기 인스턴스의 complete()를
+  // 재진입해 세마포어 permit이 영구 반환되지 않는 데드락에 빠진다(§요구사항, 8d의 module 주석이 경고한 바로 그 사고).
+  it('자기위임 데드락 차단: 채널 두뇌 자신의 이름은 위임 목록에서 빠지고 나머지는 남는다', async () => {
+    const cache = new Map<string, BrainProvider>();
+    const seen: { opts?: CompleteOpts }[] = [];
+    // BRAIN_NAME_RESOLVE와 동일한 결의 공유 캐시: 같은 이름 → 같은 인스턴스.
+    const resolveByName = (name: string): BrainProvider => {
+      if (!cache.has(name)) {
+        cache.set(
+          name,
+          name === 'claude-B'
+            ? { canDelegate: true, complete: async (_p, _c, opts) => { seen.push({ opts }); return { text: 'ok', costUsd: 0, isError: false }; } }
+            : { complete: async () => ({ text: 'w', costUsd: 0, isError: false }) },
+        );
+      }
+      return cache.get(name)!;
+    };
+    const delegator = new BrainDelegator(resolveByName, () => ['claude-B', 'ollama', 'gemma']);
+    const defaultBrain: BrainProvider = { complete: async () => ({ text: '기본', costUsd: 0, isError: false }) };
+    const resolver = new ChannelBrainResolver(resolveByName, defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, delegator, resolver);
+    // 채널 두뇌 이름이 'claude-B' — 이게 곧 지휘자 자신의 인스턴스 이름(resolveByName 공유).
+    await reader.handle({ text: 'q', userId: 'c1', brain: 'claude-B' });
+    expect(seen[0].opts?.delegate?.brains).toEqual(['ollama', 'gemma']); // 자기 이름 제외, 나머지는 유지
+    expect(seen[0].opts?.delegate?.brains).not.toContain('claude-B');
+  });
+
+  it('기본 지휘자(채널 두뇌 이름 미지정)는 위임 목록에 자기 이름 관련 제외가 없다(회귀 0)', async () => {
+    const seen: { opts?: CompleteOpts }[] = [];
+    const defaultBrain: BrainProvider = {
+      canDelegate: true,
+      complete: async (_p, _c, opts) => { seen.push({ opts }); return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const worker = { complete: async () => ({ text: 'w', costUsd: 0, isError: false }) } as BrainProvider;
+    const delegator = new BrainDelegator(() => worker, () => ['claude', 'ollama']);
+    const resolver = new ChannelBrainResolver(() => defaultBrain, defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, delegator, resolver);
+    await reader.handle({ text: 'q', userId: 'c1' }); // brain 미지정
+    expect(seen[0].opts?.delegate?.brains).toEqual(['claude', 'ollama']);
+  });
+
+  // 동시성 격리(가벼운 버전, 최종 리뷰 제안): 서로 다른 채널 두뇌로 동시에 handle해도 각자 자기
+  // 인스턴스로만 불리고 서로 뒤섞이지 않는다 — reader-agent.ts의 brain 지역 변수(this.brain에 대입하지
+  // 않음) 계약이 실제 동시 실행 하에서도 지켜지는지 확인.
+  it('동시 handle() — 서로 다른 채널 두뇌는 각자 자기 인스턴스로만 불린다(격리)', async () => {
+    const cache = new Map<string, BrainProvider>();
+    const callsByName: Record<string, number> = {};
+    const resolveByName = (name: string): BrainProvider => {
+      if (!cache.has(name)) {
+        callsByName[name] = 0;
+        cache.set(name, {
+          complete: async () => {
+            callsByName[name]++;
+            await new Promise((r) => setTimeout(r, 5));
+            return { text: `답-${name}`, costUsd: 0, isError: false };
+          },
+        });
+      }
+      return cache.get(name)!;
+    };
+    const defaultBrain: BrainProvider = { complete: async () => ({ text: '기본', costUsd: 0, isError: false }) };
+    const resolver = new ChannelBrainResolver(resolveByName, defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, undefined, resolver);
+    const [outA, outB] = await Promise.all([
+      reader.handle({ text: 'qA', userId: 'cA', brain: 'brain-A' }),
+      reader.handle({ text: 'qB', userId: 'cB', brain: 'brain-B' }),
+    ]);
+    expect(outA).toContain('답-brain-A');
+    expect(outB).toContain('답-brain-B');
+    expect(callsByName['brain-A']).toBe(1);
+    expect(callsByName['brain-B']).toBe(1);
+    expect(cache.get('brain-A')).not.toBe(cache.get('brain-B')); // 서로 다른 인스턴스
+  });
 });

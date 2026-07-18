@@ -53,4 +53,38 @@ describe('BrainDelegator', () => {
     expect(h2.spentUsd()).toBe(0);
     expect(h1.spentUsd()).toBeCloseTo(0.5); // h1은 영향 없음
   });
+
+  // 최종 리뷰 Important: 자기위임 데드락 차단. handle(selfName)이 selfName을 목록에서 빼야
+  // 지휘자가 ask_brain으로 자기 자신을 호출해 같은 세마포어 permit을 재진입하는 사고를 막는다.
+  describe('selfName 제외(자기위임 데드락 차단)', () => {
+    it('handle(selfName) → brains 목록에서 selfName만 빠지고 나머지는 유지', () => {
+      const d = new BrainDelegator(() => fakeBrain({}) as BrainProvider, () => ['claude-A', 'ollama', 'claude-A2']);
+      expect(d.handle('claude-A').brains).toEqual(['ollama', 'claude-A2']);
+    });
+
+    it('selfName 미지정(기본 지휘자) → 전 목록 그대로(회귀 0)', () => {
+      const d = new BrainDelegator(() => fakeBrain({}) as BrainProvider, () => ['claude-A', 'ollama']);
+      expect(d.handle().brains).toEqual(['claude-A', 'ollama']);
+      expect(d.handle(undefined).brains).toEqual(['claude-A', 'ollama']);
+    });
+
+    it('run()으로 selfName을 호출하면 unknown brain 에러 — resolve가 아예 안 불려 자기 인스턴스로 재진입하지 않는다', async () => {
+      let resolveCalled = false;
+      const d = new BrainDelegator(
+        () => { resolveCalled = true; return fakeBrain({}) as BrainProvider; },
+        () => ['claude-A', 'ollama'],
+      );
+      const out = await d.handle('claude-A').run('claude-A', 'task');
+      expect(out).toBe('delegate error: unknown brain "claude-A" (available: ollama)'); // 안내 목록에 claude-A 없음
+      expect(resolveCalled).toBe(false); // 데드락의 핵심 방지점: complete() 재진입 자체가 없다
+    });
+
+    it('run()으로 selfName이 아닌 다른 이름은 정상 위임된다(과도한 차단 없음)', async () => {
+      const worker = fakeBrain({});
+      const d = new BrainDelegator((name) => (name === 'ollama' ? worker : (fakeBrain({}) as BrainProvider)), () => ['claude-A', 'ollama']);
+      const out = await d.handle('claude-A').run('ollama', 'task');
+      expect(out).toBe('worker-answer');
+      expect(worker.calls).toHaveLength(1);
+    });
+  });
 });
