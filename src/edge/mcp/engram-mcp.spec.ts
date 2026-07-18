@@ -303,9 +303,11 @@ describe('buildMcpServer', () => {
     const proposals = { list: jest.fn(), approve: jest.fn(), reject: jest.fn() };
     const s = await connectedSession(makeDeps({ proposals }));
     const defs = await s.listToolDefs();
-    const approveDef = defs.find((d) => d.name === T('approve_proposal'));
-    expect(approveDef?.description?.toLowerCase()).toContain('human');
-    expect(approveDef?.description?.toLowerCase()).toContain('explicitly');
+    for (const name of ['approve_proposal', 'reject_proposal']) {
+      const def = defs.find((d) => d.name === T(name));
+      expect(def?.description?.toLowerCase()).toContain('human');
+      expect(def?.description?.toLowerCase()).toContain('explicitly');
+    }
     await s.close();
   });
 
