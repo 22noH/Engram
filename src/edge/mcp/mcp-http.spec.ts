@@ -67,21 +67,43 @@ describe('handleMcpRequest', () => {
     }
   });
 
-  it('연속 POST(initialize→tools/list)가 같은 server 인스턴스 재사용으로 정상 처리됨', async () => {
-    const mcpServer = buildMcpServer(makeDeps());
+  it('동시 POST 2건(한쪽 200ms 지연) — 요청별 server 생성으로 둘 다 성공(경합 회귀)', async () => {
+    // server를 요청 간 공유하면 SDK Protocol.connect()가 "Already connected"를 던져 두 번째가
+    // 500이 된다 — 요청별 buildMcpServer(self.adapter와 동일 사용법)로 경합이 없음을 고정.
+    const deps = makeDeps({
+      search: jest.fn().mockImplementation(async (query: string) => {
+        if (query === 'slow') {
+          await new Promise((r) => setTimeout(r, 200));
+          return [{ slug: 'slow', title: 'Slow', snippet: 's' }];
+        }
+        return [{ slug: 'fast', title: 'Fast', snippet: 'f' }];
+      }),
+    });
     const httpServer = http.createServer((req, res) => {
-      void handleMcpRequest(mcpServer, req, res);
+      void handleMcpRequest(buildMcpServer(deps), req, res);
     });
     await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
     const port = (httpServer.address() as AddressInfo).port;
     try {
-      const client = new Client({ name: 'test-client-2', version: '1.0.0' });
-      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
-      await client.connect(transport);
-      const first = await client.listTools();
-      const second = await client.listTools();
-      expect(first.tools.length).toBe(second.tools.length);
-      await client.close();
+      const url = `http://127.0.0.1:${port}/mcp`;
+      const a = new Client({ name: 'client-a', version: '1.0.0' });
+      await a.connect(new StreamableHTTPClientTransport(new URL(url)));
+      const b = new Client({ name: 'client-b', version: '1.0.0' });
+      await b.connect(new StreamableHTTPClientTransport(new URL(url)));
+      // a의 slow 호출이 서버를 점유하는 동안 b의 fast 호출이 겹치게 발사.
+      const [ra, rb] = await Promise.all([
+        a.callTool({ name: 'wiki_search', arguments: { query: 'slow' } }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, 50)); // slow가 확실히 in-flight인 시점
+          return b.callTool({ name: 'wiki_search', arguments: { query: 'fast' } });
+        })(),
+      ]);
+      expect(ra.isError).toBeFalsy();
+      expect(rb.isError).toBeFalsy();
+      expect(JSON.stringify(ra.content)).toContain('slow');
+      expect(JSON.stringify(rb.content)).toContain('fast');
+      await a.close();
+      await b.close();
     } finally {
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     }

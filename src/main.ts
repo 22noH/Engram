@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Orchestrator } from './agent-layer/orchestrator';
-import { PathResolver, DEFAULT_USER } from './pal/path-resolver';
+import { PathResolver } from './pal/path-resolver';
 import { PinoLogger } from './pal/logger';
 import { loadMessengerConfig } from './edge/messenger/messenger.config';
 import { createMessenger } from './edge/messenger/messenger.factory';
@@ -36,6 +36,7 @@ import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
 import { ensureSetupCode } from './edge/auth/setup-code';
 import type { AuthDeps } from './edge/messenger/self.adapter';
 import type { McpDeps } from './edge/mcp/engram-mcp';
+import { makeMcpPropose } from './edge/mcp/mcp-propose';
 import { listBrainNames } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
 
@@ -49,13 +50,6 @@ const WIKI_MERGE_FALLBACK = `Below are two versions of one wiki page body (they 
 === Version B ===
 {{THEIRS}}
 `;
-
-// MCP wiki_propose가 slug 미지정일 때 title로부터 만드는 폴백(Phase 8c-2).
-// ingester-agent.ts의 slugify(한글 유지)와 유사하되 이쪽은 export되어 있지 않아 재사용하지 않는다 —
-// MCP 클라이언트는 외부 도구라 ascii 소문자-하이픈로 단순화(ponytail: 재사용보다 최소 폴백).
-function slugifyMcpTitle(title: string): string {
-  return title.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled';
-}
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -121,21 +115,8 @@ async function bootstrap(): Promise<void> {
           (await wiki.listPages({ status: 'published' })).map((p) => ({
             slug: p.slug, title: p.frontmatter.title, category: p.frontmatter.category,
           })),
-        propose: async (input) => {
-          const existing = input.slug ? await wiki.getPage(input.slug) : null;
-          const p = await proposals.enqueue({
-            userId: DEFAULT_USER,
-            op: existing ? 'append' : 'create',
-            targetSlug: input.slug ?? slugifyMcpTitle(input.title),
-            title: input.title,
-            category: 'external',
-            payload: input.content,
-            sources: ['mcp'],
-            importance: 3,
-            verdict: { confidence: 0.5, reason: `external MCP client proposal${input.reason ? `: ${input.reason}` : ''}` },
-          });
-          return p.id;
-        },
+        // targetSlug 선확정 → 그 slug로 존재 검사(한글 제목 slugify 폴백 충돌 봉쇄 — mcp-propose.ts).
+        propose: makeMcpPropose(wiki, proposals),
         askBrain: null, // 아래에서 BrainDelegator가 해소되면 채운다(8d 위임 계약 재사용).
         brainNames: () => listBrainNames(paths.getConfigDir()),
       };

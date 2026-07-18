@@ -13,14 +13,14 @@ export function isLoopback(remoteAddress: string | undefined): boolean {
 // /mcp 요청 1건 처리. SDK StreamableHTTPServerTransport의 stateless 패턴(설치본 v1.29.0
 // dist/cjs/examples/server/simpleStatelessStreamableHttp.js 실 예제 확인):
 // sessionIdGenerator: undefined로 요청마다 새 transport를 만들어 연결하고 handleRequest에 위임.
-// ★POST만 처리(그 예제와 동일 — GET/DELETE는 405). 여기서는 server(Task 1 buildMcpServer 산출물)를
-// 호출자가 lazy-singleton으로 재사용하므로(self.adapter가 1회만 build) GET을 허용하면 안 된다:
-// GET은 미종료 SSE 스트림(standalone notifications 채널)을 열어 그 transport가 server의 내부
-// _transport 참조를 영구 점유 → 다음 POST의 connect()가 전부 "Already connected" 예외로 막힌다
-// (실측: 클라 초기화 직후 notifications/initialized가 202를 받으면 백그라운드로 GET SSE를 여는데,
-// 이걸 허용하자 이어지는 tools/list POST가 전부 막혀 테스트가 타임아웃했다). POST는 요청 처리가
-// 끝나는 즉시(finally) transport를 닫아 server를 다음 요청에 다시 connect 가능하게 되돌린다.
-// never-throw: 실패해도 상주를 죽이지 않고 500(또는 405)으로 흡수.
+// ★server도 요청마다 새로 받는다(호출자=self.adapter가 buildMcpServer를 요청별 호출 — SDK 참조
+// 예제의 getServer()와 동일). SDK Protocol.connect()는 기존 transport가 닫히기 전 재연결 시
+// throw하므로 server를 요청 간 공유하면 동시 POST 2건이 경합해 두 번째가 500이 된다(리뷰 재현).
+// ★POST만 처리(그 예제와 동일 — GET/DELETE는 405). GET은 미종료 SSE 스트림(standalone
+// notifications 채널)이라 stateless 요청-응답 모델과 안 맞고, 열어주면 클라 초기화 직후
+// notifications/initialized 202 후 백그라운드 GET이 연결을 영구 점유한다(실측: 허용했더니
+// 이어지는 tools/list POST가 막혀 테스트 타임아웃). 처리 종료 시(finally) transport를 닫아
+// 리소스를 즉시 회수한다. never-throw: 실패해도 상주를 죽이지 않고 500(또는 405)으로 흡수.
 export async function handleMcpRequest(server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     if (req.method !== 'POST') {

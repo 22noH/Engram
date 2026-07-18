@@ -1545,4 +1545,41 @@ describe('/mcp HTTP 노출(Phase 8c-2)', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('동시 POST 2건(별도 소켓·한쪽 200ms 지연) → 둘 다 성공(요청별 Server 생성 회귀)', async () => {
+    // 리뷰 적발 경합: Server 싱글턴 공유 시 첫 요청이 in-flight인 동안 두 번째 connect()가
+    // "Already connected" throw → 500. 요청별 buildMcpServer로 고쳐진 것을 실 어댑터에서 고정.
+    const deps = makeMcpDeps({
+      search: jest.fn().mockImplementation(async (query: string) => {
+        if (query === 'slow') {
+          await new Promise((r) => setTimeout(r, 200));
+          return [{ slug: 'slow', title: 'Slow', snippet: 's' }];
+        }
+        return [{ slug: 'fast', title: 'Fast', snippet: 'f' }];
+      }),
+    });
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, undefined, deps,
+    );
+    await sm.start();
+    const url = `http://127.0.0.1:${sm.addressPort()}/mcp`;
+    const a = new Client({ name: 'client-a', version: '1.0.0' });
+    await a.connect(new StreamableHTTPClientTransport(new URL(url)));
+    const b = new Client({ name: 'client-b', version: '1.0.0' });
+    await b.connect(new StreamableHTTPClientTransport(new URL(url)));
+    const [ra, rb] = await Promise.all([
+      a.callTool({ name: 'wiki_search', arguments: { query: 'slow' } }),
+      (async () => {
+        await new Promise((r) => setTimeout(r, 50)); // slow가 확실히 in-flight인 시점에 겹치게
+        return b.callTool({ name: 'wiki_search', arguments: { query: 'fast' } });
+      })(),
+    ]);
+    expect(ra.isError).toBeFalsy();
+    expect(rb.isError).toBeFalsy();
+    expect(JSON.stringify(ra.content)).toContain('slow');
+    expect(JSON.stringify(rb.content)).toContain('fast');
+    await a.close();
+    await b.close();
+  });
 });
