@@ -14,6 +14,7 @@ export class InsightScheduler {
 
   @Cron(INSIGHT_CRON)
   async tick(): Promise<void> {
+    if (process.env.ENGRAM_RESIDENT !== '1') return; // 상주 게이트(digest.scheduler와 동일)
     try {
       const ins = await this.orchestrator.insight(DEFAULT_USER);
       this.logger.log(ins ? `인사이트 생성: ${ins.date}` : '인사이트 생략(대화 없음)', 'InsightScheduler');

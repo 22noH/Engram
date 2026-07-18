@@ -6,8 +6,22 @@ import { PathResolver } from './path-resolver';
 import { PinoLogger } from './logger';
 
 describe('memory-monitor', () => {
+  const ORIGINAL_RESIDENT = process.env.ENGRAM_RESIDENT;
+  beforeEach(() => { process.env.ENGRAM_RESIDENT = '1'; }); // sample()은 상주 게이트 뒤에 있음
   afterEach(() => {
     delete process.env.ENGRAM_HEAP_KEEP;
+    if (ORIGINAL_RESIDENT === undefined) delete process.env.ENGRAM_RESIDENT;
+    else process.env.ENGRAM_RESIDENT = ORIGINAL_RESIDENT;
+  });
+
+  it('ENGRAM_RESIDENT 미설정(헤드리스 등) — sample 무발화', () => {
+    delete process.env.ENGRAM_RESIDENT;
+    const paths = new PathResolver(os.tmpdir());
+    const logger = new PinoLogger(paths);
+    let sampled = false;
+    const m = new MemoryMonitor(paths, logger, { limitMb: 1, rssFn: () => { sampled = true; return 999 * 1024 * 1024; }, alertFn: async () => {}, snapshotFn: () => 'x' });
+    m.sample();
+    expect(sampled).toBe(false);
   });
 
   it('isOverLimit은 MB 임계치를 바이트와 비교', () => {

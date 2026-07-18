@@ -17,6 +17,7 @@ export class MeetingScheduler implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    if (process.env.ENGRAM_RESIDENT !== '1') return; // 상주 게이트 — 헤드리스·원샷은 회의 크론 미등록
     for (const def of loadMeetings(this.paths.getConfigDir())) {
       const job = new CronJob(def.schedule, () => {
         this.engine.run(def, DEFAULT_USER).catch((e) =>

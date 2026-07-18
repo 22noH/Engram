@@ -24,6 +24,9 @@ export class DigestScheduler {
   // DigestLock(파일 락)이 한 번에 하나만 돌게 한다(§11). 락 못 잡은 쪽은 건너뜀.
   @Cron(DIGEST_CRON)
   async tick(): Promise<void> {
+    // ★상주 게이트(heartbeat.ts와 동일 이유): 헤드리스 MCP 같은 비상주 장수명 프로세스가
+    // 새벽 자율 다이제스트를 돌리면 안 된다(사용자가 시키지 않은 수집·제안·두뇌 비용).
+    if (process.env.ENGRAM_RESIDENT !== '1') return;
     try {
       const s = await this.orchestrator.digest(DEFAULT_USER);
       this.logger.log(`자율 다이제스트: 제안 ${s.proposed}건`, 'DigestScheduler'); // PinoLogger.log(message, context)

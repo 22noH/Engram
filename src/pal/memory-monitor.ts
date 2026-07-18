@@ -41,6 +41,7 @@ export class MemoryMonitor {
 
   @Interval(5 * 60_000)
   sample(): void {
+    if (process.env.ENGRAM_RESIDENT !== '1') return; // 상주 게이트 — 헤드리스가 heap 스냅샷·알림을 쏘면 안 됨
     const rss = this.rssFn();
     if (!isOverLimit(rss, this.limitMb)) { this.alerted = false; return; } // 정상 복귀 시 쿨다운 해제
     if (this.alerted) return;                                              // 이미 알림 — 쿨다운
