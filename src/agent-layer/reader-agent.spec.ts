@@ -6,6 +6,7 @@ import { PathResolver } from '../pal/path-resolver';
 import { PinoLogger } from '../pal/logger';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import { BrainDelegator } from './brain-delegator';
+import { ChannelBrainResolver } from './channel-brain-resolver';
 import { BrainProvider, BrainResult, CompleteOpts } from '../brain/brain.port';
 
 const ragWith = (hits: { slug: string; title: string; text: string }[]): RagStore =>
@@ -229,5 +230,57 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
     await reader.handle(msg8d);
     expect(seen[0].opts?.delegate).toBeUndefined();
     expect(seen[0].prompt).not.toContain('ask_brain');
+  });
+});
+
+describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
+  const rag = { search: async () => [] } as any;
+  const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;
+
+  it('이벤트 brain 지정 시 해소된 두뇌의 complete가 불리고 기본 두뇌는 안 불림', async () => {
+    const defaultCalls: string[] = [];
+    const namedCalls: string[] = [];
+    const defaultBrain: BrainProvider = { complete: async () => { defaultCalls.push('x'); return { text: '기본답', costUsd: 0, isError: false }; } };
+    const namedBrain: BrainProvider = { complete: async () => { namedCalls.push('x'); return { text: '채널답', costUsd: 0, isError: false }; } };
+    const resolver = new ChannelBrainResolver((name) => (name === 'qwen' ? namedBrain : defaultBrain), defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, undefined, resolver);
+    const out = await reader.handle({ text: 'q', userId: 'c1', brain: 'qwen' });
+    expect(out).toContain('채널답');
+    expect(namedCalls).toHaveLength(1);
+    expect(defaultCalls).toHaveLength(0);
+  });
+
+  it('지휘자 게이트는 해소된(채널) 두뇌의 canDelegate 기준 — 기본은 미지원이어도 채널 두뇌가 지원하면 위임 켜짐', async () => {
+    const defaultBrain: BrainProvider = { complete: async () => ({ text: 'x', costUsd: 0, isError: false }) }; // canDelegate 없음
+    const seen: { opts?: CompleteOpts }[] = [];
+    const namedBrain: BrainProvider = {
+      canDelegate: true,
+      complete: async (_p, _c, opts) => { seen.push({ opts }); return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const worker = { complete: async () => ({ text: 'w', costUsd: 0, isError: false }) } as BrainProvider;
+    const delegator = new BrainDelegator(() => worker, () => ['claude', 'qwen']);
+    const resolver = new ChannelBrainResolver((name) => (name === 'qwen' ? namedBrain : defaultBrain), defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, delegator, resolver);
+    await reader.handle({ text: 'q', userId: 'c1', brain: 'qwen' });
+    expect(seen[0].opts?.delegate).toBeDefined();
+  });
+
+  it('이벤트 brain 미지정이면 channelBrain 주입돼도 기본 두뇌 그대로(회귀 0)', async () => {
+    const calls: string[] = [];
+    const defaultBrain: BrainProvider = { complete: async () => { calls.push('x'); return { text: '기본답', costUsd: 0, isError: false }; } };
+    const resolver = new ChannelBrainResolver(() => { throw new Error('불려선 안 됨'); }, defaultBrain, logger);
+    const reader = new ReaderAgent(rag, defaultBrain, logger, undefined, undefined, undefined, resolver);
+    const out = await reader.handle({ text: 'q', userId: 'c1' });
+    expect(out).toContain('기본답');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('channelBrain 미주입(구식 DI) → 기존 동작 그대로(회귀 0)', async () => {
+    const calls: string[] = [];
+    const defaultBrain: BrainProvider = { complete: async () => { calls.push('x'); return { text: '기본답', costUsd: 0, isError: false }; } };
+    const reader = new ReaderAgent(rag, defaultBrain, logger);
+    const out = await reader.handle({ text: 'q', userId: 'c1', brain: 'qwen' }); // resolver 없으니 brain 필드는 무시
+    expect(out).toContain('기본답');
+    expect(calls).toHaveLength(1);
   });
 });

@@ -1,4 +1,5 @@
 import { Orchestrator } from './orchestrator';
+import { ChannelBrainResolver } from './channel-brain-resolver';
 
 const logger = { warn() {}, error() {}, log() {} } as any;
 
@@ -99,6 +100,53 @@ it('resume hatch: 승인된 프로젝트 → runState 복원 + launchCoding(atte
   expect(o.getRunState()).toBe('running');
   expect(seen).toEqual({ projectId: 'p1', targetPath: 'C:/repos/api', attempt: 1 });
   expect(posts[0]).toContain('Continuing');
+});
+
+it('resume 메시지에 brain 지정 → launchCoding에 해소된 채널 두뇌 전달(Task 2 스펙 §3.2, 예약 재주입 경로)', async () => {
+  const brainJson = '{"kind":"chat","team":[]}';
+  const defaultBrain = { complete: async () => ({ text: brainJson, costUsd: 0, isError: false }) } as any;
+  const namedBrain = { complete: async () => ({ text: brainJson, costUsd: 0, isError: false }) } as any;
+  const resolver = new ChannelBrainResolver((name) => (name === 'qwen' ? namedBrain : defaultBrain), defaultBrain, logger);
+  const registry = { all: () => [] } as any;
+  const conversations = { append: async () => {} } as any;
+  const projects = { get: async (id: string) => ({ id, targetPath: 'C:/repos/api', approved: true }) } as any;
+  const fence = { assertWritable() {} } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    projects, null as any, null as any, null as any, null as any,
+    defaultBrain, fence, null as any, registry, null as any,
+    undefined, resolver,
+  ) as any;
+  const seen: any = {};
+  o.launchCoding = (projectId: string, targetPath: string, _tk: string, _post: any, attempt: number, brain: any) => {
+    seen.projectId = projectId; seen.targetPath = targetPath; seen.attempt = attempt; seen.brain = brain;
+  };
+  o.setRunState('paused'); // STUCK이 남긴 상태 재현
+  await o.handleMention({ text: 'resume p1 1', userId: 'c1', brain: 'qwen' }, async () => {});
+  expect(seen).toEqual({ projectId: 'p1', targetPath: 'C:/repos/api', attempt: 1, brain: namedBrain });
+});
+
+it('resume 메시지에 brain 미지정 → resolver 주입돼도 기본 두뇌 그대로(회귀 0)', async () => {
+  const brainJson = '{"kind":"chat","team":[]}';
+  const defaultBrain = { complete: async () => ({ text: brainJson, costUsd: 0, isError: false }) } as any;
+  const resolver = new ChannelBrainResolver(() => { throw new Error('불려선 안 됨'); }, defaultBrain, logger);
+  const registry = { all: () => [] } as any;
+  const conversations = { append: async () => {} } as any;
+  const projects = { get: async (id: string) => ({ id, targetPath: 'C:/repos/api', approved: true }) } as any;
+  const fence = { assertWritable() {} } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    projects, null as any, null as any, null as any, null as any,
+    defaultBrain, fence, null as any, registry, null as any,
+    undefined, resolver,
+  ) as any;
+  const seen: any = {};
+  o.launchCoding = (_p: string, _t: string, _tk: string, _post: any, _attempt: number, brain: any) => { seen.brain = brain; };
+  o.setRunState('paused');
+  await o.handleMention({ text: 'resume p1 1', userId: 'c1' }, async () => {});
+  expect(seen.brain).toBe(defaultBrain);
 });
 
 it('resume hatch: 프로젝트 없음 → 안내', async () => {

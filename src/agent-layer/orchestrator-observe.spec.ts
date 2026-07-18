@@ -1,4 +1,5 @@
 import { Orchestrator } from './orchestrator';
+import { ChannelBrainResolver } from './channel-brain-resolver';
 
 const logger = { warn() {}, error() {}, log() {} } as any;
 
@@ -83,6 +84,45 @@ it('rag 미주입(18인자 구식) → 무음 no-op', async () => {
     null as any, null as any, null as any, null as any, null as any,
   ) as any;
   await expect(o.observe({ text: '마이그레이션 질문입니다', userId: 'c1' }, async () => {})).resolves.toBeUndefined();
+});
+
+it('이벤트 brain 지정 → 채널 두뇌로 관찰(기본 codeBrain은 안 불림, Task 2 스펙 §3.2)', async () => {
+  const defaultCalls = { n: 0 };
+  const defaultBrain = { complete: async () => { defaultCalls.n++; return { text: '{"interject":false,"text":""}', costUsd: 0, isError: false }; } } as any;
+  const namedCalls = { n: 0 };
+  const namedBrain = { complete: async () => { namedCalls.n++; return { text: '{"interject":true,"text":"채널 두뇌 힌트"}', costUsd: 0, isError: false }; } } as any;
+  const resolver = new ChannelBrainResolver((name) => (name === 'qwen' ? namedBrain : defaultBrain), defaultBrain, logger);
+  const rag = { search: async () => HIT } as any;
+  const conversations = { append: async () => {} } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    null as any, null as any, null as any, null as any, null as any,
+    defaultBrain, null as any, null as any, { all: () => [] } as any, null as any,
+    rag, resolver,
+  ) as any;
+  const posts: string[] = [];
+  await o.observe({ text: '마이그레이션 질문입니다', userId: 'c1', brain: 'qwen' }, async (t: string) => { posts.push(t); });
+  expect(posts).toEqual(['💡 채널 두뇌 힌트']);
+  expect(namedCalls.n).toBe(1);
+  expect(defaultCalls.n).toBe(0);
+});
+
+it('이벤트 brain 미지정 → resolver 주입돼도 기본 codeBrain 그대로(회귀 0)', async () => {
+  const defaultCalls = { n: 0 };
+  const defaultBrain = { complete: async () => { defaultCalls.n++; return { text: '{"interject":false,"text":""}', costUsd: 0, isError: false }; } } as any;
+  const resolver = new ChannelBrainResolver(() => { throw new Error('불려선 안 됨'); }, defaultBrain, logger);
+  const rag = { search: async () => HIT } as any;
+  const conversations = { append: async () => {} } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    null as any, null as any, null as any, null as any, null as any,
+    defaultBrain, null as any, null as any, { all: () => [] } as any, null as any,
+    rag, resolver,
+  ) as any;
+  await o.observe({ text: '마이그레이션 질문입니다', userId: 'c1' }, async () => {});
+  expect(defaultCalls.n).toBe(1);
 });
 
 it('insight(userId, date) → reporter.run에 date 패스스루', async () => {

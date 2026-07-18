@@ -30,8 +30,9 @@ it('Code 모드 메시지는 classify를 건너뛰고 대화 답변으로 간다
     async () => {}, 'c1',
   );
   expect(spyClassify).not.toHaveBeenCalled();
+  // 3번째 인자는 요청 한정 채널 두뇌(Task 2, 스펙 §3.2) — channelBrain 미주입이면 codeBrain 그대로 전달.
   expect(spyAnswer).toHaveBeenCalledWith(
-    expect.objectContaining({ mode: 'code', repoPath: 'C:/repo/app' }), 'c1',
+    expect.objectContaining({ mode: 'code', repoPath: 'C:/repo/app' }), 'c1', expect.anything(),
   );
 });
 

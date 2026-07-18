@@ -82,7 +82,8 @@ it('[구현 시작] 누르면 startProposal로 escalate', async () => {
   await orch.handleMention(
     { text: '구현 시작', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
   );
-  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙이기', 'c1', expect.any(Function));
+  // 5번째 인자는 요청 한정 채널 두뇌(Task 2, 스펙 §3.2) — channelBrain 미주입이면 codeBrain 그대로 전달.
+  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙이기', 'c1', expect.any(Function), expect.anything());
   expect((orch as any).pending.get('c1')).toBeUndefined(); // proposeReady 소비됨
 });
 

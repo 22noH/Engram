@@ -9,6 +9,7 @@ import { ConversationStore, ConversationRecord } from '../knowledge-core/convers
 import { outputDirective } from './language';
 import { t } from './i18n';
 import { BrainDelegator } from './brain-delegator';
+import { ChannelBrainResolver } from './channel-brain-resolver';
 import { loadPrompt } from './prompt-store';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
@@ -33,6 +34,8 @@ export class ReaderAgent {
     @Optional() private readonly insight?: InsightContext,
     @Optional() private readonly conversations?: ConversationStore,
     @Optional() private readonly delegator?: BrainDelegator,
+    // 채널별 두뇌 해소(스펙 §3.2). 미주입(구식 DI·기존 테스트)이면 항상 주입 BRAIN 사용(회귀 0).
+    @Optional() private readonly channelBrain?: ChannelBrainResolver,
   ) {}
 
   async handle(
@@ -41,6 +44,9 @@ export class ReaderAgent {
     onSources?: (slugs: string[]) => void,
   ): Promise<string> {
     const emit = (s: string): void => onChunk?.(s);
+    // 요청 한정 지역 변수(스펙 §3.2) — this.brain(싱글턴)에 대입하지 않는다.
+    // channelBrain 미주입 시 항상 this.brain 그대로(회귀 0). msg.brain 미지정이면 resolve가 this.brain을 돌려준다.
+    const brain = this.channelBrain ? this.channelBrain.resolve(msg.brain) : this.brain;
     try {
       const hits = await this.rag.search(msg.text, 5, msg.userId);
       onSources?.(hits.map((h) => h.slug));
@@ -55,9 +61,10 @@ export class ReaderAgent {
       } catch { recent = []; }
       // 지휘자 활성 조건: 위임기 주입됨 + 이 두뇌가 위임 지원(엔그램 하네스) + 위임 가능한 두뇌가 실재.
       // CLI 두뇌(canDelegate 없음)면 지휘자 오프 → 프롬프트·opts.delegate 모두 8d 이전과 동일(회귀 0).
-      const session = this.delegator && this.brain.canDelegate ? this.delegator.handle() : undefined;
+      // 게이트는 해소된(채널) 두뇌의 canDelegate 기준 — 기본 두뇌가 아니라 이 요청이 실제로 쓰는 두뇌.
+      const session = this.delegator && brain.canDelegate ? this.delegator.handle() : undefined;
       const handle = session && session.brains.length > 0 ? session : undefined;
-      const result = await this.brain.complete(
+      const result = await brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle),
         onChunk,
         handle ? { delegate: handle } : undefined,

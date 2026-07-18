@@ -74,6 +74,37 @@ describe('Orchestrator.codeRun', () => {
     expect(r.status).toBe('STUCK');   // SUCCESS가 아니어야 한다
   });
 
+  it('opts.brain 지정 → decompose·coder.work 모두 채널 두뇌로 불리고 기본 codeBrain은 안 불림(Task 2 스펙 §3.2)', async () => {
+    const tickets = [{ id: 'tk0', area: '.', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }];
+    const tasks = {
+      createCoding: async () => ({ id: 's1' }), transition: async () => {}, addTickets: async () => {},
+      recordProgress: async () => {}, contribute: async () => {},
+      updateTicket: async (_i: string, id: string, patch: any) => { const t = tickets.find(x => x.id === id); Object.assign(t!, patch); },
+      get: async () => ({ id: 's1', tickets, blackboard: {}, progress: { landed: tickets.filter(t=>t.status==='SUCCESS').length, criteriaMet: 0, criteriaTotal: 1 } }),
+      setResult: async () => {}, remove: async () => {},
+    };
+    let defaultCalls = 0;
+    const defaultBrain = { complete: async () => { defaultCalls++; return { text: '{"tickets":[]}', costUsd: 0, isError: false }; } };
+    let channelCalls = 0;
+    const channelBrain = { complete: async () => { channelCalls++; return { text: '{"tickets":[{"area":".","instruction":"i"}]}', costUsd: 0, isError: false }; } };
+    const seenWorkBrain: unknown[] = [];
+    const coder = { work: async (_p: string, _t: any, _proj: any, _c: any, brainArg: unknown) => { seenWorkBrain.push(brainArg); return '코딩함'; } };
+    const o = new Orchestrator({} as any, {} as any, logger, {} as any,
+      tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
+      { get: async () => project } as any,
+      { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      coder as any,
+      { review: async () => ({ approved: true, extraTickets: [] }) } as any,
+      defaultBrain as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
+    const r = await o.codeRun('p', { maxRounds: 5, brain: channelBrain as any });
+    expect(r.status).toBe('SUCCESS');
+    expect(channelCalls).toBe(1); // decompose
+    expect(defaultCalls).toBe(0);
+    expect(seenWorkBrain).toEqual([channelBrain]);
+  });
+
   it('runState=stopped면 STOPPED', async () => {
     const tasks = {
       createCoding: async () => ({ id: 's1' }), transition: async () => {}, addTickets: async () => {},

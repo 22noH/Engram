@@ -28,7 +28,11 @@ export function bindMessenger(
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
     try {
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).
-      await orchestrator.handleMention({ text: e.text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}) }, post, threadKey);
+      await orchestrator.handleMention(
+        { text: e.text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}), ...(e.brain ? { brain: e.brain } : {}) },
+        post,
+        threadKey,
+      );
     } catch (err) {
       logger.warn(`멘션 처리 실패: ${String(err)}`, 'Messenger');
       try { await post(t('mentionHandleFailed')); } catch { /* post도 실패하면 포기 */ }
@@ -41,7 +45,7 @@ export function bindMessenger(
       if (!allows(policy, e.channelId, 'observe')) return;
       try {
         await orchestrator.observe!(
-          { text: e.text, userId: e.channelId },
+          { text: e.text, userId: e.channelId, ...(e.brain ? { brain: e.brain } : {}) },
           (text) => port.postToChannel(e.channelId, text, e.threadId),
         );
       } catch (err) {

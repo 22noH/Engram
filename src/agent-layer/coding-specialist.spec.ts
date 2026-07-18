@@ -97,4 +97,24 @@ describe('CodingSpecialist', () => {
     await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }, project);
     expect(captured.opts.cmdGuard).toBeUndefined();
   });
+
+  it('brainOverride 지정 → persona.brain 조회를 건너뛰고 그 두뇌로 부른다(Task 2, 채널 두뇌 위임)', async () => {
+    let personaCalls = 0;
+    const namedCalls: string[] = [];
+    const namedBrain = { complete: (p: string) => { namedCalls.push(p); return Promise.resolve({ text: '채널두뇌답', costUsd: 0, isError: false }); } };
+    const resolveBrain = () => { personaCalls++; return { complete: () => Promise.resolve({ text: '기본답', costUsd: 0, isError: false }) } as any; };
+    const spec = new CodingSpecialist(registry, fence, resolveBrain as any, logger);
+    const out = await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: '로그인 고쳐', status: 'PENDING', attempts: 0, gate: null }, project, undefined, namedBrain as any);
+    expect(out).toBe('채널두뇌답');
+    expect(namedCalls).toHaveLength(1);
+    expect(personaCalls).toBe(0); // persona.brain 조회(resolveBrain)는 호출되지 않아야 한다
+  });
+
+  it('brainOverride 미지정 → 기존 동작(persona.brain 조회) 그대로(회귀 0)', async () => {
+    const captured: any = {};
+    const brain = { complete: (p: string) => { captured.prompt = p; return Promise.resolve({ text: '작업함', costUsd: 0, isError: false }); } };
+    const spec = new CodingSpecialist(registry, fence, () => brain as any, logger);
+    const out = await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: '로그인 고쳐', status: 'PENDING', attempts: 0, gate: null }, project);
+    expect(out).toBe('작업함');
+  });
 });

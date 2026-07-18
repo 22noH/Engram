@@ -29,7 +29,8 @@ export class CodingSpecialist {
     private readonly logger: PinoLogger,
   ) {}
 
-  async work(personaName: string, ticket: CodingTicket, project: ProjectConfig, onChunk?: (t: string) => void): Promise<string> {
+  // brainOverride: 채널 두뇌(스펙 §3.2, Task 2) — 지정되면 persona.brain 조회보다 우선한다. 미지정=기존 동작(회귀 0).
+  async work(personaName: string, ticket: CodingTicket, project: ProjectConfig, onChunk?: (t: string) => void, brainOverride?: BrainProvider): Promise<string> {
     const persona = this.registry.get(personaName);
     if (!persona) throw new Error(`알 수 없는 페르소나: ${personaName}`);
     const failNote = ticket.gate && !ticket.gate.pass ? `\n# Previous gate failure (fix it)\n${ticket.gate.output}` : '';
@@ -43,7 +44,7 @@ export class CodingSpecialist {
     ].join('\n');
     // 자동모드: 표준 코딩 toolset + 백스톱 밖 타깃 스코프 + acceptEdits(울타리 안 자율 편집).
     const flags = [...this.fence.codingAutoFlags(project.writePaths), '--permission-mode', 'acceptEdits'];
-    const brain = this.resolveBrain(persona.brain);
+    const brain = brainOverride ?? this.resolveBrain(persona.brain);
     const r = await brain.complete(prompt, onChunk, {
       cwd: project.targetPath,
       extraArgs: flags, // CLI 두뇌용(무변경)

@@ -34,6 +34,7 @@ import { RagStore } from '../knowledge-core/rag/rag-store';
 import type { Action } from '../../shared/protocol';
 import { outputDirective, configuredLang } from './language';
 import { t } from './i18n';
+import { ChannelBrainResolver } from './channel-brain-resolver';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 type PostFn = (text: string, actions?: Action[]) => Promise<void>;
@@ -101,7 +102,15 @@ export class Orchestrator {
     @Optional() private readonly registry?: PersonaRegistry,
     @Optional() private readonly paths?: PathResolver,
     @Optional() private readonly rag?: RagStore,
+    // 채널별 두뇌 해소(스펙 §3.2). 미주입(구식 DI·기존 테스트)이면 resolveMsgBrain이 기존 codeBrain 그대로 돌려준다(회귀 0).
+    @Optional() private readonly channelBrain?: ChannelBrainResolver,
   ) {}
+
+  // 이 메시지가 쓸 두뇌를 요청 한정으로 해소(스펙 §3.2) — 결과는 지역 변수로만 쓴다(싱글턴 필드 오염 금지).
+  // channelBrain 미주입 시 기존 codeBrain 그대로(회귀 0). msg.brain 미지정이면 resolve가 기본(=codeBrain)을 돌려준다.
+  private resolveMsgBrain(msg: CoreMessage): BrainProvider | undefined {
+    return this.channelBrain ? this.channelBrain.resolve(msg.brain) : this.codeBrain;
+  }
 
   digest(userId: string = DEFAULT_USER): Promise<{ extracted: number; gated: number; proposed: number }> {
     return this.ingester.run(userId);
@@ -139,6 +148,8 @@ export class Orchestrator {
     threadKey: string = msg.userId,
   ): Promise<void> {
     const trimmed = msg.text.trim();
+    // 이 요청 한정 두뇌(스펙 §3.2) — 아래 코딩/분류 경로 전부가 이 지역 변수를 공유한다.
+    const brain = this.resolveMsgBrain(msg);
 
     // 상태 조회: 이 스레드의 진행/최근 작업 보고.
     if (trimmed === '상태' || trimmed === 'status') {
@@ -158,7 +169,7 @@ export class Orchestrator {
           const n = parseInt(trimmed, 10);
           if (n < 1 || n > p.candidates.length) { await post(t('chooseFromRange', p.candidates.length)); return; }
           this.pending.delete(threadKey);
-          await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post);
+          await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post, brain);
           return;
         }
         // 비숫자·비취소 → 이 스레드의 모호선택을 포기(스테일 방지), 아래 일반 처리로 흐름.
@@ -166,13 +177,13 @@ export class Orchestrator {
       } else if (p.kind === 'approve' && (trimmed === '승인' || trimmed === 'approve')) {
         this.pending.delete(threadKey);
         await this.approveProject(p.projectId);
-        this.launchCoding(p.projectId, p.path, threadKey, post);
+        this.launchCoding(p.projectId, p.path, threadKey, post, 0, brain);
         return;
       } else if (p.kind === 'proposeReady') {
         if (trimmed === '구현 시작' || trimmed === '승인' || trimmed === 'approve') {
           this.pending.delete(threadKey);
           if (!(await this.channelGate('coding', msg.userId, post))) return;
-          await this.startProposal(p.repoPath, p.goal, threadKey, post);
+          await this.startProposal(p.repoPath, p.goal, threadKey, post, brain);
           return;
         }
         // 비매칭 → 스테일 제안 버리고 아래 일반 흐름으로(disambiguate와 동일 패턴)
@@ -186,7 +197,7 @@ export class Orchestrator {
       const repoRef = sp < 0 ? rest : rest.slice(0, sp);
       const goal = sp < 0 ? '' : rest.slice(sp + 1);
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startCoding(repoRef, goal, threadKey, post);
+      await this.startCoding(repoRef, goal, threadKey, post, brain);
       return;
     }
     // 예약(스케줄) 관리 명령
@@ -216,7 +227,7 @@ export class Orchestrator {
       const parts = trimmed.slice('resume '.length).trim().split(/\s+/);
       const attempt = /^\d+$/.test(parts[1] ?? '') ? parseInt(parts[1], 10) : 0;
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post);
+      await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post, brain);
       return;
     }
     // 협업 재시도 재주입(6b-3-2). 형식: retry <attempt> <팀CSV> <질문> — 불일치면 일반 흐름으로.
@@ -255,7 +266,7 @@ export class Orchestrator {
         await post(t('noRepoFolder'));
         return;
       }
-      const { reply, goal } = await this.answerInCode(msg, threadKey);
+      const { reply, goal } = await this.answerInCode(msg, threadKey, brain);
       // 이 채널의 다음 턴 연속성을 위해 Q&A 적재(answerInCode의 recent가 읽는다). 실패는 continuity만 포기.
       try {
         await this.conversations.append(msg.userId, { ts: new Date().toISOString(), question: msg.text, answer: reply, sources: [] });
@@ -269,10 +280,10 @@ export class Orchestrator {
       return;
     }
 
-    const decision = await this.classify(trimmed);
+    const decision = await this.classify(trimmed, brain);
     if (decision.kind === 'code') {
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post);
+      await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post, brain);
       return;
     }
     if (decision.kind === 'schedule') {
@@ -360,8 +371,8 @@ export class Orchestrator {
     return resolveRepo(repoRef, this.codeRepos());
   }
 
-  // 멘션 코딩 진입: repo 해소 → 0/1/N 분기.
-  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
+  // 멘션 코딩 진입: repo 해소 → 0/1/N 분기. brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain).
+  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
     const matches = this.resolveRepoPaths(repoRef);
     if (matches.length === 0) {
       await post(t('repoNotFound', repoRef));
@@ -376,13 +387,15 @@ export class Orchestrator {
       await post(t('multipleReposFound', matches.map((m, i) => `${i + 1}. ${m}`).join('\n')), actions);
       return;
     }
-    await this.startProposal(matches[0], goal, threadKey, post);
+    await this.startProposal(matches[0], goal, threadKey, post, brain);
   }
 
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
   // 조회만 한다 — 게시·pending은 호출 분기(Step 6)가 결정. 읽기전용이라 게이트 없음(질문=chat 동급).
-  private async answerInCode(msg: CoreMessage, threadKey: string): Promise<{ reply: string; goal?: string }> {
-    if (!this.codeBrain || !msg.repoPath) return { reply: t('answerUnavailable') };
+  // brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
+  private async answerInCode(msg: CoreMessage, threadKey: string, brain?: BrainProvider): Promise<{ reply: string; goal?: string }> {
+    const useBrain = brain ?? this.codeBrain;
+    if (!useBrain || !msg.repoPath) return { reply: t('answerUnavailable') };
 
     let recent = '';
     try {
@@ -398,7 +411,7 @@ export class Orchestrator {
     });
     // 읽기전용 도구 + --add-dir로 레포 읽기 보장(헤드리스 claude가 cwd 밖을 막을 수 있음).
     // 읽기전용은 이 allowedTools에 쓰기 도구가 없음에 의존한다 — 프로필(brains.json)이 Edit/Write를 직접 주면 깨질 수 있음(기본 프로필 extraArgs는 비어 안전).
-    const r = await this.codeBrain.complete(prompt, undefined, {
+    const r = await useBrain.complete(prompt, undefined, {
       cwd: msg.repoPath,
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
     });
@@ -406,12 +419,12 @@ export class Orchestrator {
     return extractPropose(r.text);
   }
 
-  // 완성조건 초안 → 대상·조건 게시 → 승인 대기.
-  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn): Promise<void> {
+  // 완성조건 초안 → 대상·조건 게시 → 승인 대기. brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
+  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
     if (!this.fence || !this.projects) { await post(t('codingNotReady')); return; }
     try { this.fence.assertWritable(targetPath); }
     catch { await post(t('pathProtected')); return; }
-    const cfg = await this.proposeProject(targetPath, goal);
+    const cfg = await this.proposeProject(targetPath, goal, brain);
     this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
     const crit = cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
     await post(
@@ -424,12 +437,13 @@ export class Orchestrator {
   }
 
   // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
-  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0): void {
+  // brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain) — codeRun·CodingSpecialist.work까지 전달.
+  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0, brain?: BrainProvider): void {
     const tracked = this.tracker.start(threadKey, { question: t('codingTaskLabel', targetPath), team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         await post(t('codingStarted'));
-        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); } });
+        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); }, brain });
         this.tracker.finish(threadKey, tracked.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
@@ -472,7 +486,9 @@ export class Orchestrator {
   }
 
   // 예약된 코딩 재개 실행: 존재·승인 확인 → runState 복원(STUCK이 남긴 paused) → 백그라운드 재실행.
-  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn): Promise<void> {
+  // brain: 요청 한정 채널 두뇌(재주입 메시지가 실어온 것 — self.adapter가 매 이벤트에 최신 채널 brain을
+  // 첨부하므로 사용자의 "resume" 답장이나 예약 발사 둘 다 이 경로로 흐른다. 미지정=기존 codeBrain).
+  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
     if (!this.projects) { await post(t('codingNotReady')); return; }
     const project = await this.projects.get(projectId);
     if (!project) { await post(t('projectNotFound')); return; }
@@ -480,7 +496,7 @@ export class Orchestrator {
     // ponytail: runState는 전역 스위치(N=1 가정) — 재개가 engram pause로 멈춘 다른 코딩까지 풀 수 있다. N>1이면 프로젝트별 run-state로.
     this.setRunState('running');
     await post(t('resuming', project.targetPath, attempt));
-    this.launchCoding(projectId, project.targetPath, threadKey, post, attempt);
+    this.launchCoding(projectId, project.targetPath, threadKey, post, attempt, brain);
   }
 
   // 재시작 생존(Phase 10b): 부팅 시 호출. RUNNING 코딩 레코드를 각자 채널로 재개(승인된 프로젝트만 —
@@ -578,7 +594,9 @@ export class Orchestrator {
 
   async observe(msg: CoreMessage, post: (text: string) => Promise<void>): Promise<void> {
     try {
-      if (!this.rag || !this.codeBrain) return;
+      // 요청 한정 채널 두뇌(스펙 §3.2). channelBrain 미주입이면 this.codeBrain 그대로(회귀 0).
+      const brain = this.resolveMsgBrain(msg);
+      if (!this.rag || !brain) return;
       const text = msg.text.trim();
       if (text.length < 10) return;
       const n = Number(process.env.ENGRAM_AMBIENT_COOLDOWN_MIN);
@@ -594,7 +612,7 @@ export class Orchestrator {
         `\n# Wiki excerpts\n${hits.map((h) => `- [${h.slug}] ${h.text.slice(0, 200)}`).join('\n')}`,
         '\nOutput only this JSON: {"interject":true|false,"text":"one or two sentences"}',
       ].join('\n');
-      const r = await this.codeBrain.complete(prompt);
+      const r = await brain.complete(prompt);
       if (r.isError) return;
       const o = parseJsonBlock<{ interject?: unknown; text?: unknown }>(r.text);
       if (!o || o.interject !== true || typeof o.text !== 'string' || !o.text.trim()) return;
@@ -609,8 +627,10 @@ export class Orchestrator {
   protected now(): number { return Date.now(); }
 
   // 멘션 분류 + 로스터/코딩대상/예약 추출(두뇌 1콜). 실패는 전부 chat 폴백(상주를 막지 않음).
-  private async classify(text: string): Promise<{ kind: 'chat' | 'collaborate' | 'code' | 'schedule'; team: string[]; repoRef?: string; goal?: string; cron?: string; task?: string; once?: boolean }> {
-    if (!this.codeBrain) return { kind: 'chat', team: [] };
+  // brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
+  private async classify(text: string, brain?: BrainProvider): Promise<{ kind: 'chat' | 'collaborate' | 'code' | 'schedule'; team: string[]; repoRef?: string; goal?: string; cron?: string; task?: string; once?: boolean }> {
+    const useBrain = brain ?? this.codeBrain;
+    if (!useBrain) return { kind: 'chat', team: [] };
     const roster = (this.registry?.all() ?? []).map((p) => `- ${p.name}: ${p.role}`).join('\n');
     const aliases = Object.keys(this.codeRepos().aliases);
     const prompt = [
@@ -621,7 +641,7 @@ export class Orchestrator {
       '\nOutput only this JSON: {"kind":"chat"|"collaborate"|"code"|"schedule","team":["name",...],"repo":"repo ref","goal":"the task","cron":"0 9 * * *","task":"the task","once":false}',
     ].join('\n');
     try {
-      const r = await this.codeBrain.complete(prompt);
+      const r = await useBrain.complete(prompt);
       if (r.isError) return { kind: 'chat', team: [] };
       const o = parseJsonBlock<{ kind?: unknown; team?: unknown; repo?: unknown; goal?: unknown; cron?: unknown; task?: unknown; once?: unknown }>(r.text);
       const kind = o && (o.kind === 'collaborate' || o.kind === 'code' || o.kind === 'schedule') ? o.kind : 'chat';
@@ -704,15 +724,17 @@ export class Orchestrator {
 
   // 시작 게이트(설계 §4-0, D). 완성조건은 두뇌 추정, 게이트는 프로젝트 파일에서 *결정적 탐지*
   // (두뇌 추측 'node x.js'는 로드만 보고 거짓 통과 → detectGate로 package.json/tsconfig 직접 읽음).
-  async proposeProject(targetPath: string, goal: string): Promise<ProjectConfig> {
-    if (!this.projects || !this.codeBrain || !this.fence) throw new Error('proposeProject 협력자 미주입');
+  // brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain).
+  async proposeProject(targetPath: string, goal: string, brain?: BrainProvider): Promise<ProjectConfig> {
+    const useBrain = brain ?? this.codeBrain;
+    if (!this.projects || !useBrain || !this.fence) throw new Error('proposeProject 협력자 미주입');
     this.fence.assertWritable(targetPath); // denyPaths/writePaths 밖 거부(자기수정 차단 ③)
     const prompt = [
       'Estimate the acceptance criteria (verifiable items) for the goal below.',
       `\n# Goal\n${goal}\n# Target path\n${targetPath}`,
       '\nOutput only this JSON: {"acceptanceCriteria":["..."]}',
     ].join('\n');
-    const r = await this.codeBrain.complete(prompt);
+    const r = await useBrain.complete(prompt);
     const draft = this.parseProposal(r.isError ? '' : r.text);
     const id = `proj_${targetPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-24)}_${this.hashPath(targetPath)}`;
     const cfg: ProjectConfig = {
@@ -740,9 +762,10 @@ export class Orchestrator {
   getRunState(): string { return this.runState; }
 
   // 코딩 루프(설계 §4). 유일 배정구(seam #1). run-state로 stop·stuck·budget 통합(§6).
+  // opts.brain: 요청 한정 채널 두뇌(스펙 §3.2) — decompose·CodingSpecialist.work에 전달. 미지정=기존 codeBrain.
   async codeRun(
     projectId: string,
-    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string } = {},
+    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string; brain?: BrainProvider } = {},
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
     if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
@@ -764,7 +787,8 @@ export class Orchestrator {
     });
     await this.tasks!.transition(session.id, 'RUNNING');
     report(t('decomposing'));
-    const initial = await this.decompose(project.acceptanceCriteria.join('\n'), this.codeBrain);
+    const brain = opts.brain ?? this.codeBrain;
+    const initial = await this.decompose(project.acceptanceCriteria.join('\n'), brain);
     await this.tasks!.addTickets(session.id, initial);
     report(t('decomposeDone', initial.length));
 
@@ -785,7 +809,7 @@ export class Orchestrator {
         try {
           report(t('codingTicket', ticket.area));
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'RUNNING', attempts: ticket.attempts + 1 });
-          const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk);
+          const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk, opts.brain);
           budgetSpent += 1; // ponytail: 호출 수 근사. 실토큰 회계는 후속(§14).
           report(t('gateRunning', ticket.area));
           const result = await this.gate!.run(project.targetPath, project.gate);

@@ -30,27 +30,42 @@ import { loadBrainProfile, listBrainNames } from '../brain/brain.config';
 import { VerificationGate } from './verification-gate';
 import { InsightReporter } from './insight-reporter';
 import { BrainDelegator } from './brain-delegator';
+import { ChannelBrainResolver, BRAIN_NAME_RESOLVE, BrainNameResolve } from './channel-brain-resolver';
 
 // AgentLayer(설계 §7). 코어(RagStore·PinoLogger)와 두뇌(BRAIN)를 소비.
 @Module({
   imports: [KnowledgeCoreModule, BrainModule],
   providers: [
     ReaderAgent,
+    // 이름→두뇌 캐시(8d 위임기 정책 — 프로필별 새 인스턴스·고유 세마포어). 위임기·채널 두뇌 해소(Task 2)가
+    // 이 하나의 캐시를 공유한다(새 캐시 금지 — 같은 이름은 어느 경로로 와도 같은 인스턴스).
+    // ★'claude'를 주입 BRAIN으로 pre-seed하지 않는다. 위임/채널 두뇌 이름은 brains.json 실키(listBrainNames)라
+    // 'claude'는 진짜 claude-cli 프로필. 주입 BRAIN(=지휘자 자신)으로 alias하면 (1)'claude' 위임이 지휘자를
+    // 다시 돌려 데드락(같은 Semaphore 재진입), (2)사용자가 지목한 claude-cli 대신 엉뚱한 두뇌가 돈다.
+    // 그래서 항상 프로필로부터 새 인스턴스(고유 Semaphore)로 해소.
     {
-      provide: BrainDelegator,
-      useFactory: (paths: PathResolver) => {
-        // ★SpecialistAgent와 달리 여기선 'claude'를 주입 BRAIN으로 pre-seed하지 않는다.
-        // 위임 대상 이름은 brains.json 실키(listBrainNames)라 'claude'는 진짜 claude-cli 프로필이다.
-        // 주입 BRAIN(=지휘자 자신)으로 alias하면 (1)'claude' 위임이 지휘자를 다시 돌려 데드락(같은 Semaphore 재진입),
-        // (2)사용자가 지목한 claude-cli 대신 엉뚱한 두뇌가 돈다. 그래서 항상 프로필로부터 새 인스턴스(고유 Semaphore)로 해소.
+      provide: BRAIN_NAME_RESOLVE,
+      useFactory: (paths: PathResolver): BrainNameResolve => {
         const cache = new Map<string, BrainProvider>();
-        const resolve = (key: string): BrainProvider => {
+        return (key: string): BrainProvider => {
           if (!cache.has(key)) cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key), paths.getConfigDir()));
           return cache.get(key)!;
         };
-        return new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir()));
       },
       inject: [PathResolver],
+    },
+    {
+      provide: BrainDelegator,
+      useFactory: (resolve: BrainNameResolve, paths: PathResolver) =>
+        new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir())),
+      inject: [BRAIN_NAME_RESOLVE, PathResolver],
+    },
+    // 채널별 두뇌 해소(스펙 §3.2). 이름 미지정=주입 BRAIN, 이름 지정=위와 동일 캐시로 resolve, 실패=기본+warn.
+    {
+      provide: ChannelBrainResolver,
+      useFactory: (resolve: BrainNameResolve, defaultBrain: BrainProvider, logger: PinoLogger) =>
+        new ChannelBrainResolver(resolve, defaultBrain, logger),
+      inject: [BRAIN_NAME_RESOLVE, BRAIN, PinoLogger],
     },
     IngesterAgent,
     // personas 디렉토리는 절대경로로 해소(테스트 cwd 무관): dataDir 오버라이드 우선, 없으면 레포/앱 루트(Phase 7).
@@ -166,12 +181,13 @@ import { BrainDelegator } from './brain-delegator';
         registry: PersonaRegistry,
         paths: PathResolver,
         rag: RagStore,
+        channelBrain: ChannelBrainResolver,
       ) => {
         const sem = new Semaphore(2);
         return new Orchestrator(
           reader, conversations, logger, ingester, tasks, specialist, synthesizer, sem,
           projects, gate, codingGit, coder, reviewer, codeBrain, fence, reporter, registry, paths,
-          rag,
+          rag, channelBrain,
         );
       },
       inject: [
@@ -179,6 +195,7 @@ import { BrainDelegator } from './brain-delegator';
         SpecialistAgent, Synthesizer,
         ProjectStore, VerificationGate, CodingGit, CodingSpecialist, ReviewerAgent,
         BRAIN, PermissionFence, InsightReporter, PersonaRegistry, PathResolver, RagStore,
+        ChannelBrainResolver,
       ],
     },
   ],

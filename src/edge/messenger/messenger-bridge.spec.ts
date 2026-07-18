@@ -103,6 +103,36 @@ it('mode가 없는 mention은 mode 필드를 포함하지 않는다(후방호환
   expect('repoPath' in calls[0]).toBe(false);
 });
 
+it('mention 이벤트의 brain을 handleMention에 넘긴다(Task 2, 스펙 §3.2)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {}, brain: 'qwen' });
+  expect(calls[0].brain).toBe('qwen');
+});
+
+it('brain이 없는 mention은 brain 필드를 포함하지 않는다(후방호환)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {} });
+  expect('brain' in calls[0]).toBe(false);
+});
+
+it('observe로 흐르는 일반 메시지의 brain도 함께 넘긴다', async () => {
+  const seen: any[] = [];
+  const orchestrator = {
+    handleMention: async () => {},
+    observe: async (msg: any) => { seen.push(msg); },
+  };
+  const port = new FakeMessenger();
+  bindMessenger(port, orchestrator as any, { warn() {} } as any, OBS_POLICY);
+  await port.emitMessage({ text: '일반 대화', channelId: 'obs', authorId: 'u1', target: null, brain: 'qwen' } as any);
+  expect(seen[0].brain).toBe('qwen');
+});
+
 it('post(text, actions)가 port.reply에 actions를 넘긴다', async () => {
   const replied: any[] = [];
   const port = new FakeMessenger();

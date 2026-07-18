@@ -14,6 +14,7 @@ export interface MentionEvent {
   target: ReplyTarget; // reply가 되돌려줄 핸들
   mode?: 'chat' | 'code'; // Phase 10: 어댑터가 채널 모드를 실어줌(Discord는 미설정=chat).
   repoPath?: string;      // Phase 10: Code 채널 바인딩 경로.
+  brain?: string;         // 채널별 두뇌(스펙 §3.2): 어댑터가 채널의 brain 이름을 실어줌. 미첨부=기본(Discord는 비범위).
 }
 
 export interface MessengerPort {

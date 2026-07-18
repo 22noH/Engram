@@ -5,4 +5,5 @@ export interface CoreMessage {
   userId: string; // 멀티유저 네임스페이스(기본 DEFAULT_USER)
   mode?: 'chat' | 'code'; // Phase 10: Code 채널이면 classify 건너뛰고 코딩으로.
   repoPath?: string;      // Phase 10: Code 채널이 바인딩한 레포 절대경로.
+  brain?: string;         // 채널별 두뇌 이름(설계 §3.2): 미설정=기존 주입 BRAIN(회귀 0).
 }
