@@ -242,4 +242,11 @@ describe('ChatStore.setChannelBrain (Task 1)', () => {
     const ch = fresh.listChannels()[0];
     expect(ch.brain).toBeUndefined();
   });
+
+  it('setChannelBrain 공백이 있는 값은 trim하여 저장', () => {
+    const ch = store.createChannel('ai-dev')!;
+    expect(store.setChannelBrain(ch.id, ' qwen ')).toBe(true);
+    const again = new ChatStore(dir);
+    expect(again.listChannels().find((c) => c.id === ch.id)?.brain).toBe('qwen');
+  });
 });

@@ -120,9 +120,9 @@ export class ChatStore {
     if (brain === null) {
       delete ch.brain;
     } else {
-      const trimmed = (brain ?? '').trim();
+      const trimmed = brain.trim();
       if (!trimmed) return false;
-      ch.brain = brain;
+      ch.brain = trimmed;
     }
     this.save(list);
     return true;
