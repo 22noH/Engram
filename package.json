@@ -21,6 +21,7 @@
     "prompts",
     "personas",
     "README.md",
+    "README.ko.md",
     "!dist/**/*.spec.js",
     "!dist/**/*.spec.js.map",
     "!dist/**/*.spec.d.ts",
