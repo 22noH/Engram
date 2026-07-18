@@ -401,6 +401,7 @@
       mcpCap: 'AI에 도구를 꽂는 표준(MCP) 서버 목록 — Claude Code의 .mcp.json과 같은 포맷이라 파일을 직접 편집해도 돼요',
       mcpEmpty: '등록된 MCP 서버가 없어요',
       mcpNameRule: '이름은 영소문자·숫자·-·_만, 중복 불가',
+      mcpCmdRequired: '실행 명령을 입력하세요 (예: npx)',
       addServer: '서버 추가',
     } : {
       tagline2: 'Settings', search: 'Search',
@@ -455,6 +456,7 @@
       mcpCap: "MCP servers — the standard way to plug tools into AI. Same format as Claude Code's .mcp.json, so editing the file directly works too",
       mcpEmpty: 'No MCP servers',
       mcpNameRule: 'Lowercase letters, digits, - and _ only; no duplicates',
+      mcpCmdRequired: 'Enter a command to run (e.g. npx)',
       addServer: 'Add server',
     };
 
@@ -1180,6 +1182,7 @@
         const name = nameInput.value.trim();
         const command = cmdInput.value.trim();
         const argsLine = argsInput.value.trim();
+        if (!command) { status.textContent = t.mcpCmdRequired; return; } // 빈 command는 이름 규칙 문구가 오답이라 선분기
         const ok = await window.engram.addMcpServer(name, command, argsLine);
         if (!ok) { status.textContent = t.mcpNameRule; return; }
         await loadMcpServers();
