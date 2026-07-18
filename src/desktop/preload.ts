@@ -33,4 +33,7 @@ contextBridge.exposeInMainWorld('engram', {
   removeSchedule: (id: string) => ipcRenderer.invoke('engram:remove-schedule', id),
   getWikiRemote: () => ipcRenderer.invoke('engram:get-wiki-remote'),
   setWikiRemote: (cfg: { remote: string; branch: string; syncIntervalSec: number }) => ipcRenderer.invoke('engram:set-wiki-remote', cfg),
+  listMcpServers: () => ipcRenderer.invoke('engram:list-mcp-servers'),
+  addMcpServer: (name: string, command: string, argsLine: string) => ipcRenderer.invoke('engram:add-mcp-server', name, command, argsLine),
+  removeMcpServer: (name: string) => ipcRenderer.invoke('engram:remove-mcp-server', name),
 });

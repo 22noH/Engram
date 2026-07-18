@@ -10,6 +10,7 @@ import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
 import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
+import { listMcpServersFile, addMcpServer, removeMcpServer } from './mcp-file';
 import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList } from './permissions-file';
 import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
 import { listSchedules, removeScheduleFromFile } from './schedules-file';
@@ -292,6 +293,10 @@ function registerIpc(): void {
     startLocalBrain(b);
     return { endpoint: `ws://127.0.0.1:${b.port}`, name: b.name };
   });
+  ipcMain.handle('engram:list-mcp-servers', () => listMcpServersFile(configDir));
+  ipcMain.handle('engram:add-mcp-server', (_e, name: string, command: string, argsLine: string) =>
+    addMcpServer(configDir, name, command, argsLine));
+  ipcMain.handle('engram:remove-mcp-server', (_e, name: string) => { removeMcpServer(configDir, name); });
 }
 
 // ---- 부팅 ----
