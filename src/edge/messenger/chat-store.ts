@@ -27,6 +27,7 @@ export interface ChatChannel {
   ownerId?: string;                    // 9b/16c: 비공개 채널 소유자(별개 — 건드리지 않음)
   visibility?: 'public' | 'private';   // Phase 16c: 비공개 = 초대된 사람만
   memberIds?: string[];                // Phase 16c: 비공개 채널 입장 허용 계정 id
+  brain?: string;                      // Task 1: 채널이 사용할 뇌(모델) 선택. 누락=기본값.
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
@@ -54,13 +55,25 @@ export class ChatStore {
       const raw = JSON.parse(fs.readFileSync(this.channelsPath(), 'utf8')) as ChatChannel[];
       if (Array.isArray(raw)) {
         // respondMode는 손수정 channels.json 등으로 오염될 수 있어 값을 정규화(드롭 대신 안전값으로 교정).
+        // brain도 마찬가지로 정규화: 비문자열/빈문자열이면 필드 자체 드롭.
         list = raw
           .filter((c) => c && safeId(c.id) && typeof c.name === 'string')
-          .map((c) => ({
-            ...c,
-            respondMode: c.respondMode === 'mention' ? 'mention' : 'all',
-            mode: c.mode === 'code' ? 'code' : c.mode === 'team' ? 'team' : 'chat',
-          }));
+          .map((c) => {
+            const normalized: ChatChannel = {
+              id: c.id,
+              name: c.name,
+              respondMode: c.respondMode === 'mention' ? 'mention' : 'all',
+              mode: c.mode === 'code' ? 'code' : c.mode === 'team' ? 'team' : 'chat',
+            };
+            // 선택적 필드들: 유효한 경우만 포함
+            if (typeof c.repoPath === 'string') normalized.repoPath = c.repoPath;
+            if (typeof c.creatorId === 'string') normalized.creatorId = c.creatorId;
+            if (typeof c.ownerId === 'string') normalized.ownerId = c.ownerId;
+            if (c.visibility === 'public' || c.visibility === 'private') normalized.visibility = c.visibility;
+            if (Array.isArray(c.memberIds)) normalized.memberIds = c.memberIds;
+            if (typeof c.brain === 'string' && c.brain.trim().length > 0) normalized.brain = c.brain;
+            return normalized;
+          });
       }
     } catch { /* 파일없음/손상 시 기본 생성 */ }
     if (list.length === 0) {
@@ -96,6 +109,21 @@ export class ChatStore {
     const ch = list.find((c) => c.id === id);
     if (!ch) return false;
     ch.respondMode = mode;
+    this.save(list);
+    return true;
+  }
+
+  setChannelBrain(id: string, brain: string | null): boolean {
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    if (brain === null) {
+      delete ch.brain;
+    } else {
+      const trimmed = (brain ?? '').trim();
+      if (!trimmed) return false;
+      ch.brain = brain;
+    }
     this.save(list);
     return true;
   }

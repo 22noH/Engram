@@ -181,3 +181,65 @@ describe('ChatStore 비공개 채널 (Phase 16c)', () => {
     expect(s.setVisibility('없음', 'private')).toBe(false);
   });
 });
+
+describe('ChatStore.setChannelBrain (Task 1)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brain-'));
+    store = new ChatStore(dir);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('setChannelBrain 설정→영속 재로드에 남음', () => {
+    const ch = store.createChannel('ai-dev')!;
+    expect(store.setChannelBrain(ch.id, 'claude-opus')).toBe(true);
+    const again = new ChatStore(dir);
+    expect(again.listChannels().find((c) => c.id === ch.id)?.brain).toBe('claude-opus');
+  });
+
+  it('setChannelBrain null 해제→필드 자체 삭제', () => {
+    const ch = store.createChannel('ai-dev')!;
+    store.setChannelBrain(ch.id, 'claude-opus');
+    expect(store.setChannelBrain(ch.id, null)).toBe(true);
+    const again = new ChatStore(dir);
+    expect(again.listChannels().find((c) => c.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  it('없는 채널 id는 false', () => {
+    expect(store.setChannelBrain('nonexistent', 'claude-opus')).toBe(false);
+  });
+
+  it('empty string 입력은 false 반환, 미변경', () => {
+    const ch = store.createChannel('ai-dev')!;
+    store.setChannelBrain(ch.id, 'claude-opus');
+    expect(store.setChannelBrain(ch.id, '')).toBe(false);
+    expect(store.listChannels().find((c) => c.id === ch.id)?.brain).toBe('claude-opus');
+  });
+
+  it('로드 정규화: brain이 비문자열/빈문자열이면 드롭', () => {
+    fs.writeFileSync(
+      path.join(dir, 'channels.json'),
+      JSON.stringify([
+        { id: 'a', name: 'a', respondMode: 'all', brain: 123 },
+        { id: 'b', name: 'b', respondMode: 'all', brain: '' },
+        { id: 'c', name: 'c', respondMode: 'all', brain: 'valid-brain' },
+      ])
+    );
+    const fresh = new ChatStore(dir);
+    const chs = fresh.listChannels();
+    expect(chs.find((c) => c.id === 'a')?.brain).toBeUndefined();
+    expect(chs.find((c) => c.id === 'b')?.brain).toBeUndefined();
+    expect(chs.find((c) => c.id === 'c')?.brain).toBe('valid-brain');
+  });
+
+  it('기존 채널 데이터(brain 없음) 로드 무변경', () => {
+    fs.writeFileSync(
+      path.join(dir, 'channels.json'),
+      JSON.stringify([{ id: 'general', name: 'general', respondMode: 'all' }])
+    );
+    const fresh = new ChatStore(dir);
+    const ch = fresh.listChannels()[0];
+    expect(ch.brain).toBeUndefined();
+  });
+});
