@@ -22,6 +22,9 @@ export function Channels(props: {
   // 쓰는 자리(테스트 등)를 깨지 않게 optional — 미전달 시 드롭다운은 "기본"만 보인다.
   brainNames?: string[];
   onSetChannelBrain?: (id: string, brain: string | null) => void;
+  // Task 4(리뷰 지적) — 현재 기본 두뇌 이름. 있으면 드롭다운 기본 항목이 "Default (claude)" 형태로
+  // 표시(스펙 §3.4). 미전달·빈 문자열이면 안전 폴백으로 기존처럼 "Default"만.
+  defaultBrain?: string;
 }) {
   const { channels, current, mode } = props;
   const [creating, setCreating] = useState(false);
@@ -100,7 +103,7 @@ export function Channels(props: {
             </div>
             <div className="popLabel">{T.brain}</div>
             <div className={!c.brain ? 'sel' : undefined} onClick={() => { setMenu(null); props.onSetChannelBrain?.(c.id, null); }}>
-              {T.brainDefault}
+              {T.brainDefault(props.defaultBrain)}
             </div>
             {(props.brainNames ?? []).map((name) => (
               <div key={name} className={c.brain === name ? 'sel' : undefined} onClick={() => { setMenu(null); props.onSetChannelBrain?.(c.id, name); }}>

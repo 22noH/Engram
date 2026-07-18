@@ -88,7 +88,7 @@ export type ClientFrame =
 
 // 서버 → 클라
 export type ServerFrame =
-  | { t: 'channels'; list: Channel[]; brainNames: string[] }
+  | { t: 'channels'; list: Channel[]; brainNames: string[]; defaultBrain: string }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
   | { t: 'authOk'; user: UserDto }

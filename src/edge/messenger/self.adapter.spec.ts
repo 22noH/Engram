@@ -302,7 +302,7 @@ describe('setChannelBrain(Task 3)', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brainch-'));
     store = new ChatStore(dir);
     store.listChannels();
-    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names, defaultBrain: () => 'claude' });
     await sm.start();
     client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
     await once(client, 'open');
@@ -313,12 +313,13 @@ describe('setChannelBrain(Task 3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('등록된 이름으로 설정 성공 → channels 브로드캐스트에 brain·brainNames 동봉', async () => {
+  it('등록된 이름으로 설정 성공 → channels 브로드캐스트에 brain·brainNames·defaultBrain 동봉', async () => {
     const ch = store.createChannel('coding')!;
     client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'qwen' }));
     const f = await nextFrame(client);
     expect(f.t).toBe('channels');
     expect(f.brainNames).toEqual(names);
+    expect(f.defaultBrain).toBe('claude');
     expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBe('qwen');
   });
 
@@ -344,14 +345,15 @@ describe('setChannelBrain(Task 3)', () => {
     expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBeUndefined();
   });
 
-  it('channels 요청 응답에도 brainNames가 동봉된다', async () => {
+  it('channels 요청 응답에도 brainNames·defaultBrain이 동봉된다', async () => {
     client.send(JSON.stringify({ t: 'channels' }));
     const f = await nextFrame(client);
     expect(f.t).toBe('channels');
     expect(f.brainNames).toEqual(names);
+    expect(f.defaultBrain).toBe('claude');
   });
 
-  it('brainNames 미주입이면 빈 목록(회귀 없음)', async () => {
+  it('brainNames·defaultBrain 미주입이면 빈 목록·빈 문자열(회귀 없음)', async () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brainch2-'));
     const store2 = new ChatStore(dir2);
     store2.listChannels();
@@ -362,6 +364,7 @@ describe('setChannelBrain(Task 3)', () => {
     c.send(JSON.stringify({ t: 'channels' }));
     const f = await nextFrame(c);
     expect(f.brainNames).toEqual([]);
+    expect(f.defaultBrain).toBe('');
     c.terminate();
     await sm2.stop();
     fs.rmSync(dir2, { recursive: true, force: true });

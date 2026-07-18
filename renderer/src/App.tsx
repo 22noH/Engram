@@ -57,6 +57,9 @@ export default function App() {
   // Task 4 — 채널별 두뇌 드롭다운 채우기용 등록 이름 목록. wiki/admin과 같은 결로 기본 연결
   // (그 서버) 기준 하나만 들고 있는다 — respondMode 팬아웃과 동형으로 다른 연결에도 그대로 전송된다.
   const [brainNames, setBrainNames] = useState<string[]>([]);
+  // Task 4(리뷰 지적) — 현재 기본 두뇌 이름(드롭다운 기본 항목의 "Default (claude)" 표시용).
+  // brainNames와 같은 결로 기본 연결 기준 하나만.
+  const [defaultBrain, setDefaultBrain] = useState<string>('');
   // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
   // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
   const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
@@ -86,7 +89,7 @@ export default function App() {
     if (f.t === 'channels') {
       setChannelsByConn((prev) => ({ ...prev, [connId]: f.list }));
       // Task 4 — 두뇌 드롭다운은 기본 연결(그 서버) 기준 하나만(roster/wiki와 같은 결).
-      if (connId === connState.defaultConnId) setBrainNames(f.brainNames);
+      if (connId === connState.defaultConnId) { setBrainNames(f.brainNames); setDefaultBrain(f.defaultBrain); }
       setChanIdByConnName((prev) => {
         const next = new Map(prev);
         // Minor: 이 연결의 기존 엔트리를 먼저 지우고 새로 채운다 — 삭제된 채널이 stale로 안 남게.
@@ -451,6 +454,7 @@ export default function App() {
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
           brainNames={brainNames}
+          defaultBrain={defaultBrain}
           onSetChannelBrain={(name, brain) => fanoutToName(name, (id) => ({ t: 'setChannelBrain', id, brain }))}
           onManageMembers={(name) => {
             const ch = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);

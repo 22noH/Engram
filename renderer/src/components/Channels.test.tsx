@@ -74,6 +74,26 @@ it('두뇌 드롭다운 렌더: 기본 + 등록 이름들', () => {
   expect(screen.getByText('gemma')).toBeInTheDocument();
 });
 
+// Task 4(리뷰 지적) — defaultBrain 전달 시 기본 항목이 "Default (name)"/"기본 (name)" 형태로 표시.
+it('defaultBrain 전달 시 기본 항목에 현재 기본 두뇌 이름이 붙는다', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['qwen', 'gemma']} defaultBrain="claude" onSetChannelBrain={() => {}}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  fireEvent.click(screen.getByText('⋯'));
+  expect(screen.getByText(/Default \(claude\)|기본 \(claude\)/)).toBeInTheDocument();
+});
+
+// defaultBrain 미전달(빈 문자열)이면 기존처럼 이름 없는 "Default"/"기본"만.
+it('defaultBrain 미전달 시 기본 항목은 이름 없이 표시(회귀)', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['qwen', 'gemma']} onSetChannelBrain={() => {}}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  fireEvent.click(screen.getByText('⋯'));
+  expect(screen.getByText(/^(Default|기본)$/)).toBeInTheDocument();
+});
+
 it('두뇌 항목 선택 시 setChannelBrain 콜백을 채널 id+이름으로 즉시 호출', () => {
   const onSetChannelBrain = vi.fn();
   const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];

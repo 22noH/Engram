@@ -75,6 +75,9 @@ export class SelfMessenger implements MessengerPort {
       // Task 3: 등록된 두뇌 이름 목록(configDir 접근은 main.ts 몫 — 여기는 주입만 받는다).
       // 미주입 시 빈 목록(무등록=setChannelBrain은 항상 무시, channels 응답의 brainNames=[]).
       brainNames?: () => string[];
+      // Task 4(리뷰 지적): 현재 기본 두뇌 이름. brainNames와 같은 결로 요청마다 재조회(캐시 금지).
+      // 미주입 시 ''(안전 폴백 — channels 응답의 defaultBrain='').
+      defaultBrain?: () => string;
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
@@ -242,15 +245,20 @@ export class SelfMessenger implements MessengerPort {
   private brainNames(): string[] {
     return this.opts.brainNames ? this.opts.brainNames() : [];
   }
+  // Task 4(리뷰 지적): 현재 기본 두뇌 이름(요청 시점 재조회, 미주입 시 '').
+  private defaultBrain(): string {
+    return this.opts.defaultBrain ? this.opts.defaultBrain() : '';
+  }
 
   // 소켓별로 접근 가능한 채널만 담아 channels 프레임을 각 인증 소켓에 전송.
   private broadcastChannels(): void {
     const all = this.store.listChannels();
     const brainNames = this.brainNames();
+    const defaultBrain = this.defaultBrain();
     for (const c of this.wss?.clients ?? []) {
       if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
       const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(c, ch)) : all;
-      try { c.send(JSON.stringify({ t: 'channels', list, brainNames })); } catch { /* 격리 */ }
+      try { c.send(JSON.stringify({ t: 'channels', list, brainNames, defaultBrain })); } catch { /* 격리 */ }
     }
   }
   private adminList(): AdminUserDto[] {
@@ -295,7 +303,7 @@ export class SelfMessenger implements MessengerPort {
         case 'channels': {
           const all = this.store.listChannels();
           const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(ws, ch)) : all;
-          this.sendTo(ws, { t: 'channels', list, brainNames: this.brainNames() });
+          this.sendTo(ws, { t: 'channels', list, brainNames: this.brainNames(), defaultBrain: this.defaultBrain() });
           return;
         }
         case 'createChannel': {

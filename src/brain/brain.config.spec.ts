@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadActiveBrain, loadBrainProfile, listBrainNames } from './brain.config';
+import { loadActiveBrain, loadBrainProfile, listBrainNames, defaultBrainName } from './brain.config';
 
 describe('loadActiveBrain', () => {
   let dir: string;
@@ -133,6 +133,28 @@ describe('listBrainNames', () => {
       expect(listBrainNames(dir)).toEqual([]);
       fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'claude' }));
       expect(listBrainNames(dir)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+// Task 4(리뷰 지적) — 채널 두뇌 드롭다운 "Default (name)" 표시용 현재 기본 두뇌 이름.
+describe('defaultBrainName', () => {
+  it('brains.json의 default 값을 반환', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-defname-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ default: 'claude', brains: { claude: {} } }));
+      expect(defaultBrainName(dir)).toBe('claude');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('파일 없음·깨진 JSON·default 비문자열이면 빈 문자열(안전 폴백)', () => {
+    expect(defaultBrainName(path.join(os.tmpdir(), 'engram-defname-nope'))).toBe('');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-defname-bad-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'brains.json'), '{ not valid json');
+      expect(defaultBrainName(dir)).toBe('');
+      fs.writeFileSync(path.join(dir, 'brains.json'), JSON.stringify({ brains: {} }));
+      expect(defaultBrainName(dir)).toBe('');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

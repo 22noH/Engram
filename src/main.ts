@@ -38,7 +38,7 @@ import type { AuthDeps } from './edge/messenger/self.adapter';
 import type { McpDeps } from './edge/mcp/engram-mcp';
 import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import * as fs from 'fs';
-import { listBrainNames } from './brain/brain.config';
+import { listBrainNames, defaultBrainName } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
@@ -134,7 +134,11 @@ async function bootstrap(): Promise<void> {
         mcpDeps.write = makeWikiWrite(wiki);
       }
     }
-    self = new SelfMessenger(chatCfg, chatStore, { logger, brainNames: () => listBrainNames(paths.getConfigDir()) },
+    self = new SelfMessenger(chatCfg, chatStore, {
+      logger,
+      brainNames: () => listBrainNames(paths.getConfigDir()),
+      defaultBrain: () => defaultBrainName(paths.getConfigDir()),
+    },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
       authDeps, mcpDeps);
   }

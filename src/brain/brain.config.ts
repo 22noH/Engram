@@ -100,3 +100,14 @@ export function listBrainNames(configDir: string): string[] {
     return [];
   }
 }
+
+// Task 4(리뷰 지적) — 현재 기본(default) 두뇌 이름. 채널 ⋯ 메뉴 드롭다운의 "Default (name)"
+// 표시용 — 캐싱 없이 요청마다 재조회(두뇌 전환 직후 반영). 없거나 깨지면 ''(안전 폴백).
+export function defaultBrainName(configDir: string): string {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'brains.json'), 'utf8'));
+    return raw && typeof raw.default === 'string' ? raw.default : '';
+  } catch {
+    return '';
+  }
+}

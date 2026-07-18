@@ -1,5 +1,8 @@
 import { ko } from './config';
 
+// "기본"/"Default" 기본 문구 — default(엔그램 선택기)·brainDefault(채널 두뇌 드롭다운)가 공유(중복 방지, 리뷰 지적).
+const defaultLabel = ko ? '기본' : 'Default';
+
 export const T = {
   placeholder: ko ? '메시지 입력…' : 'Message…',
   send: ko ? '보내기' : 'Send',
@@ -25,7 +28,7 @@ export const T = {
   engrams: ko ? 'Engram 목록' : 'Engrams',
   addEngram: ko ? 'Engram 추가' : 'Add Engram',
   manageEngrams: ko ? 'Engram 관리…' : 'Manage Engrams…',
-  default: ko ? '기본' : 'Default',
+  default: defaultLabel,
   setDefault: ko ? '기본으로 지정' : 'Set default',
   engramNamePh: ko ? '이름' : 'Name',
   engramEndpointPh: ko ? '엔드포인트 (예: ws://192.168.0.9:47800)' : 'Endpoint (e.g. ws://192.168.0.9:47800)',
@@ -104,5 +107,7 @@ export const T = {
   membersClose: ko ? '닫기' : 'Close',
   // Task 4 — 채널별 두뇌
   brain: ko ? '두뇌' : 'Brain',
-  brainDefault: ko ? '기본' : 'Default',
+  // Task 4(리뷰 지적) — 현재 기본 두뇌 이름을 알 때는 "Default (claude)"/"기본 (claude)" 형태,
+  // 모를 때(defaultBrain='')는 이름 없이 "Default"/"기본"만.
+  brainDefault: (name?: string) => (name ? `${defaultLabel} (${name})` : defaultLabel),
 };
