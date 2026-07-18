@@ -1,5 +1,6 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import type { Server as McpServerInstance } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ServerFrame, Action } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
@@ -16,6 +17,9 @@ import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
 import type { AuthSettings } from '../auth/auth.config';
 import { can, type Permission } from '../auth/permissions';
+import type { McpDeps } from '../mcp/engram-mcp';
+import { buildMcpServer } from '../mcp/engram-mcp';
+import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
 
 interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
 
@@ -61,6 +65,7 @@ export class SelfMessenger implements MessengerPort {
   private authed = new WeakSet<WebSocket>();
   private approving = new Set<string>();
   private users = new Map<WebSocket, Account>(); // 인증 소켓 → 계정(세션 모드)
+  private mcpServer?: McpServerInstance; // Phase 8c-2: 1회만 lazy build, 요청마다 재사용(mcp-http.ts가 transport만 요청단위로 새로 만듦)
 
   constructor(
     private readonly cfg: ChatConfig,
@@ -71,6 +76,8 @@ export class SelfMessenger implements MessengerPort {
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
+    // Phase 8c-2: 메인 서버(isServer)에만 주입. 미주입(brain 모드·테스트)이면 /mcp는 404(현행과 동일).
+    private readonly mcpDeps?: McpDeps,
   ) {}
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
@@ -93,6 +100,18 @@ export class SelfMessenger implements MessengerPort {
         void this.authDeps.http.handle(req, res).catch(() => {
           try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
         });
+        return;
+      }
+      // Phase 8c-2: /mcp는 mcpDeps 주입 시에만(메인 서버) + 루프백 전용(원격은 팀 서버 모드라도 잠금).
+      // 미주입이면 이 블록을 건너뛰어 기존 404로 떨어진다(현행 동일).
+      if (this.mcpDeps && req.url === '/mcp') {
+        if (!isLoopback(req.socket.remoteAddress)) {
+          res.writeHead(403, { 'content-type': 'text/plain' });
+          res.end('forbidden — /mcp is loopback-only');
+          return;
+        }
+        if (!this.mcpServer) this.mcpServer = buildMcpServer(this.mcpDeps);
+        void handleMcpRequest(this.mcpServer, req, res);
         return;
       }
       res.writeHead(404, { 'content-type': 'text/plain' });

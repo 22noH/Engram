@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import WebSocket from 'ws';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SelfMessenger, SelfTarget, hasEngramMention, stripEngramMention } from './self.adapter';
 import { ChatStore } from './chat-store';
 import { MentionEvent } from './messenger.port';
@@ -12,6 +14,8 @@ import { SessionStore } from '../auth/session-store';
 import { AuthHttp } from '../auth/auth-http';
 import type { AuthDeps } from './self.adapter';
 import type { AdminSettings } from '../../../shared/protocol';
+import type { McpDeps } from '../mcp/engram-mcp';
+import * as mcpHttp from '../mcp/mcp-http';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -1470,5 +1474,75 @@ describe('비공개 채널 멤버 관리(Phase 16c)', () => {
     expect(f).toEqual({ t: 'roster', list: [] });
 
     await sm.stop();
+  });
+});
+
+describe('/mcp HTTP 노출(Phase 8c-2)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger | undefined;
+
+  function makeMcpDeps(overrides: Partial<McpDeps> = {}): McpDeps {
+    return {
+      search: jest.fn().mockResolvedValue([]),
+      read: jest.fn().mockResolvedValue(null),
+      list: jest.fn().mockResolvedValue([]),
+      propose: jest.fn().mockResolvedValue('p1'),
+      askBrain: null,
+      brainNames: jest.fn().mockReturnValue([]),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcp-'));
+    store = new ChatStore(dir);
+    store.listChannels();
+  });
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('mcpDeps 주입 + 루프백 → initialize/tools 왕복 성공', async () => {
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, undefined, makeMcpDeps(),
+    );
+    await sm.start();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${sm.addressPort()}/mcp`));
+    await client.connect(transport);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual(['wiki_list', 'wiki_propose', 'wiki_read', 'wiki_search']);
+    await client.close();
+  });
+
+  it('비루프백 원격 주소 → 403(isLoopback 모킹)', async () => {
+    jest.spyOn(mcpHttp, 'isLoopback').mockReturnValue(false);
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, undefined, makeMcpDeps(),
+    );
+    await sm.start();
+    const res = await fetch(`http://127.0.0.1:${sm.addressPort()}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize', id: 1, params: {} }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('mcpDeps 미주입 → 404(기존 라우팅과 동일)', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    const res = await fetch(`http://127.0.0.1:${sm.addressPort()}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize', id: 1, params: {} }),
+    });
+    expect(res.status).toBe(404);
   });
 });
