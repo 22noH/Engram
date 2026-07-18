@@ -236,3 +236,7 @@ Lock down capabilities or turn on observation per channel. Without an entry, eve
 - `observe`: default `false` — when `true`, observes regular conversation and interjects with 💡 when the wiki has relevant information (default 30-minute cooldown per channel, `ENGRAM_AMBIENT_COOLDOWN_MIN`).
 
 Changes take effect on restart.
+
+## License
+
+Engram is licensed under the [GNU AGPL-3.0](LICENSE). You are free to use, modify, and self-host it. **Simply running the app or the `engram-wiki-mcp` CLI locally imposes no obligations** — the license only applies when you distribute a modified version or offer Engram to others as a network service, in which case you must share your source under the same license.
