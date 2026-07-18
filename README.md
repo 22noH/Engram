@@ -108,16 +108,19 @@ npm 패키지 이름·`npm publish`는 아직 사용자 결정 대기 상태라,
 
 ```bash
 npm pack                                       # engram-0.0.1.tgz 생성
-claude mcp add engram -- npx <타볼 절대경로>       # 예: npx C:\...\engram-0.0.1.tgz
+claude mcp add engram -- npx --yes --package=<타볼 절대경로> engram-mcp
 ```
 
-publish 후에는 (패키지명 확정되면) `claude mcp add engram -- npx -y <패키지명>`처럼 한 줄로 줄어든다.
+(⚠️ `npx <타볼경로>`처럼 `--package` 없이 쓰면 npx가 아무것도 실행하지 않고 조용히 끝난다 —
+패키지명(`engram`)과 bin 이름(`engram-mcp`)이 달라서 반드시 위 형태여야 한다.)
+
+publish 후에도 같은 이유로 `claude mcp add engram -- npx --yes --package=<패키지명> engram-mcp` 형태를 쓴다.
 
 **승인 흐름은 앱과 동일하게 유지된다.** 헤드리스도 기본은 "제안만" — 두뇌가 `wiki_propose`로 지식을 올려도 바로 반영되지 않고 대기열에 쌓인다. 채팅에서 "제안 보여줘" → "1번 승인해줘"처럼 사람이 확인·승인해야 위키에 반영된다(승인 도구는 위 표의 앱용 MCP 도구와 같은 코드 경로).
 
 **`--write-mode`**: 승인 절차 없이 두뇌가 바로 쓰게 하려면 opt-in으로 켠다.
 ```bash
-npx engram-mcp --write-mode
+npx --yes --package=<타볼경로 또는 패키지명> engram-mcp --write-mode
 ```
 켜면 `wiki_write` 도구가 추가로 열려 즉시 반영된다(신뢰하는 자동화 전용 — 기본은 꺼짐).
 
