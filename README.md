@@ -102,25 +102,19 @@ claude mcp add engram -- node <앱경로>/dist/src/mcp-bridge.js
 
 ### 앱 없이 쓰기 (헤드리스 MCP)
 
-Electron 앱을 안 띄워도 된다 — Claude Code 같은 MCP 클라이언트가 `node dist/src/mcp-headless.js`(패키징하면 `engram-mcp` 명령)를 stdio로 직접 spawn해서 위키 지식 코어(의미검색+제안 대기열)에 붙을 수 있다.
-
-npm 패키지 이름·`npm publish`는 아직 사용자 결정 대기 상태라, 지금은 로컬 타볼로 검증한다:
+Electron 앱을 안 띄워도 된다 — [`engram-wiki-mcp`](https://www.npmjs.com/package/engram-wiki-mcp) npm 패키지가 위키 지식 코어(의미검색+제안 대기열)를 stdio MCP 서버로 그대로 제공한다. 설치 한 줄:
 
 ```bash
-npm pack                                       # engram-0.0.1.tgz 생성
-claude mcp add engram -- npx --yes --package=<타볼 절대경로> engram-mcp
+claude mcp add engram -- npx -y engram-wiki-mcp
 ```
 
-(⚠️ `npx <타볼경로>`처럼 `--package` 없이 쓰면 npx가 아무것도 실행하지 않고 조용히 끝난다 —
-패키지명(`engram`)과 bin 이름(`engram-mcp`)이 달라서 반드시 위 형태여야 한다.)
-
-publish 후에도 같은 이유로 `claude mcp add engram -- npx --yes --package=<패키지명> engram-mcp` 형태를 쓴다.
+(개발 중 로컬 검증은 `npm pack` 후 `npx --yes --package=<타볼경로> engram-wiki-mcp` — bin 이름이 패키지명과 같아 레지스트리 설치에선 bare `npx`로 충분하다.)
 
 **승인 흐름은 앱과 동일하게 유지된다.** 헤드리스도 기본은 "제안만" — 두뇌가 `wiki_propose`로 지식을 올려도 바로 반영되지 않고 대기열에 쌓인다. 채팅에서 "제안 보여줘" → "1번 승인해줘"처럼 사람이 확인·승인해야 위키에 반영된다(승인 도구는 위 표의 앱용 MCP 도구와 같은 코드 경로).
 
 **`--write-mode`**: 승인 절차 없이 두뇌가 바로 쓰게 하려면 opt-in으로 켠다.
 ```bash
-npx --yes --package=<타볼경로 또는 패키지명> engram-mcp --write-mode
+claude mcp add engram -- npx -y engram-wiki-mcp --write-mode
 ```
 켜면 `wiki_write` 도구가 추가로 열려 즉시 반영된다(신뢰하는 자동화 전용 — 기본은 꺼짐).
 
