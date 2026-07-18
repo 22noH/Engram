@@ -112,3 +112,39 @@ it('internal이라도 잘못된 cron은 null(검증은 동일)', () => {
   const svc = service({}, new FakeMessenger(), fakeRegistry(), tmpStore());
   expect(svc.add({ channelId: 'c1', cron: 'BAD', task: 'X' }, { internal: true })).toBeNull();
 });
+
+// Finding 1: fire()가 발사 시점에 채널의 "현재" 브레인을 조회해 handleMention에 실어보낸다.
+it('fire: 채널에 brain 설정 → handleMention에 그 brain을 전달', async () => {
+  const store = tmpStore();
+  const seen: any[] = [];
+  const orchestrator = { handleMention: async (msg: any, post: any) => { seen.push(msg); await post('ok'); } };
+  const chatStore = { listChannels: () => [{ id: 'c1', name: 'c1', respondMode: 'all' as const, brain: 'qwen' }] };
+  const svc = new ScheduleService(orchestrator as any, new FakeMessenger(), fakeRegistry() as any, store, logger, chatStore as any);
+  (svc as any).makeJob = () => ({ start() {}, stop() {} });
+  const e = store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'X' });
+  svc.fire(e);
+  await new Promise((r) => setImmediate(r));
+  expect(seen[0]).toMatchObject({ text: 'X', userId: 'c1', brain: 'qwen' });
+});
+
+it('fire: 채널에 brain 미설정(또는 chatStore 미주입) → brain undefined(회귀 0)', async () => {
+  const store = tmpStore();
+  const seen: any[] = [];
+  const orchestrator = { handleMention: async (msg: any, post: any) => { seen.push(msg); await post('ok'); } };
+  const chatStore = { listChannels: () => [{ id: 'c1', name: 'c1', respondMode: 'all' as const }] };
+  const svc = new ScheduleService(orchestrator as any, new FakeMessenger(), fakeRegistry() as any, store, logger, chatStore as any);
+  (svc as any).makeJob = () => ({ start() {}, stop() {} });
+  const e = store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'X' });
+  svc.fire(e);
+  await new Promise((r) => setImmediate(r));
+  expect(seen[0]).toMatchObject({ text: 'X', userId: 'c1', brain: undefined });
+
+  // chatStore 자체가 없는 기존 호출부(main.ts 구식 경로)도 회귀 없이 undefined.
+  const seen2: any[] = [];
+  const orchestrator2 = { handleMention: async (msg: any, post: any) => { seen2.push(msg); await post('ok'); } };
+  const svc2 = service(orchestrator2, new FakeMessenger(), fakeRegistry(), store);
+  const e2 = store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'Y' });
+  svc2.fire(e2);
+  await new Promise((r) => setImmediate(r));
+  expect(seen2[0]).toMatchObject({ text: 'Y', userId: 'c1', brain: undefined });
+});

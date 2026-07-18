@@ -157,6 +157,9 @@ async function bootstrap(): Promise<void> {
   const poster: ChannelPoster =
     self && chatStore ? new MessengerHub(chatStore, self, discord ?? undefined) : discord!;
 
+  // 채널→브레인 조회 배선(Finding 1): chat 활성화됐을 때만(chatStore가 채널 목록의 유일한 소스).
+  if (chatStore) orchestrator.setChannelBrainSource(chatStore);
+
   // 재시작 생존(Phase 10b): 중단된 코딩 작업을 부팅 시 이어서. 게시는 poster(재시작 후엔 라이브 reply 핸들 없음).
   // 실패는 상주를 죽이지 않는다.
   try {
@@ -167,7 +170,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const store = new ScheduleStore(paths.getConfigDir());
-  const scheduler = new ScheduleService(orchestrator, poster, app.get(SchedulerRegistry), store, logger);
+  const scheduler = new ScheduleService(orchestrator, poster, app.get(SchedulerRegistry), store, logger, chatStore ?? undefined);
   orchestrator.setScheduler(scheduler);
   scheduler.start();
   const ambient = new AmbientService(

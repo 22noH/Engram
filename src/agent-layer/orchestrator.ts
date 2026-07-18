@@ -81,6 +81,10 @@ export class Orchestrator {
   private channelPolicyCache?: ChannelPolicy;
   // 예약(스케줄) 포트 — main.ts에서 setter 주입(메신저처럼 DI 밖). 6b-3.
   private scheduler?: SchedulerPort;
+  // 채널→브레인 조회(ChatStore) — main.ts에서 setter 주입(scheduler와 동일 결, DI 밖·chat 비활성이면 미주입).
+  // 리뷰 지적 Finding 1: resumeInterrupted의 재개 발사가 채널 브레인을 안 실어보내던 것 — 부팅 시점에
+  // "현재" 채널 브레인을 조회해 넣는다(재시작 사이 채널 브레인이 바뀌었어도 최신 값 반영).
+  private chatStoreForBrain?: { listChannels(): Array<{ id: string; brain?: string }> };
 
   constructor(
     private readonly reader: ReaderAgent,
@@ -124,6 +128,21 @@ export class Orchestrator {
 
   setScheduler(scheduler: SchedulerPort): void {
     this.scheduler = scheduler;
+  }
+
+  // ChatStore를 채널→브레인 조회로 주입(구조적 타입, 순환 회피 — Finding 1). main.ts에서 chatStore 있을 때만 호출.
+  setChannelBrainSource(source: { listChannels(): Array<{ id: string; brain?: string }> }): void {
+    this.chatStoreForBrain = source;
+  }
+
+  // channelId의 "현재" 브레인 조회(never-throw — 조회 실패는 brain 미지정으로 폴백).
+  private channelBrainOf(channelId: string): string | undefined {
+    if (!this.chatStoreForBrain) return undefined;
+    try {
+      return this.chatStoreForBrain.listChannels().find((c) => c.id === channelId)?.brain;
+    } catch {
+      return undefined;
+    }
   }
 
   async route(msg: CoreMessage, onChunk?: (t: string) => void): Promise<string> {
@@ -518,7 +537,7 @@ export class Orchestrator {
         // 뒤집으면(재주입 후 remove) 옛 RUNNING 레코드와 새 세션이 겹쳐 다음 부팅에 이중 재개 위험 → 현 순서 유지.
         await this.tasks.remove(rec.id); // 스테일 세션 제거 — 재개가 새 세션 생성
         await this.handleMention(
-          { text: `resume ${projectRef}`, userId: channelId },
+          { text: `resume ${projectRef}`, userId: channelId, brain: this.channelBrainOf(channelId) },
           (t) => post(channelId, t),
           channelId,
         );

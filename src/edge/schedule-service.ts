@@ -6,10 +6,17 @@ import { ScheduleStore, ScheduleEntry, SchedulerPort } from '../agent-layer/sche
 // Orchestrator를 구조적 타입으로만 의존(순환 회피).
 interface MentionRunner {
   handleMention(
-    msg: { text: string; userId: string },
+    msg: { text: string; userId: string; brain?: string },
     post: (t: string) => Promise<void>,
     threadKey?: string,
   ): Promise<void>;
+}
+
+// ChatStore를 구조적 타입으로만 의존(edge/messenger/chat-store.ts, 순환 회피 — Orchestrator 쪽과 동일 결).
+// 리뷰 지적: fire()가 채널의 브레인을 안 실어보내던 것 — 발사 "시점"에 조회해 넣는다(스케줄 저장 시점이 아니라
+// 발사 시점 — 그래야 그 사이 채널 브레인이 바뀌면 자동 반영/자가치유).
+interface ChannelBrainSource {
+  listChannels(): Array<{ id: string; brain?: string }>;
 }
 
 // 예약 런타임(Phase 6b-3, plain — main.ts 결선). cron 등록·발사·영속을 담당하고
@@ -24,7 +31,19 @@ export class ScheduleService implements SchedulerPort {
     private readonly registry: SchedulerRegistry,
     private readonly store: ScheduleStore,
     private readonly logger: { warn(msg: string, ctx?: string): void },
+    // 채널→브레인 조회(옵션, 리뷰 지적 Finding 1). 미주입(chat 비활성 등)이면 brain 미지정(회귀 0).
+    private readonly chatStore?: ChannelBrainSource,
   ) {}
+
+  // e.channelId의 "현재" 브레인을 발사 시점에 조회(never-throw — 조회 실패는 brain 미지정으로 폴백).
+  private channelBrainOf(channelId: string): string | undefined {
+    if (!this.chatStore) return undefined;
+    try {
+      return this.chatStore.listChannels().find((c) => c.id === channelId)?.brain;
+    } catch {
+      return undefined;
+    }
+  }
 
   // 부팅: 저장된 예약을 로드·등록(개별 실패는 스킵).
   start(): void {
@@ -61,7 +80,7 @@ export class ScheduleService implements SchedulerPort {
     this.firingDepth++;
     void this.orchestrator
       .handleMention(
-        { text: e.task, userId: e.channelId },
+        { text: e.task, userId: e.channelId, brain: this.channelBrainOf(e.channelId) },
         (t) => this.port.postToChannel(e.channelId, t, e.threadId),
         e.threadId ?? e.channelId,
       )

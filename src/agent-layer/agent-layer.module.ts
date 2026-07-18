@@ -60,12 +60,13 @@ import { ChannelBrainResolver, BRAIN_NAME_RESOLVE, BrainNameResolve } from './ch
         new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir())),
       inject: [BRAIN_NAME_RESOLVE, PathResolver],
     },
-    // 채널별 두뇌 해소(스펙 §3.2). 이름 미지정=주입 BRAIN, 이름 지정=위와 동일 캐시로 resolve, 실패=기본+warn.
+    // 채널별 두뇌 해소(스펙 §3.2/§3.5). 이름 미지정=주입 BRAIN, 이름 지정=위와 동일 캐시로 resolve,
+    // 미등록(삭제된 프로필)/실패=기본+warn. listNames는 BrainDelegator와 동일 주입 패턴.
     {
       provide: ChannelBrainResolver,
-      useFactory: (resolve: BrainNameResolve, defaultBrain: BrainProvider, logger: PinoLogger) =>
-        new ChannelBrainResolver(resolve, defaultBrain, logger),
-      inject: [BRAIN_NAME_RESOLVE, BRAIN, PinoLogger],
+      useFactory: (resolve: BrainNameResolve, defaultBrain: BrainProvider, logger: PinoLogger, paths: PathResolver) =>
+        new ChannelBrainResolver(resolve, defaultBrain, logger, () => listBrainNames(paths.getConfigDir())),
+      inject: [BRAIN_NAME_RESOLVE, BRAIN, PinoLogger, PathResolver],
     },
     IngesterAgent,
     // personas 디렉토리는 절대경로로 해소(테스트 cwd 무관): dataDir 오버라이드 우선, 없으면 레포/앱 루트(Phase 7).

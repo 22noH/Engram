@@ -87,6 +87,37 @@ describe('Orchestrator.resumeInterrupted', () => {
     expect(n).toBe(0);
   });
 
+  // Finding 1: resumeInterrupted가 채널의 "현재" 브레인을 재개 메시지에 실어보낸다(부팅 시점 조회).
+  it('setChannelBrainSource 주입 + 채널에 brain 설정 → resume 메시지에 그 brain을 실어보낸다', async () => {
+    const tasks = fakeTaskStore();
+    const orch = makeOrchestrator(tasks) as any;
+    orch.setChannelBrainSource({ listChannels: () => [{ id: 'chan-1', brain: 'qwen' }] });
+    const rec = await tasks.createCoding({ question: 'q', projectRef: 'p1', criteriaTotal: 1, channelId: 'chan-1' });
+    await tasks.transition(rec.id, 'RUNNING');
+    const spyHandle = jest.spyOn(orch, 'handleMention').mockResolvedValue(undefined);
+    const n = await orch.resumeInterrupted(async () => {});
+    expect(n).toBe(1);
+    expect(spyHandle).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'resume p1', userId: 'chan-1', brain: 'qwen' }),
+      expect.any(Function),
+      'chan-1',
+    );
+  });
+
+  it('setChannelBrainSource 미주입(또는 채널에 brain 없음) → brain undefined(회귀 0)', async () => {
+    const tasks = fakeTaskStore();
+    const orch = makeOrchestrator(tasks) as any;
+    const rec = await tasks.createCoding({ question: 'q', projectRef: 'p1', criteriaTotal: 1, channelId: 'chan-1' });
+    await tasks.transition(rec.id, 'RUNNING');
+    const spyHandle = jest.spyOn(orch, 'handleMention').mockResolvedValue(undefined);
+    await orch.resumeInterrupted(async () => {});
+    expect(spyHandle).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'resume p1', userId: 'chan-1', brain: undefined }),
+      expect.any(Function),
+      'chan-1',
+    );
+  });
+
   it('TaskStore 미주입이면 0 반환', async () => {
     const conversations = { append: async () => {} } as any;
     const fence = { assertWritable() {} } as any;
