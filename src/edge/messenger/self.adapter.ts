@@ -19,6 +19,7 @@ import { can, type Permission } from '../auth/permissions';
 import type { McpDeps } from '../mcp/engram-mcp';
 import { buildMcpServer } from '../mcp/engram-mcp';
 import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
+import { makeMcpProposals } from '../mcp/mcp-proposals';
 
 interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
 
@@ -111,7 +112,22 @@ export class SelfMessenger implements MessengerPort {
           res.end('forbidden — /mcp is loopback-only');
           return;
         }
-        void handleMcpRequest(buildMcpServer(this.mcpDeps), req, res);
+        // §3.4: wikiDeps 있으면(메인 서버) 승인 도구 3종을 앱 /mcp에도 상시 노출 — ws 승인함(this.approving)과
+        // ★같은 Set을 공유해 교차 경로(ws↔MCP) 이중승인을 원천 차단, onChanged로 ws 클라에도 실시간 브로드캐스트.
+        // wiki_write는 this.mcpDeps.write에 이미 담겨 오면 그대로 흘려보낸다(주입은 main.ts 몫 — 여기 로직 없음).
+        const deps: McpDeps = this.wikiDeps
+          ? {
+              ...this.mcpDeps,
+              proposals: makeMcpProposals(this.wikiDeps.proposals, this.wikiDeps.applier, {
+                approving: this.approving,
+                onChanged: () => {
+                  this.broadcast({ t: 'wikiChanged' });
+                  this.broadcast({ t: 'proposalsChanged' });
+                },
+              }),
+            }
+          : this.mcpDeps;
+        void handleMcpRequest(buildMcpServer(deps), req, res);
         return;
       }
       res.writeHead(404, { 'content-type': 'text/plain' });

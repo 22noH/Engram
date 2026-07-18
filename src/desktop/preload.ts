@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('engram', {
   setDefaultBrain: (key: string) => ipcRenderer.invoke('engram:set-default-brain', key),
   getCommandMode: () => ipcRenderer.invoke('engram:get-command-mode'),
   setCommandMode: (mode: string) => ipcRenderer.invoke('engram:set-command-mode', mode),
+  getMcpWriteMode: () => ipcRenderer.invoke('engram:get-mcp-write-mode'),
+  setMcpWriteMode: (mode: string) => ipcRenderer.invoke('engram:set-mcp-write-mode', mode),
   listBrainDetails: () => ipcRenderer.invoke('engram:list-brain-details'),
   updateBrainProfile: (key: string, patch: Record<string, unknown>, newKey?: string) =>
     ipcRenderer.invoke('engram:update-brain-profile', key, patch, newKey),

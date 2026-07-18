@@ -36,7 +36,8 @@ import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
 import { ensureSetupCode } from './edge/auth/setup-code';
 import type { AuthDeps } from './edge/messenger/self.adapter';
 import type { McpDeps } from './edge/mcp/engram-mcp';
-import { makeMcpPropose } from './edge/mcp/mcp-propose';
+import { makeMcpPropose, slugifyMcpTitle } from './edge/mcp/mcp-propose';
+import * as fs from 'fs';
 import { listBrainNames } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
 
@@ -50,6 +51,18 @@ const WIKI_MERGE_FALLBACK = `Below are two versions of one wiki page body (they 
 === Version B ===
 {{THEIRS}}
 `;
+
+// permissions.json의 allow.mcpWriteMode 읽기(§3.4) — desktop/permissions-file.ts와 같은 결이지만
+// 서버 코드(main.ts)에서 desktop 모듈을 import하지 않기 위해 여기 자체 구현(fs만 의존, 결 동일).
+// 없거나 깨짐/미지정값 → 'propose'(기본=제안만, 직접쓰기는 명시적 opt-in).
+function readMcpWriteMode(configDir: string): 'propose' | 'write' {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'permissions.json'), 'utf8'));
+    return raw?.allow?.mcpWriteMode === 'write' ? 'write' : 'propose';
+  } catch {
+    return 'propose';
+  }
+}
 
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
@@ -125,6 +138,21 @@ async function bootstrap(): Promise<void> {
         mcpDeps.askBrain = (brain, task) => delegator.handle().run(brain, task);
       } catch (e) {
         logger.warn(`MCP ask_brain 배선 실패(도구 미노출): ${String(e)}`, 'Mcp');
+      }
+
+      // §3.4 직접쓰기 모드: permissions.json allow.mcpWriteMode: 'write'일 때만 wiki_write 노출.
+      // 기존 slug면 updatePage(본문 교체)·없으면 createPage(published)로 즉시 반영(승인 없음, opt-in).
+      if (readMcpWriteMode(paths.getConfigDir()) === 'write') {
+        mcpDeps.write = async ({ slug, title, content }) => {
+          const target = slug ?? slugifyMcpTitle(title);
+          const existing = await wiki.getPage(target);
+          if (existing) {
+            await wiki.updatePage(target, { body: content });
+            return `updated ${target}`;
+          }
+          await wiki.createPage({ slug: target, title, category: 'external', body: content, sources: ['mcp'], status: 'published' });
+          return `created ${target}`;
+        };
       }
     }
     self = new SelfMessenger(chatCfg, chatStore, { logger },

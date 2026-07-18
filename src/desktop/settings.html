@@ -307,6 +307,15 @@
 
   <section id="sec-mcp">
     <h2>MCP</h2>
+    <div class="grp">
+      <div class="li">
+        <label for="mcp-write-mode" style="font-size:13px" data-t="mcpWrite"></label>
+        <span class="val"><select id="mcp-write-mode">
+          <option value="propose" data-t="mcpWriteProposeOpt"></option>
+          <option value="write" data-t="mcpWriteWriteOpt"></option>
+        </select></span>
+      </div>
+    </div>
     <div class="grp" id="mcp-grp"></div>
     <div class="cap" data-t="mcpCap"></div>
     <p class="cap ok" id="mcp-hint" hidden></p>
@@ -418,6 +427,7 @@
       mcpPresets: '추천 서버 — 클릭하면 등록돼요 (첫 사용 때 자동으로 내려받음)',
       addManual: '직접 입력', addBtn: '추가',
       mcpCmd: '실행 명령', mcpArgs: '인자',
+      mcpWrite: 'MCP 쓰기', mcpWriteProposeOpt: '제안만 (사람이 승인)', mcpWriteWriteOpt: '직접 쓰기 (승인 없이 반영)',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -478,6 +488,7 @@
       mcpPresets: 'Recommended servers — click to register (downloaded on first use)',
       addManual: 'Add manually', addBtn: 'Add',
       mcpCmd: 'Command', mcpArgs: 'Arguments',
+      mcpWrite: 'MCP writes', mcpWriteProposeOpt: 'Propose only (human approves)', mcpWriteWriteOpt: 'Direct write (no approval)',
     };
 
     // 섹션 전환
@@ -498,7 +509,7 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
-      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7'],
+      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7', t.mcpWrite],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -880,6 +891,11 @@
     };
 
     async function loadCmdMode() { $('cmd-mode').value = await window.engram.getCommandMode(); }
+    async function loadMcpWriteMode() { $('mcp-write-mode').value = await window.engram.getMcpWriteMode(); }
+    $('mcp-write-mode').onchange = async () => {
+      await window.engram.setMcpWriteMode($('mcp-write-mode').value);
+      showMcpHint();
+    };
     $('cmd-mode').onchange = async () => { await window.engram.setCommandMode($('cmd-mode').value); };
 
     // 목록 그룹 렌더(⊖줄 + ＋Add줄). getList/setList는 async, addFn은 값 하나를 얻는 함수(경로=pickFolder, 명령=prompt식 인라인 input).
@@ -1310,6 +1326,7 @@
     loadSchedules();
     loadWikiRemote();
     loadMcpServers();
+    loadMcpWriteMode();
     renderMcpExpose();
 
     refresh();

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList } from './permissions-file';
+import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList, getMcpWriteMode, setMcpWriteMode } from './permissions-file';
 
 describe('permissions-file commandMode', () => {
   it('파일 없거나 미지정 → auto', () => {
@@ -31,6 +31,57 @@ describe('permissions-file commandMode', () => {
     try {
       setCommandMode(dir, 'allowlist');
       expect(getCommandMode(dir)).toBe('allowlist');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('permissions-file mcpWriteMode(Task 2 §3.4)', () => {
+  it('파일 없거나 미지정 → propose', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcpw-'));
+    try {
+      expect(getMcpWriteMode(dir)).toBe('propose');
+      fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } }));
+      expect(getMcpWriteMode(dir)).toBe('propose');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('깨진 값(임의 문자열) → propose로 폴백', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcpw2-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], mcpWriteMode: 'bogus' } }));
+      expect(getMcpWriteMode(dir)).toBe('propose');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('setMcpWriteMode는 allow.mcpWriteMode만 갱신, 나머지 보존', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcpw3-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ default: 'deny', allow: { tools: { Dev: ['Edit'] }, writePaths: ['C:/p'], denyPaths: [], commandMode: 'off' } }));
+      setMcpWriteMode(dir, 'write');
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, 'permissions.json'), 'utf8'));
+      expect(raw.allow.mcpWriteMode).toBe('write');
+      expect(raw.allow.tools).toEqual({ Dev: ['Edit'] });       // 보존
+      expect(raw.allow.writePaths).toEqual(['C:/p']);            // 보존
+      expect(raw.allow.commandMode).toBe('off');                 // 보존
+      expect(getMcpWriteMode(dir)).toBe('write');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('파일 없을 때 setMcpWriteMode는 골격 생성', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcpw4-'));
+    try {
+      setMcpWriteMode(dir, 'write');
+      expect(getMcpWriteMode(dir)).toBe('write');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('허용 외 값은 런타임 no-op (IPC 경계 — 화이트리스트 두 값만)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-mcpw5-'));
+    try {
+      setMcpWriteMode(dir, 'write');
+      setMcpWriteMode(dir, 'bogus' as never);
+      expect(getMcpWriteMode(dir)).toBe('write'); // 기존값 유지, 골격 생성도 안 함(no-op)
+      expect(fs.existsSync(path.join(dir, 'permissions.json'))).toBe(true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

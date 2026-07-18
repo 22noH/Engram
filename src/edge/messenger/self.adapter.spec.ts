@@ -1582,4 +1582,89 @@ describe('/mcp HTTP 노출(Phase 8c-2)', () => {
     await a.close();
     await b.close();
   });
+
+  // Task 2(§3.4): wikiDeps 주입 시 앱 /mcp에도 승인 도구 3종 상시 노출 + ws 승인함과 같은
+  // in-flight Set 공유(교차 경로 이중승인 차단) + 성공 시 ws 클라 실시간 브로드캐스트.
+  function makeWikiDeps(proposal: Proposal, opts?: { applyDelayGate?: Promise<void>; applied?: string[] }) {
+    return {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: {
+        listPending: async () => [proposal],
+        get: async (id: string) => (id === proposal.id ? proposal : null),
+      },
+      applier: {
+        apply: async (p: Proposal) => {
+          if (opts?.applyDelayGate) await opts.applyDelayGate;
+          opts?.applied?.push(p.id);
+        },
+        reject: async () => {},
+      },
+    };
+  }
+
+  it('wikiDeps 주입 시 tools/list에 승인 도구 3종 포함', async () => {
+    const proposal = fakeProposal('p1');
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      makeWikiDeps(proposal) as any, undefined, makeMcpDeps(),
+    );
+    await sm.start();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${sm.addressPort()}/mcp`)));
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining(['list_proposals', 'approve_proposal', 'reject_proposal']));
+    await client.close();
+  });
+
+  it('ws 승인함이 in-flight인 같은 id를 MCP approve → isError(ws와 같은 approving Set 공유 증거)', async () => {
+    let resolveApply!: () => void;
+    const applyDelayGate = new Promise<void>((r) => { resolveApply = r; });
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      makeWikiDeps(proposal, { applyDelayGate, applied }) as any, undefined, makeMcpDeps(),
+    );
+    await sm.start();
+    const ws = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(ws, 'open');
+    ws.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    // ws 핸들러가 approving.add(id)를 동기 실행한 뒤 applier.apply(비동기·게이트로 정지)로 들어간
+    // 시점을 기다린다 — 그 뒤 MCP approve가 같은 id를 보면 in-flight로 거부돼야 Set 공유가 증명된다.
+    await new Promise((r) => setTimeout(r, 30));
+    const client = new Client({ name: 'race-client', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${sm.addressPort()}/mcp`)));
+    const res = await client.callTool({ name: 'approve_proposal', arguments: { id: proposal.id } });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain('already being approved');
+    resolveApply();
+    await new Promise((r) => setTimeout(r, 30)); // ws쪽 apply 완료 대기(정리)
+    expect(applied).toEqual([proposal.id]); // ws 경로가 결국 1회만 반영
+    await client.close();
+    ws.terminate();
+  });
+
+  it('MCP approve 성공 → 연결된 ws 클라에 wikiChanged+proposalsChanged 브로드캐스트', async () => {
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      makeWikiDeps(proposal, { applied }) as any, undefined, makeMcpDeps(),
+    );
+    await sm.start();
+    const ws = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(ws, 'open');
+    const got: string[] = [];
+    ws.on('message', (d) => got.push(JSON.parse(String(d)).t));
+
+    const client = new Client({ name: 'broadcast-client', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${sm.addressPort()}/mcp`)));
+    const res = await client.callTool({ name: 'approve_proposal', arguments: { id: proposal.id } });
+    expect(res.isError).toBeFalsy();
+    expect(applied).toEqual([proposal.id]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
+    await client.close();
+    ws.terminate();
+  });
 });

@@ -11,7 +11,7 @@ import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
 import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
 import { listMcpServersFile, addMcpServer, removeMcpServer } from './mcp-file';
-import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList } from './permissions-file';
+import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList, getMcpWriteMode, setMcpWriteMode } from './permissions-file';
 import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
 import { listSchedules, removeScheduleFromFile } from './schedules-file';
 import { readWikiRemoteFile, saveWikiRemote, WikiRemoteForm } from './wiki-remote-file';
@@ -260,6 +260,8 @@ function registerIpc(): void {
   ipcMain.handle('engram:set-wiki-remote', (_e, cfg: WikiRemoteForm) => { saveWikiRemote(configDir, cfg); });
   ipcMain.handle('engram:get-command-mode', () => getCommandMode(configDir));
   ipcMain.handle('engram:set-command-mode', (_e, mode: string) => { setCommandMode(configDir, mode as 'auto' | 'allowlist' | 'off'); });
+  ipcMain.handle('engram:get-mcp-write-mode', () => getMcpWriteMode(configDir));
+  ipcMain.handle('engram:set-mcp-write-mode', (_e, mode: string) => { setMcpWriteMode(configDir, mode as 'propose' | 'write'); });
   ipcMain.handle('engram:open-path', (_e, which: string) => {
     const dirs: Record<string, string> = {
       data: dataDir,

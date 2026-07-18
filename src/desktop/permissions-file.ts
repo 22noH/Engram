@@ -30,6 +30,36 @@ export function setCommandMode(configDir: string, mode: CommandMode): void {
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
 }
 
+export type McpWriteMode = 'propose' | 'write';
+
+// permissions.json의 allow.mcpWriteMode 읽기(없거나 깨짐/미지정값 → 'propose'). §3.4.
+export function getMcpWriteMode(configDir: string): McpWriteMode {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'permissions.json'), 'utf8'));
+    return raw?.allow?.mcpWriteMode === 'write' ? 'write' : 'propose';
+  } catch {
+    return 'propose';
+  }
+}
+
+// allow.mcpWriteMode 부분 갱신(다른 필드 보존, 골격 없으면 생성) — getCommandMode/setCommandMode와 동일 결.
+// IPC 경계로 노출되는 원시함수 — 런타임 화이트리스트(두 값만) 필수(setPermissionList와 동일 이유).
+export function setMcpWriteMode(configDir: string, mode: McpWriteMode): void {
+  if (mode !== 'propose' && mode !== 'write') return;
+  const file = path.join(configDir, 'permissions.json');
+  let cfg: { default: string; allow: Record<string, unknown> } = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw && typeof raw === 'object') cfg = raw;
+  } catch {
+    // 없거나 깨짐 → 골격
+  }
+  if (!cfg.allow || typeof cfg.allow !== 'object') cfg.allow = { tools: {}, writePaths: [], denyPaths: [] };
+  cfg.allow.mcpWriteMode = mode;
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+}
+
 export interface PermissionDetails { writePaths: string[]; denyPaths: string[]; commands: string[] | null }
 
 export function getPermissionDetails(configDir: string): PermissionDetails {
