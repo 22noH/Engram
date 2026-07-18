@@ -1,8 +1,16 @@
 {
   "name": "engram-wiki-mcp",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Engram — a self-hosted team knowledge wiki with semantic search, served as an MCP server. Propose-and-approve knowledge flow (human gate), shared data with the Engram desktop app.",
-  "keywords": ["mcp", "mcp-server", "memory", "knowledge-base", "wiki", "semantic-search", "claude"],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "memory",
+    "knowledge-base",
+    "wiki",
+    "semantic-search",
+    "claude"
+  ],
   "main": "dist/src/desktop/main.js",
   "bin": {
     "engram": "dist/src/cli.js",
