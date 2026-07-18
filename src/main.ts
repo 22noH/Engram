@@ -141,13 +141,14 @@ async function bootstrap(): Promise<void> {
       }
 
       // §3.4 직접쓰기 모드: permissions.json allow.mcpWriteMode: 'write'일 때만 wiki_write 노출.
-      // 기존 slug면 updatePage(본문 교체)·없으면 createPage(published)로 즉시 반영(승인 없음, opt-in).
+      // 기존 slug면 editPage(★게시본 전용 — draft면 throw→isError로 정직하게 실패, updatePage는
+      // draft를 조용히 미게시 상태로 두는 무효 쓰기가 됨[리뷰 적발])·없으면 createPage(published).
       if (readMcpWriteMode(paths.getConfigDir()) === 'write') {
         mcpDeps.write = async ({ slug, title, content }) => {
           const target = slug ?? slugifyMcpTitle(title);
           const existing = await wiki.getPage(target);
           if (existing) {
-            await wiki.updatePage(target, { body: content });
+            await wiki.editPage(target, content);
             return `updated ${target}`;
           }
           await wiki.createPage({ slug: target, title, category: 'external', body: content, sources: ['mcp'], status: 'published' });
