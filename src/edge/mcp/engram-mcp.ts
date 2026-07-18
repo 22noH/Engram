@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
+import { McpProposalsDeps } from './mcp-proposals';
 
 // 주입 의존성(§3.1) — main이 실 WikiEngine/ProposalStore/BrainDelegator를 배선, 테스트는 가짜 주입.
 export interface McpDeps {
@@ -9,6 +10,10 @@ export interface McpDeps {
   propose(input: { slug?: string; title: string; content: string; reason?: string }): Promise<string>;
   askBrain: ((brain: string, task: string) => Promise<string>) | null;
   brainNames(): string[];
+  // §3.3 확장 — 미주입/null이면 기존 도구 4/5종 그대로(회귀 0). proposals=공용 승인 어댑터(mcp-proposals.ts)
+  // 주입 시 list_proposals/approve_proposal/reject_proposal 노출. write 주입 시 wiki_write 노출(--write-mode).
+  proposals?: McpProposalsDeps | null;
+  write?: ((input: { slug?: string; title: string; content: string }) => Promise<string>) | null;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -73,6 +78,53 @@ const WIKI_PROPOSE_TOOL: Tool = {
   },
 };
 
+const LIST_PROPOSALS_TOOL: Tool = {
+  name: 'list_proposals',
+  description:
+    'List pending Engram wiki proposals awaiting human review. Each entry has id, title, op, targetSlug, and a preview of the content.',
+  inputSchema: { type: 'object', properties: {} },
+};
+
+const APPROVE_PROPOSAL_TOOL: Tool = {
+  name: 'approve_proposal',
+  description:
+    'Approve a pending Engram wiki proposal and apply it to the wiki. Approval is the human gate — only call this ' +
+    'when the user explicitly asks you to approve a specific proposal (by id from list_proposals).',
+  inputSchema: {
+    type: 'object',
+    properties: { id: { type: 'string', description: 'proposal id, from list_proposals' } },
+    required: ['id'],
+  },
+};
+
+const REJECT_PROPOSAL_TOOL: Tool = {
+  name: 'reject_proposal',
+  description:
+    'Reject (discard) a pending Engram wiki proposal. Approval/rejection is the human gate — only call this when ' +
+    'the user explicitly asks you to reject a specific proposal (by id from list_proposals).',
+  inputSchema: {
+    type: 'object',
+    properties: { id: { type: 'string', description: 'proposal id, from list_proposals' } },
+    required: ['id'],
+  },
+};
+
+const WIKI_WRITE_TOOL: Tool = {
+  name: 'wiki_write',
+  description:
+    'Write directly to the Engram wiki — creates or updates a published page immediately, with no human approval ' +
+    'step (unlike wiki_propose). Only available when the server is running in write mode.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      content: { type: 'string' },
+      slug: { type: 'string', description: 'optional — target an existing page' },
+    },
+    required: ['title', 'content'],
+  },
+};
+
 function askBrainTool(names: string[]): Tool {
   return {
     name: 'ask_brain',
@@ -121,6 +173,37 @@ async function callWikiPropose(deps: McpDeps, args: Record<string, unknown>): Pr
   return ok(`proposal ${id} created — a human will review it in the Engram app`);
 }
 
+async function callListProposals(deps: McpDeps): Promise<CallToolResult> {
+  if (!deps.proposals) return fail('list_proposals is not available (no proposals adapter configured)');
+  const list = await deps.proposals.list();
+  if (list.length === 0) return ok('no pending proposals');
+  return ok(list.map((p) => `${p.id} — ${p.title} [${p.op} -> ${p.targetSlug}]\n${p.preview}`).join('\n\n'));
+}
+
+async function callApproveProposal(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.proposals) return fail('approve_proposal is not available (no proposals adapter configured)');
+  const id = typeof args.id === 'string' ? args.id : '';
+  const summary = await deps.proposals.approve(id);
+  return ok(summary);
+}
+
+async function callRejectProposal(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.proposals) return fail('reject_proposal is not available (no proposals adapter configured)');
+  const id = typeof args.id === 'string' ? args.id : '';
+  const summary = await deps.proposals.reject(id);
+  return ok(summary);
+}
+
+async function callWikiWrite(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.write) return fail('wiki_write is not available (write mode is not enabled)');
+  const title = typeof args.title === 'string' ? args.title : '';
+  const content = typeof args.content === 'string' ? args.content : '';
+  const input: { slug?: string; title: string; content: string } = { title, content };
+  if (typeof args.slug === 'string') input.slug = args.slug;
+  const result = await deps.write(input);
+  return ok(result);
+}
+
 async function callAskBrain(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
   if (!deps.askBrain) return fail('ask_brain is not available (no delegate configured)');
   const brain = typeof args.brain === 'string' ? args.brain : '';
@@ -139,6 +222,8 @@ export function buildMcpServer(deps: McpDeps): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools: Tool[] = [WIKI_SEARCH_TOOL, WIKI_READ_TOOL, WIKI_LIST_TOOL, WIKI_PROPOSE_TOOL];
     if (deps.askBrain) tools.push(askBrainTool(deps.brainNames()));
+    if (deps.proposals) tools.push(LIST_PROPOSALS_TOOL, APPROVE_PROPOSAL_TOOL, REJECT_PROPOSAL_TOOL);
+    if (deps.write) tools.push(WIKI_WRITE_TOOL);
     return { tools };
   });
 
@@ -157,6 +242,14 @@ export function buildMcpServer(deps: McpDeps): Server {
           return await callWikiPropose(deps, args);
         case 'ask_brain':
           return await callAskBrain(deps, args);
+        case 'list_proposals':
+          return await callListProposals(deps);
+        case 'approve_proposal':
+          return await callApproveProposal(deps, args);
+        case 'reject_proposal':
+          return await callRejectProposal(deps, args);
+        case 'wiki_write':
+          return await callWikiWrite(deps, args);
         default:
           return fail(`unknown tool: ${name}`);
       }

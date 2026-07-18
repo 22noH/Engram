@@ -12,6 +12,8 @@ function makeDeps(overrides: Partial<McpDeps> = {}): McpDeps {
     propose: jest.fn().mockResolvedValue('p1'),
     askBrain: null,
     brainNames: jest.fn().mockReturnValue([]),
+    proposals: null,
+    write: null,
     ...overrides,
   };
 }
@@ -170,6 +172,149 @@ describe('buildMcpServer', () => {
     const out = await s.callTool(T('wiki_search'), { query: 'x' });
     expect(out.toLowerCase()).toMatch(/error/);
     expect(out).toContain('boom');
+    await s.close();
+  });
+
+  it('tools/list: proposals 주입 → 7종(list/approve/reject_proposal 추가)', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('ok'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const defs = await s.listToolDefs();
+    const names = defs.map((d) => d.name).sort();
+    expect(names).toEqual(
+      [
+        T('wiki_search'), T('wiki_read'), T('wiki_list'), T('wiki_propose'),
+        T('list_proposals'), T('approve_proposal'), T('reject_proposal'),
+      ].sort(),
+    );
+    await s.close();
+  });
+
+  it('tools/list: proposals 미주입 → 기존 4종 그대로(회귀 없음)', async () => {
+    const s = await connectedSession(makeDeps({ proposals: null }));
+    const defs = await s.listToolDefs();
+    const names = defs.map((d) => d.name).sort();
+    expect(names).toEqual(
+      [T('wiki_search'), T('wiki_read'), T('wiki_list'), T('wiki_propose')].sort(),
+    );
+    await s.close();
+  });
+
+  it('tools/list: write 주입 → wiki_write 추가(8종)', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('ok'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    const write = jest.fn().mockResolvedValue('written');
+    const s = await connectedSession(makeDeps({ proposals, write }));
+    const defs = await s.listToolDefs();
+    const names = defs.map((d) => d.name).sort();
+    expect(names).toContain(T('wiki_write'));
+    expect(names).toHaveLength(8);
+    await s.close();
+  });
+
+  it('list_proposals: 결과 텍스트에 id/title/op/targetSlug/preview 포함', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([
+        { id: 'p1', title: 'My Title', op: 'create', targetSlug: 'my-slug', preview: 'preview text' },
+      ]),
+      approve: jest.fn(),
+      reject: jest.fn(),
+    };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const out = await s.callTool(T('list_proposals'), {});
+    expect(out).toContain('p1');
+    expect(out).toContain('My Title');
+    expect(out).toContain('create');
+    expect(out).toContain('my-slug');
+    expect(out).toContain('preview text');
+    await s.close();
+  });
+
+  it('approve_proposal: 성공 시 어댑터 결과를 그대로 통과', async () => {
+    const approve = jest.fn().mockResolvedValue('approved: my-slug (create)');
+    const proposals = { list: jest.fn(), approve, reject: jest.fn() };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const out = await s.callTool(T('approve_proposal'), { id: 'p1' });
+    expect(approve).toHaveBeenCalledWith('p1');
+    expect(out).toContain('approved: my-slug (create)');
+    await s.close();
+  });
+
+  it('approve_proposal: 어댑터 throw → isError', async () => {
+    const approve = jest.fn().mockRejectedValue(new Error('already pending elsewhere'));
+    const proposals = { list: jest.fn(), approve, reject: jest.fn() };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const out = await s.callTool(T('approve_proposal'), { id: 'p1' });
+    expect(out.toLowerCase()).toMatch(/error/);
+    expect(out).toContain('already pending elsewhere');
+    await s.close();
+  });
+
+  it('reject_proposal: 성공 시 어댑터 결과를 그대로 통과, 실패 시 isError', async () => {
+    const reject = jest.fn().mockResolvedValue('rejected: my-slug');
+    const proposals = { list: jest.fn(), approve: jest.fn(), reject };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const out = await s.callTool(T('reject_proposal'), { id: 'p1' });
+    expect(reject).toHaveBeenCalledWith('p1');
+    expect(out).toContain('rejected: my-slug');
+    await s.close();
+  });
+
+  it('proposals 미주입인데 승인 도구 직접 호출 → isError(도구 자체는 tools/list에서 빠짐)', async () => {
+    const s = await connectedSession(makeDeps({ proposals: null }));
+    const out = await s.callTool(T('list_proposals'), {});
+    expect(out.toLowerCase()).toMatch(/error|not available/i);
+    await s.close();
+  });
+
+  it('wiki_write: {title, content, slug}를 deps.write에 그대로 전달', async () => {
+    const write = jest.fn().mockResolvedValue('page written: my-slug');
+    const s = await connectedSession(makeDeps({ write }));
+    const out = await s.callTool(T('wiki_write'), { title: 'T', content: 'C', slug: 'my-slug' });
+    expect(write).toHaveBeenCalledWith({ title: 'T', content: 'C', slug: 'my-slug' });
+    expect(out).toContain('page written: my-slug');
+    await s.close();
+  });
+
+  it('wiki_write: slug 생략 시 deps.write에 slug 없이 전달', async () => {
+    const write = jest.fn().mockResolvedValue('page written');
+    const s = await connectedSession(makeDeps({ write }));
+    await s.callTool(T('wiki_write'), { title: 'T', content: 'C' });
+    expect(write).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    await s.close();
+  });
+
+  it('wiki_write: write 미주입 → isError(도구 자체는 tools/list에서 빠짐)', async () => {
+    const s = await connectedSession(makeDeps({ write: null }));
+    const defs = await s.listToolDefs();
+    expect(defs.find((d) => d.name === T('wiki_write'))).toBeUndefined();
+    const out = await s.callTool(T('wiki_write'), { title: 'T', content: 'C' });
+    expect(out.toLowerCase()).toMatch(/error|not available/i);
+    await s.close();
+  });
+
+  it('approve_proposal 설명에 human-gate 문구(human·explicitly) 포함', async () => {
+    const proposals = { list: jest.fn(), approve: jest.fn(), reject: jest.fn() };
+    const s = await connectedSession(makeDeps({ proposals }));
+    const defs = await s.listToolDefs();
+    const approveDef = defs.find((d) => d.name === T('approve_proposal'));
+    expect(approveDef?.description?.toLowerCase()).toContain('human');
+    expect(approveDef?.description?.toLowerCase()).toContain('explicitly');
+    await s.close();
+  });
+
+  it('wiki_write 설명에 승인 없이 직접 쓴다는 안내 포함', async () => {
+    const write = jest.fn().mockResolvedValue('ok');
+    const s = await connectedSession(makeDeps({ write }));
+    const defs = await s.listToolDefs();
+    const writeDef = defs.find((d) => d.name === T('wiki_write'));
+    expect(writeDef?.description?.toLowerCase()).toMatch(/no.*approval|no human approval|without approval/);
     await s.close();
   });
 });
