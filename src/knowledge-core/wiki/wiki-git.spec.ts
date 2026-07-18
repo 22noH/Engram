@@ -36,7 +36,7 @@ describe('WikiGit 이력', () => {
     await engine.updatePage('p', { body: 'new' });
     const msgs = await git.recentMessages();
     expect(msgs.length).toBeGreaterThanOrEqual(2);
-  });
+  }, 30_000); // git spawn 3회 — 윈도우 병렬 부하에서 기본 5s를 넘겨 플레이크(전체 스위트에서만 재현)
 
   it('relPath를 주면 그 경로만 스테이징한다(동시 변경 혼입 방지)', async () => {
     const { git, paths } = await setup();
