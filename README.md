@@ -12,7 +12,7 @@ A self-hosted, 24/7 multi-agent system built around a personal **stateful LLM wi
 
 ## Status
 
-Design finalized — **Phase 0 (KnowledgeCore)** about to start.
+All roadmap phases through **Phase 8 (self-hosted harness + MCP)** are complete — including the desktop app, team accounts, shared wiki with human-approved knowledge flow, and MCP integration both ways (Engram as MCP client and server). Also published as a standalone headless MCP package: [`engram-wiki-mcp`](https://www.npmjs.com/package/engram-wiki-mcp).
 
 ## Stack
 
@@ -36,6 +36,9 @@ Node 22+ · NestJS · TypeScript · **LanceDB** · local (multilingual) embeddin
 10. **Phase 8d** — Conductor brain: an Engram-harness brain can delegate a sub-task to another registered brain mid-conversation (`ask_brain`) — either named explicitly ("do the review with Claude") or as an autonomous fallback when stuck; the brain it delegates to cannot delegate further (stage 1)
 11. **Phase 8b-1** — Engram-harness coding: an Engram-harness brain performs coding (file edits) directly — its own file-tool loop (read/write/edit/glob/grep), with writes blocked outside its own repo/working folder (including symlink escapes)
 12. **Phase 8b-2** — Engram-harness command execution: during coding, the brain can run shell commands (`Bash`) directly — auto mode by default (any command), with safety from timeout-based process-tree termination, output caps, and reverting via a temporary git branch. The settings window lets you switch between auto/restricted/off and pick the default brain (harness)
+13. **Phase 8c-1** — MCP client: Engram-harness brains use tools from user-registered MCP servers (official SDK, `mcp.json` compatible with Claude Code's format, one-click presets in settings)
+14. **Phase 8c-2** — MCP server: Engram exposes its wiki and brain delegation to external MCP clients (Claude Code etc.) over HTTP `/mcp` (loopback) and a stdio bridge — plus slash-command prompts
+15. **Headless MCP** — `npx engram-wiki-mcp` runs the knowledge core without the app: approval inbox in chat, opt-in `--write-mode`, data shared with the app, auto-bridges when the app is running
 
 ## Installable desktop app (Phase 7)
 
