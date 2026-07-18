@@ -4,6 +4,8 @@ import * as path from 'path';
 // 자체 채팅 서버 설정(스펙 §3). 기본 = 가동·127.0.0.1:47800. enabled:false만 끔.
 // env는 포트/바인딩 오버라이드. 인증은 계정(Phase 16a) — 공유 토큰은 폐기.
 
+export const DEFAULT_CHAT_PORT = 47800;
+
 export interface ChatConfig {
   enabled: boolean;
   port: number;
@@ -28,7 +30,7 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
   }
   const port = (env.ENGRAM_CHAT_PORT ? validPort(env.ENGRAM_CHAT_PORT) : null)
     ?? validPort(raw.port)
-    ?? 47800;
+    ?? DEFAULT_CHAT_PORT;
   const role: 'server' | 'brain' = (env.ENGRAM_CHAT_ROLE === 'brain' || raw.role === 'brain') ? 'brain' : 'server';
   const bind = role === 'brain' ? '127.0.0.1' : (
     (typeof env.ENGRAM_CHAT_BIND === 'string' && env.ENGRAM_CHAT_BIND)

@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { loadChatConfig } from './edge/messenger/chat.config';
+import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
 
 // 독립 stdio↔HTTP 브리지 엔트리(설계 §3.3). 구형(stdio 전용) MCP 클라이언트가 상주의
 // /mcp(HTTP, Task 1·2)에 접속할 수 있게 해준다: `node dist/src/mcp-bridge.js [--port N]`.
@@ -13,16 +13,27 @@ import { loadChatConfig } from './edge/messenger/chat.config';
 // 다음 요청이 새로 연결하므로 자동 복구된다 — 캐시 유지가 주는 이득(연결 재사용 비용 절감)보다
 // stdio 브리지의 저빈도 호출 특성상 단순함·상주 재시작 내성이 더 값지다.
 
-async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>): Promise<T> {
+const UPSTREAM_TIMEOUT_MS = 60_000;
+
+async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<T> {
   const client = new Client({ name: 'engram-bridge', version: '1.0.0' });
   // ★8b-2 교훈: 언핸들드 'error'는 호스트 크래시 — 구독 필수(mcp-client.ts와 동일 패턴).
   client.onerror = (e) => console.error('[mcp-bridge] client error:', e);
   const transport = new StreamableHTTPClientTransport(new URL(url));
   transport.onerror = (e) => console.error('[mcp-bridge] transport error:', e);
-  await client.connect(transport);
+  // ★8a 교훈(스톨 클래스): 거부(ECONNREFUSED)는 즉시 실패하지만 '멈춘' 상주는 영원히 대기
+  // — connect+호출 전 구간에 타임아웃(초과 시 catch에서 close로 정리).
+  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    return await fn(client);
+    return await Promise.race([
+      (async () => {
+        await client.connect(transport);
+        return fn(client);
+      })(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`upstream timeout (${timeoutMs}ms)`)), timeoutMs); }),
+    ]);
   } finally {
+    if (timer !== null) clearTimeout(timer);
     try {
       await client.close();
     } catch {
@@ -66,18 +77,11 @@ function isValidPort(n: number): boolean {
   return Number.isInteger(n) && n > 0 && n <= 65535;
 }
 
-// chat.config의 기본 포트 계산을 재사용(단일 진실 소스, 값 중복 없음) — 존재하지 않는
-// 디렉터리를 넘겨 chat.json 읽기를 실패시키고(raw={} 폴백) env도 빈 객체로 넘겨, 실행 환경의
-// ENGRAM_CHAT_PORT 등에 영향받지 않는 순수 기본값(47800)만 얻는다.
-function defaultPort(): number {
-  return loadChatConfig('__engram-bridge-no-such-config-dir__', {}).port;
-}
-
 export function parseBridgeArgs(argv: string[], env: NodeJS.ProcessEnv): { url: string } {
   const idx = argv.indexOf('--port');
   const argPort = idx !== -1 ? Number(argv[idx + 1]) : NaN;
   const envPort = env.ENGRAM_PORT !== undefined ? Number(env.ENGRAM_PORT) : NaN;
-  const port = isValidPort(argPort) ? argPort : isValidPort(envPort) ? envPort : defaultPort();
+  const port = isValidPort(argPort) ? argPort : isValidPort(envPort) ? envPort : DEFAULT_CHAT_PORT;
   return { url: `http://127.0.0.1:${port}/mcp` };
 }
 
