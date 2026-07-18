@@ -310,6 +310,14 @@
     <div class="grp" id="mcp-grp"></div>
     <div class="cap" data-t="mcpCap"></div>
     <p class="cap ok" id="mcp-hint" hidden></p>
+    <div class="grp-h" data-t="mcpExpose"></div>
+    <div class="grp">
+      <div class="li">
+        <span class="mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="mcp-expose-cmd"></span>
+        <button id="btn-copy-mcp-cmd" data-t="copyCmd"></button>
+      </div>
+    </div>
+    <div class="cap" data-t="mcpExposeCap"></div>
     <div class="grp-h" id="mcp-presets-h" data-t="mcpPresets"></div>
     <div class="grp" id="mcp-presets"></div>
   </section>
@@ -402,6 +410,8 @@
       wikiCap: '비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) · ENGRAM_WIKI_REMOTE 환경변수가 있으면 그게 우선이에요',
       mcpCap: 'AI에 도구를 꽂는 표준(MCP) 서버 목록 — Claude Code의 .mcp.json과 같은 포맷이라 파일을 직접 편집해도 돼요',
       mcpEmpty: '등록된 MCP 서버가 없어요',
+      mcpExpose: '이 엔그램을 외부 도구에서 쓰기',
+      mcpExposeCap: '같은 PC의 Claude Code·Codex 등에서 위 명령으로 접속 — 위키 검색·읽기·제안과 두뇌 위임(ask_brain)이 도구로 제공돼요 (앱 실행 중일 때, 이 PC에서만). 구형 클라이언트는 node dist/src/mcp-bridge.js 브리지로도 접속 가능해요',
       mcpNameRule: '이름은 영소문자·숫자·-·_만, 중복 불가',
       mcpCmdRequired: '실행 명령을 입력하세요 (예: npx)',
       addServer: '서버 추가',
@@ -460,6 +470,8 @@
       wikiCap: 'Empty = local only · auth is standard git (SSH/token) · the ENGRAM_WIKI_REMOTE env var wins if set',
       mcpCap: "MCP servers — the standard way to plug tools into AI. Same format as Claude Code's .mcp.json, so editing the file directly works too",
       mcpEmpty: 'No MCP servers',
+      mcpExpose: 'Use this Engram from external tools',
+      mcpExposeCap: 'Connect from Claude Code, Codex, etc. on this PC with the command above — wiki search/read/propose and brain delegation (ask_brain) become tools (while the app is running, this PC only). Older clients can use the node dist/src/mcp-bridge.js bridge',
       mcpNameRule: 'Lowercase letters, digits, - and _ only; no duplicates',
       mcpCmdRequired: 'Enter a command to run (e.g. npx)',
       addServer: 'Add server',
@@ -486,7 +498,7 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
-      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7'],
+      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7'],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -1277,6 +1289,20 @@
       renderMcpServers();
     }
 
+    // ---- MCP Expose: 엔그램 외부 접속 명령 표시 ----
+    function renderMcpExpose() {
+      const port = 47800; // DEFAULT_CHAT_PORT from chat.config.ts
+      const cmd = `claude mcp add --transport http engram http://127.0.0.1:${port}/mcp`;
+      $('mcp-expose-cmd').textContent = cmd;
+      $('btn-copy-mcp-cmd').onclick = async () => {
+        await navigator.clipboard.writeText(cmd);
+        const btn = $('btn-copy-mcp-cmd');
+        const origText = t.copyCmd;
+        btn.textContent = t.copied;
+        setTimeout(() => { btn.textContent = origText; }, 1500);
+      };
+    }
+
     loadBrains();
     loadCmdMode();
     loadPermissions();
@@ -1284,6 +1310,7 @@
     loadSchedules();
     loadWikiRemote();
     loadMcpServers();
+    renderMcpExpose();
 
     refresh();
     detect();
