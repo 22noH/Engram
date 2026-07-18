@@ -7,6 +7,7 @@ import { McpServerConfig } from './mcp-config';
 export const MCP_TOOL_PREFIX = 'mcp__';
 const MAX_OUTPUT = 50_000; // 웹도구와 동일 상한(web-tools.ts FETCH_CHAR_LIMIT)
 const DEFAULT_CALL_TIMEOUT_MS = 60_000;
+const CONNECT_TIMEOUT_MS = 10_000;
 
 interface ToolContentPart { type?: string; text?: string }
 
@@ -37,20 +38,29 @@ export class McpSession {
     return new McpSession(name, () => transport);
   }
 
-  async connect(): Promise<boolean> {
+  async connect(timeoutMs = CONNECT_TIMEOUT_MS): Promise<boolean> {
+    // ★8a 교훈(세마포어 스톨 클래스): initialize가 무한 대기하면 complete() 전체가 묶인다 — 타임아웃 필수.
+    let c: Client | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const c = new Client({ name: 'engram', version: '1.0.0' });
+      c = new Client({ name: 'engram', version: '1.0.0' });
       // ★8b-2 교훈: 언핸들드 'error' 이벤트=호스트 크래시. v1.29.0의 Client/Transport는
       // EventEmitter가 아니라 onerror 콜백 프로퍼티 노출 → 반드시 구독.
       c.onerror = (e) => console.error(`[mcp:${this.name}] client error:`, e);
       const transport = this.makeTransport();
       transport.onerror = (e) => console.error(`[mcp:${this.name}] transport error:`, e);
-      await c.connect(transport);
+      await Promise.race([
+        c.connect(transport),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`connect timeout (${timeoutMs}ms)`)), timeoutMs); }),
+      ]);
       this.client = c;
       return true;
     } catch (e) {
       console.error(`[mcp:${this.name}] connect failed:`, e);
+      try { await c?.close(); } catch { /* 실패 정리 중 예외 무해 */ } // 타임아웃 시 spawn된 자식 정리
       return false;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
     }
   }
 

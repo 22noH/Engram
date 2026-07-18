@@ -103,4 +103,10 @@ describe('McpSession', () => {
     const s = McpSession.createForTest('test', clientT);
     expect(await s.connect()).toBe(false);
   });
+
+  it('connect 무한대기(서버 무응답) → 타임아웃 false (세마포어 스톨 방지)', async () => {
+    const [clientT] = InMemoryTransport.createLinkedPair(); // 서버측 미접속 = initialize 영원히 무응답
+    const s = McpSession.createForTest('test', clientT);
+    expect(await s.connect(150)).toBe(false);
+  });
 });
