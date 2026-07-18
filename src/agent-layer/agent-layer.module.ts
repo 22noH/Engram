@@ -45,7 +45,7 @@ import { BrainDelegator } from './brain-delegator';
         // (2)사용자가 지목한 claude-cli 대신 엉뚱한 두뇌가 돈다. 그래서 항상 프로필로부터 새 인스턴스(고유 Semaphore)로 해소.
         const cache = new Map<string, BrainProvider>();
         const resolve = (key: string): BrainProvider => {
-          if (!cache.has(key)) cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
+          if (!cache.has(key)) cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key), paths.getConfigDir()));
           return cache.get(key)!;
         };
         return new BrainDelegator(resolve, () => listBrainNames(paths.getConfigDir()));
@@ -92,7 +92,7 @@ import { BrainDelegator } from './brain-delegator';
         cache.set('claude', defaultBrain);
         const resolveBrain = (key: string): BrainProvider => {
           if (!cache.has(key)) {
-            cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
+            cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key), paths.getConfigDir()));
           }
           return cache.get(key)!;
         };
@@ -114,7 +114,7 @@ import { BrainDelegator } from './brain-delegator';
         cache.set('claude', defaultBrain);
         const resolveBrain = (key: string): BrainProvider => {
           if (!cache.has(key)) {
-            cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key)));
+            cache.set(key, createBrain(loadBrainProfile(paths.getConfigDir(), key), paths.getConfigDir()));
           }
           return cache.get(key)!;
         };

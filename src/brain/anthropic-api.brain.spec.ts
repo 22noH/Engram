@@ -4,6 +4,26 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+// MCP(8c-1): 프로토콜은 Task2가 커버 — 여기선 두뇌의 병합·라우팅·수명(close)만 검증.
+jest.mock('./mcp-client', () => ({ MCP_TOOL_PREFIX: 'mcp__', McpSession: { create: jest.fn() } }));
+jest.mock('./mcp-config', () => ({ loadMcpServers: jest.fn() }));
+import { McpSession } from './mcp-client';
+import { loadMcpServers } from './mcp-config';
+
+function fakeMcpSession(overrides: {
+  connect?: jest.Mock; listToolDefs?: jest.Mock; owns?: (n: string) => boolean; callTool?: jest.Mock; close?: jest.Mock;
+} = {}) {
+  return {
+    connect: overrides.connect ?? jest.fn().mockResolvedValue(true),
+    listToolDefs: overrides.listToolDefs ?? jest.fn().mockResolvedValue([
+      { name: 'mcp__srv__tool', description: 'a tool', parameters: { type: 'object' } },
+    ]),
+    owns: overrides.owns ?? ((n: string) => n === 'mcp__srv__tool'),
+    callTool: overrides.callTool ?? jest.fn().mockResolvedValue('mcp tool result'),
+    close: overrides.close ?? jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 const PROFILE: BrainProfile = {
   provider: 'anthropic-api', cli: '', model: 'claude-opus-4-8', concurrency: 1, timeoutMs: 5000,
   extraArgs: [], apiKey: 'sk-test', inputUsdPerMTok: 5, outputUsdPerMTok: 25,
@@ -214,5 +234,119 @@ describe('AnthropicApiBrain', () => {
     await new AnthropicApiBrain(PROFILE, fetchFn).complete('do', undefined, { cwd: 'C:/x', codeGuard: () => {} });
     const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
     expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+  });
+});
+
+describe('AnthropicApiBrain — MCP 배선(8c-1)', () => {
+  beforeEach(() => {
+    (loadMcpServers as jest.Mock).mockReset().mockReturnValue({});
+    (McpSession.create as jest.Mock).mockReset();
+  });
+
+  it('configDir 미전달이면 loadMcpServers 자체를 호출하지 않음(기존 두뇌 100% 회귀 0)', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('hi');
+    expect(r.isError).toBe(false);
+    expect(loadMcpServers as jest.Mock).not.toHaveBeenCalled();
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
+  });
+
+  it('configDir는 있으나 mcp.json 서버 없음 → mcp__ 도구 없음', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('hi');
+    expect(r.isError).toBe(false);
+    expect(loadMcpServers as jest.Mock).toHaveBeenCalledWith('/cfg');
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
+  });
+
+  it('서버 1개 연결 성공 → 채팅 toolDefs 끝에 mcp__ 도구 추가 + 호출 시 해당 세션 callTool로 라우팅', async () => {
+    (loadMcpServers as jest.Mock).mockReturnValue({ srv: { command: 'node', args: [], env: {} } });
+    const session = fakeMcpSession();
+    (McpSession.create as jest.Mock).mockReturnValue(session);
+    const MCP_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'm1', name: 'mcp__srv__tool' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"x":1}' } },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    let call = 0;
+    const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(MCP_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('hi');
+    expect(r.isError).toBe(false);
+    expect(McpSession.create as jest.Mock).toHaveBeenCalledWith('srv', { command: 'node', args: [], env: {} });
+    const firstBody = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(firstBody.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch', 'mcp__srv__tool']);
+    expect(session.callTool).toHaveBeenCalledWith('mcp__srv__tool', { x: 1 });
+    const secondBody = JSON.parse((fetchFn as jest.Mock).mock.calls[1][1].body);
+    expect(JSON.stringify(secondBody.messages)).toContain('mcp tool result');
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('connect()=false인 서버는 제외(도구 없음)하고 close 호출, 나머지 서버는 정상', async () => {
+    (loadMcpServers as jest.Mock).mockReturnValue({
+      dead: { command: 'node', args: [], env: {} },
+      alive: { command: 'node', args: [], env: {} },
+    });
+    const dead = fakeMcpSession({ connect: jest.fn().mockResolvedValue(false) });
+    const alive = fakeMcpSession({
+      listToolDefs: jest.fn().mockResolvedValue([{ name: 'mcp__alive__t', description: 'd', parameters: { type: 'object' } }]),
+      owns: (n: string) => n === 'mcp__alive__t',
+    });
+    (McpSession.create as jest.Mock).mockImplementation((name: string) => (name === 'dead' ? dead : alive));
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('hi');
+    expect(r.isError).toBe(false);
+    expect(dead.close).toHaveBeenCalledTimes(1);
+    expect(dead.listToolDefs).not.toHaveBeenCalled();
+    expect(alive.close).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch', 'mcp__alive__t']);
+  });
+
+  it('알 수 없는 mcp__ 도구 호출은 에러 텍스트로 되먹임(소유 세션 없음)', async () => {
+    (loadMcpServers as jest.Mock).mockReturnValue({ srv: { command: 'node', args: [], env: {} } });
+    const session = fakeMcpSession({ owns: () => false });
+    (McpSession.create as jest.Mock).mockReturnValue(session);
+    const MCP_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'm1', name: 'mcp__srv__tool' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    let call = 0;
+    const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(MCP_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('hi');
+    expect(r.isError).toBe(false);
+    expect(session.callTool).not.toHaveBeenCalled();
+    const secondBody = JSON.parse((fetchFn as jest.Mock).mock.calls[1][1].body);
+    expect(JSON.stringify(secondBody.messages)).toContain('mcp error: unknown tool mcp__srv__tool');
+  });
+
+  it('정상 종료·에러 종료(타임아웃) 모두에서 세션 close 호출(finally)', async () => {
+    (loadMcpServers as jest.Mock).mockReturnValue({ srv: { command: 'node', args: [], env: {} } });
+    const session = fakeMcpSession();
+    (McpSession.create as jest.Mock).mockReturnValue(session);
+    const fetchFn = ((_u: string, init: { signal: AbortSignal }) =>
+      new Promise((_res, rej) => init.signal.addEventListener('abort', () => rej(new Error('aborted'))))) as unknown as typeof fetch;
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('x', undefined, { timeoutMs: 30 });
+    expect(r.isError).toBe(true);
+    expect(String(r.raw)).toContain('timeout');
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('코딩 루프(opts.cwd+codeGuard)에서도 mcp__ 도구가 병합된다', async () => {
+    (loadMcpServers as jest.Mock).mockReturnValue({ srv: { command: 'node', args: [], env: {} } });
+    const session = fakeMcpSession();
+    (McpSession.create as jest.Mock).mockReturnValue(session);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-abrain-mcp-'));
+    try {
+      const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+      const r = await new AnthropicApiBrain(PROFILE, fetchFn, '/cfg').complete('do', undefined, { cwd: dir, codeGuard: () => {} });
+      expect(r.isError).toBe(false);
+      const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+      expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'mcp__srv__tool']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

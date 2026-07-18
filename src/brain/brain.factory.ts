@@ -3,7 +3,8 @@ import { BrainProfile } from './brain.config';
 import { ClaudeCliBrain } from './claude-cli.brain';
 
 // brains.json provider → 어댑터(설계 §6). Phase 8a: anthropic-api/openai-api = 자체 하네스(CLI 불필요).
-export function createBrain(profile: BrainProfile): BrainProvider {
+// configDir(8c-1): API 두뇌에게 mcp.json 위치 전달(설정 없으면 undefined=MCP 비활성, 하위호환). CLI 두뇌는 무시.
+export function createBrain(profile: BrainProfile, configDir?: string): BrainProvider {
   switch (profile.provider) {
     case 'claude-cli':
       return new ClaudeCliBrain(profile);
@@ -17,11 +18,11 @@ export function createBrain(profile: BrainProfile): BrainProvider {
     }
     case 'anthropic-api': {
       const { AnthropicApiBrain } = require('./anthropic-api.brain');
-      return new AnthropicApiBrain(profile);
+      return new AnthropicApiBrain(profile, undefined, configDir);
     }
     case 'openai-api': {
       const { OpenAiApiBrain } = require('./openai-api.brain');
-      return new OpenAiApiBrain(profile);
+      return new OpenAiApiBrain(profile, undefined, configDir);
     }
     default:
       throw new Error(`지원하지 않는 provider: ${profile.provider}`);
