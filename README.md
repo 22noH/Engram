@@ -77,6 +77,17 @@ or in a browser at `http://127.0.0.1:47800/`.
 - Per-channel reaction mode: by default it reacts to every message. From the channel's ⋯ menu you can switch it to react only to `@Engram` mentions (observing the rest).
 - Discord keeps working alongside it as before (`config/messenger.json`).
 
+### Claude Code plugin (recommended — short commands included)
+
+One install gives you the MCP connection **and** short slash commands:
+
+```bash
+claude plugin marketplace add 22noH/Engram
+claude plugin install engram@engram
+```
+
+Then in any project: `/engram:wiki-search <query>` · `/engram:wiki-save` · `/engram:proposals` · `/engram:approve <id>`. The bundled MCP server runs via `npx -y engram-wiki-mcp` (no app required; auto-bridges to the app when it's running).
+
 ### Using Engram from Claude Code (MCP)
 
 Engram exposes the wiki and brain delegation as MCP tools. Connect from Claude Code, Codex, or other AI tools on the same machine:

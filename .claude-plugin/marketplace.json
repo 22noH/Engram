@@ -1,0 +1,13 @@
+{
+  "name": "engram",
+  "owner": {
+    "name": "22noH"
+  },
+  "plugins": [
+    {
+      "name": "engram",
+      "source": "./plugin",
+      "description": "Engram wiki as your AI's long-term memory — semantic search, propose-and-approve knowledge flow, short slash commands (/engram:wiki-search etc.)"
+    }
+  ]
+}
