@@ -34,13 +34,8 @@ export function listMcpServersFile(configDir: string): McpServer[] {
     const command = typeof s.command === 'string' ? s.command.trim() : '';
     if (!command) continue;
     const server: McpServer = { name, command };
-    if (Array.isArray(s.args) && s.args.length > 0) {
-      server.args = (s.args as unknown[]).filter((a): a is string => typeof a === 'string');
-      if (server.args.length > 0) {
-        result.push(server);
-        continue;
-      }
-    }
+    const args = Array.isArray(s.args) ? (s.args as unknown[]).filter((a): a is string => typeof a === 'string') : [];
+    if (args.length > 0) server.args = args; // 빈 args는 키 자체 생략(Claude Code 포맷 관례)
     result.push(server);
   }
   return result;
