@@ -102,4 +102,7 @@ export const T = {
   makePrivate: ko ? '비공개로 전환' : 'Make private',
   makePublic: ko ? '공개로 전환' : 'Make public',
   membersClose: ko ? '닫기' : 'Close',
+  // Task 4 — 채널별 두뇌
+  brain: ko ? '두뇌' : 'Brain',
+  brainDefault: ko ? '기본' : 'Default',
 };

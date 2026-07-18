@@ -54,6 +54,9 @@ export default function App() {
   // Phase 16c — 비공개 채널 멤버 관리(주인 전용, 기본 연결의 실제 채널 대상).
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [membersFor, setMembersFor] = useState<string | null>(null); // 관리 중인 실제 채널 id(기본 연결)
+  // Task 4 — 채널별 두뇌 드롭다운 채우기용 등록 이름 목록. wiki/admin과 같은 결로 기본 연결
+  // (그 서버) 기준 하나만 들고 있는다 — respondMode 팬아웃과 동형으로 다른 연결에도 그대로 전송된다.
+  const [brainNames, setBrainNames] = useState<string[]>([]);
   // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
   // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
   const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
@@ -82,6 +85,8 @@ export default function App() {
   function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
       setChannelsByConn((prev) => ({ ...prev, [connId]: f.list }));
+      // Task 4 — 두뇌 드롭다운은 기본 연결(그 서버) 기준 하나만(roster/wiki와 같은 결).
+      if (connId === connState.defaultConnId) setBrainNames(f.brainNames);
       setChanIdByConnName((prev) => {
         const next = new Map(prev);
         // Minor: 이 연결의 기존 엔트리를 먼저 지우고 새로 채운다 — 삭제된 채널이 stale로 안 남게.
@@ -283,6 +288,7 @@ export default function App() {
       id: name, name, respondMode: any?.respondMode ?? 'all', mode,
       ...(any?.creatorId ? { creatorId: any.creatorId } : {}),
       ...(any?.visibility ? { visibility: any.visibility } : {}),
+      ...(any?.brain ? { brain: any.brain } : {}),
     };
   });
   // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
@@ -444,6 +450,8 @@ export default function App() {
           onCreate={(name, m, visibility) => { if (m !== 'wiki' && m !== 'admin') send(connState.defaultConnId, { t: 'createChannel', name, mode: m, ...(visibility ? { visibility } : {}) }); }}
           onDelete={(name) => fanoutToName(name, (id) => ({ t: 'deleteChannel', id }))}
           onSetRespondMode={(name, m) => fanoutToName(name, (id) => ({ t: 'setRespondMode', id, mode: m }))}
+          brainNames={brainNames}
+          onSetChannelBrain={(name, brain) => fanoutToName(name, (id) => ({ t: 'setChannelBrain', id, brain }))}
           onManageMembers={(name) => {
             const ch = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
             if (ch) { setMembersFor(ch.id); send(connState.defaultConnId, { t: 'channelRoster' }); }

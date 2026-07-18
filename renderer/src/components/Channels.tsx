@@ -18,6 +18,10 @@ export function Channels(props: {
   onSetRespondMode: (id: string, mode: 'all' | 'mention') => void;
   onManageMembers: (id: string) => void;
   showAdmin?: boolean;
+  // Task 4 — 채널별 두뇌: 등록된 이름 목록(드롭다운 채우기용)과 선택 콜백. 기존 컴포넌트를
+  // 쓰는 자리(테스트 등)를 깨지 않게 optional — 미전달 시 드롭다운은 "기본"만 보인다.
+  brainNames?: string[];
+  onSetChannelBrain?: (id: string, brain: string | null) => void;
 }) {
   const { channels, current, mode } = props;
   const [creating, setCreating] = useState(false);
@@ -77,6 +81,7 @@ export function Channels(props: {
             <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
               <span>{'# ' + c.name}</span>
               {c.visibility === 'private' && <span className="lock" title={T.channelPrivate} aria-label={T.channelPrivate}>🔒</span>}
+              {c.brain && <span className="brainBadge" title={T.brain}>{c.brain}</span>}
               {canManage(c) && <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>}
             </div>
           ))}
@@ -93,6 +98,15 @@ export function Channels(props: {
             <div onClick={() => { setMenu(null); props.onManageMembers(c.id); }}>
               {T.manageMembers}
             </div>
+            <div className="popLabel">{T.brain}</div>
+            <div className={!c.brain ? 'sel' : undefined} onClick={() => { setMenu(null); props.onSetChannelBrain?.(c.id, null); }}>
+              {T.brainDefault}
+            </div>
+            {(props.brainNames ?? []).map((name) => (
+              <div key={name} className={c.brain === name ? 'sel' : undefined} onClick={() => { setMenu(null); props.onSetChannelBrain?.(c.id, name); }}>
+                {name}
+              </div>
+            ))}
             <div className="danger" onClick={() => { setMenu(null); if (window.confirm(T.delConfirm(c.name))) props.onDelete(c.id); }}>
               {T.delChannel}
             </div>

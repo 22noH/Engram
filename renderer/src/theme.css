@@ -99,6 +99,11 @@ details.thread .msg { max-width:100%; }
 #popmenu div { padding:8px 12px; border-radius:6px; cursor:pointer; color:var(--text); font-size:13px; }
 #popmenu div:hover { background:var(--hover); }
 #popmenu div.danger { color:#f26d6d; }
+#popmenu div.sel { color:var(--accent); font-weight:600; }
+#popmenu .popLabel { padding:8px 12px 2px; font-size:11px; color:var(--dim); cursor:default; }
+#popmenu .popLabel:hover { background:none; }
+/* Task 4 — 채널별 두뇌 배지(자물쇠와 같은 결: 작은 muted 텍스트) */
+.ch .brainBadge { font-size:11px; color:var(--dim); margin-left:2px; }
 #modetabs { display:flex; border-bottom:1px solid var(--line); }
 #modetabs .mtab { flex:1; text-align:center; padding:9px 0; cursor:pointer; color:var(--dim);
                   font-size:12.5px; font-weight:600; border-bottom:2px solid transparent; }

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Channels } from './Channels';
 
 const base = {
@@ -60,4 +60,61 @@ it('공개 채널은 자물쇠 없음', () => {
   render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
     onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
   expect(screen.queryByTitle(/private|비공개/i)).toBeNull();
+});
+
+// Task 4 — 채널별 두뇌 드롭다운 + 배지
+it('두뇌 드롭다운 렌더: 기본 + 등록 이름들', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['qwen', 'gemma']} onSetChannelBrain={() => {}}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  fireEvent.click(screen.getByText('⋯'));
+  expect(screen.getByText(/Default|기본/)).toBeInTheDocument();
+  expect(screen.getByText('qwen')).toBeInTheDocument();
+  expect(screen.getByText('gemma')).toBeInTheDocument();
+});
+
+it('두뇌 항목 선택 시 setChannelBrain 콜백을 채널 id+이름으로 즉시 호출', () => {
+  const onSetChannelBrain = vi.fn();
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['qwen']} onSetChannelBrain={onSetChannelBrain}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  fireEvent.click(screen.getByText('⋯'));
+  fireEvent.click(screen.getByText('qwen'));
+  expect(onSetChannelBrain).toHaveBeenCalledWith('general', 'qwen');
+});
+
+it('"기본" 선택 시 null(해제)을 전송', () => {
+  const onSetChannelBrain = vi.fn();
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'me', brain: 'qwen' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['qwen']} onSetChannelBrain={onSetChannelBrain}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  fireEvent.click(screen.getByText('⋯'));
+  fireEvent.click(screen.getByText(/Default|기본/));
+  expect(onSetChannelBrain).toHaveBeenCalledWith('general', null);
+});
+
+it('비기본 두뇌를 쓰는 채널은 목록에 두뇌 이름 배지 표시', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, brain: 'qwen' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  expect(screen.getByText('qwen')).toBeInTheDocument();
+});
+
+it('기본 두뇌(brain 미설정) 채널은 배지 없음 — 회귀: 기존 화면과 동일', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const }];
+  const { container } = render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  expect(container.querySelector('.brainBadge')).toBeNull();
+});
+
+it('권한 없으면 두뇌 드롭다운도 미표시(⋯ 자체가 숨음)', () => {
+  const channels = [{ id: 'general', name: 'general', respondMode: 'all' as const, mode: 'chat' as const, creatorId: 'other' }];
+  render(<Channels channels={channels} current="general" mode="chat" canManageChannels={false} myId="me"
+    brainNames={['gemma']} onSetChannelBrain={() => {}}
+    onSelect={() => {}} onSetMode={() => {}} onCreate={() => {}} onDelete={() => {}} onSetRespondMode={() => {}} onManageMembers={() => {}} />);
+  expect(screen.queryByText('⋯')).toBeNull();
+  expect(screen.queryByText('gemma')).toBeNull();
 });
