@@ -90,8 +90,9 @@ function askBrainTool(names: string[]): Tool {
 
 async function callWikiSearch(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
   const query = typeof args.query === 'string' ? args.query : '';
-  let limit = typeof args.limit === 'number' ? args.limit : DEFAULT_SEARCH_LIMIT;
-  if (limit > MAX_SEARCH_LIMIT) limit = MAX_SEARCH_LIMIT;
+  // 0·음수·NaN도 방어 — 하류(RagStore.limit)의 미정의 의미론에 그대로 흘리지 않는다.
+  const rawLimit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? args.limit : DEFAULT_SEARCH_LIMIT;
+  const limit = Math.max(1, Math.min(Math.floor(rawLimit), MAX_SEARCH_LIMIT));
   const hits = await deps.search(query, limit);
   if (hits.length === 0) return ok('no results');
   return ok(hits.map((h) => `${h.slug} — ${h.title}\n${h.snippet}`).join('\n\n'));
