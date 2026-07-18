@@ -100,6 +100,31 @@ claude mcp add engram -- node <앱경로>/dist/src/mcp-bridge.js
 
 *앱이 실행 중이어야 하며, 이 PC(루프백)에서만 접속된다.*
 
+### 앱 없이 쓰기 (헤드리스 MCP)
+
+Electron 앱을 안 띄워도 된다 — Claude Code 같은 MCP 클라이언트가 `node dist/src/mcp-headless.js`(패키징하면 `engram-mcp` 명령)를 stdio로 직접 spawn해서 위키 지식 코어(의미검색+제안 대기열)에 붙을 수 있다.
+
+npm 패키지 이름·`npm publish`는 아직 사용자 결정 대기 상태라, 지금은 로컬 타볼로 검증한다:
+
+```bash
+npm pack                                       # engram-0.0.1.tgz 생성
+claude mcp add engram -- npx <타볼 절대경로>       # 예: npx C:\...\engram-0.0.1.tgz
+```
+
+publish 후에는 (패키지명 확정되면) `claude mcp add engram -- npx -y <패키지명>`처럼 한 줄로 줄어든다.
+
+**승인 흐름은 앱과 동일하게 유지된다.** 헤드리스도 기본은 "제안만" — 두뇌가 `wiki_propose`로 지식을 올려도 바로 반영되지 않고 대기열에 쌓인다. 채팅에서 "제안 보여줘" → "1번 승인해줘"처럼 사람이 확인·승인해야 위키에 반영된다(승인 도구는 위 표의 앱용 MCP 도구와 같은 코드 경로).
+
+**`--write-mode`**: 승인 절차 없이 두뇌가 바로 쓰게 하려면 opt-in으로 켠다.
+```bash
+npx engram-mcp --write-mode
+```
+켜면 `wiki_write` 도구가 추가로 열려 즉시 반영된다(신뢰하는 자동화 전용 — 기본은 꺼짐).
+
+**데이터 위치는 앱과 공유한다.** 헤드리스도 앱(Electron `userData`)과 같은 규칙으로 데이터 폴더를 잡는다 — win=`%APPDATA%\Engram`, mac=`~/Library/Application Support/Engram`, linux=`$XDG_CONFIG_HOME`(없으면 `~/.config`)`/Engram`. 그래서 헤드리스로 먼저 쓰기 시작해도 나중에 앱을 설치하면 위키·제안이 그대로 이어진다. `--data-dir <경로>`(또는 env `ENGRAM_DATA_DIR`)로 다른 폴더를 쓸 수도 있고, `--port <N>`(또는 `ENGRAM_PORT`)로 아래 자동 브리지가 확인할 포트를 바꾼다.
+
+**앱이 이미 켜져 있으면 자동으로 브리지된다.** 헤드리스가 뜰 때 앱의 채팅 포트(기본 47800)가 응답하면, 위키 코어를 새로 열지 않고(같은 LanceDB에 동시 접근하는 위험 회피) 앱의 기존 `/mcp`로 자동 전환한다 — 이때 승인 도구·write 모드는 앱 설정을 그대로 따른다. 앱이 꺼져 있을 때만 헤드리스가 코어를 직접 연다.
+
 ### 계정 · 원격 접속 (Phase 16a)
 
 Engram 서버(두뇌)는 1인 1계정이다. 앱은 서버에 로그인해야 쓸 수 있다.

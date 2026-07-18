@@ -4,8 +4,19 @@
   "private": true,
   "main": "dist/src/desktop/main.js",
   "bin": {
-    "engram": "dist/src/cli.js"
+    "engram": "dist/src/cli.js",
+    "engram-mcp": "dist/src/mcp-headless.js"
   },
+  "files": [
+    "dist",
+    "prompts",
+    "personas",
+    "README.md",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.js.map",
+    "!dist/**/*.spec.d.ts",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
   "scripts": {
     "build": "nest build",
     "start": "nest start",
