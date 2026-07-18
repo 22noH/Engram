@@ -99,7 +99,7 @@ function exitOnStdinClosed(cleanup: () => Promise<void>): void {
   const finish = (): void => {
     if (triggered) return;
     triggered = true;
-    void cleanup().then(() => process.exit(0));
+    void cleanup().finally(() => process.exit(0)); // cleanup이 reject해도 종료는 무조건
   };
   process.stdin.on('end', finish);
   process.stdin.on('close', finish);
@@ -157,7 +157,7 @@ async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
   // ★stdin 'end'/'close' 직접 구독이 주 종료 경로(위 exitOnStdinClosed 주석 — SDK onclose는
   // 이 환경에서 발화 안 함이 실측됨). onclose도 발화한다면 같은 shutdown 후 명시적 exit(belt+braces
   // — shutdown의 closed 플래그가 이중 실행을 막고, exit는 Nest teardown의 잔여 핸들에 안 막힌다).
-  server.onclose = () => { void shutdown().then(() => process.exit(0)); };
+  server.onclose = () => { void shutdown().finally(() => process.exit(0)); };
   exitOnStdinClosed(shutdown);
 
   await server.connect(transport);
