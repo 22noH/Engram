@@ -53,6 +53,30 @@ describe('ProposalApplier', () => {
       delete process.env.ENGRAM_LANG;
     }
   });
+  it('create 대상이 이미 있고 본문이 같으면(부분 실패 재승인) publishPage로 치유하고 승인한다', async () => {
+    const wiki = {
+      getPage: async () => ({ slug: 'alpha', frontmatter: { sources: [] }, body: '새 내용' }),
+      createPage: jest.fn(),
+      publishPage: jest.fn().mockResolvedValue({}),
+    } as any;
+    const proposals = { markApproved: jest.fn() } as any;
+    await new ProposalApplier(wiki, proposals).apply(baseProp('create', 'alpha') as any);
+    expect(wiki.createPage).not.toHaveBeenCalled(); // EEXIST 재발 금지
+    expect(wiki.publishPage).toHaveBeenCalledWith('alpha', 'default'); // 색인·게시 치유(멱등)
+    expect(proposals.markApproved).toHaveBeenCalledWith('id1');
+  });
+  it('create 대상이 이미 있고 본문이 다르면 append로 전환한다(덮어쓰기 금지)', async () => {
+    const calls: any = {};
+    const wiki = {
+      getPage: async () => ({ slug: 'alpha', frontmatter: { sources: ['old'] }, body: '다른 기존 본문' }),
+      createPage: jest.fn(),
+      updatePage: async (_s: string, p: any) => { calls.update = p; return {} as any; },
+    } as any;
+    await new ProposalApplier(wiki, { markApproved: jest.fn() } as any).apply(baseProp('create', 'alpha') as any);
+    expect(wiki.createPage).not.toHaveBeenCalled();
+    expect(calls.update.body).toContain('다른 기존 본문');
+    expect(calls.update.body).toContain('새 내용');
+  });
   it('append 대상이 없으면 create로 강등한다', async () => {
     const calls: any = {};
     const wiki = { getPage: async () => null, createPage: async (i: any) => { calls.create = i; return {} as any; } } as any;

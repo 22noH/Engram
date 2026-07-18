@@ -8,6 +8,23 @@ import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
 
 const TABLE = 'chunks';
 
+// LanceDB는 다른 프로세스(앱 상주 vs 헤드리스 MCP가 같은 데이터 폴더 공유)와 커밋이 경합하면
+// "Retryable commit conflict … Please retry"를 던진다 — in-process 큐로는 못 막으므로 재시도가 정답.
+// (2026-07-19 실사고: 승인 중 CreateIndex 경합 → 제안 좀비화)
+const LANCE_RETRYABLE = /retryable commit conflict|please retry/i;
+
+export async function withLanceRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 200): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (i >= attempts || !LANCE_RETRYABLE.test(msg)) throw e;
+      await new Promise((r) => setTimeout(r, baseDelayMs * i));
+    }
+  }
+}
+
 // SQL 술어용 문자열 이스케이프(작은따옴표 이중화).
 const sql = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 
@@ -80,7 +97,8 @@ export class RagStore implements PageIndexer {
 
   async indexPage(page: IndexablePage): Promise<void> {
     const userId = page.userId ?? DEFAULT_USER;
-    return this.enqueue(async () => {
+    // 본문 전체를 재시도 단위로 — delete/add/인덱스가 모두 멱등이라 통째 재실행이 안전하다.
+    return this.enqueue(() => withLanceRetry(async () => {
       // 멱등: 같은 (userId, slug)의 기존 청크 제거 — userId 범위 한정으로 타 유저 데이터 보호.
       await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(page.slug)}`);
       const chunks = chunkBody(page.body);
@@ -103,17 +121,17 @@ export class RagStore implements PageIndexer {
       await this.ensureFts();
       // 쓰기마다 optimize()로 FTS 인덱스·tombstone 정비(정확성보단 성능, 누락 방지 목적).
       await this.table.optimize();
-    });
+    }));
   }
 
   async removePage(slug: string, userId: string = DEFAULT_USER): Promise<void> {
-    await this.enqueue(async () => {
+    await this.enqueue(() => withLanceRetry(async () => {
       // userId 범위 한정 삭제: 타 유저 동명 페이지를 건드리지 않는다.
       await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(slug)}`);
       // 삭제 후 optimize: tombstone 정비. startup reindexAll이 페이지마다 호출하므로
       // 코퍼스 수백+ 시 배치/주기 인덱스로 승격 여부를 측정 후 결정(현재 YAGNI).
       await this.table.optimize();
-    });
+    }));
   }
 
   async reindexAll(pages: IndexablePage[]): Promise<void> {

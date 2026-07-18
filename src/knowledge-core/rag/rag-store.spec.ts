@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { RagStore } from './rag-store';
+import { RagStore, withLanceRetry } from './rag-store';
 import { FakeEmbedder } from './fake-embedder';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { IndexablePage } from './rag.types';
@@ -9,6 +9,28 @@ import { IndexablePage } from './rag.types';
 function page(slug: string, body: string, title = slug): IndexablePage {
   return { slug, title, category: 'test', sources: ['대화'], body };
 }
+
+describe('withLanceRetry', () => {
+  it('retryable 커밋 충돌은 재시도해 성공한다', async () => {
+    let n = 0;
+    const fn = jest.fn(async () => {
+      if (++n < 3) throw new Error('Retryable commit conflict for version 36: CreateIndex preempted. Please retry.');
+      return 'ok';
+    });
+    await expect(withLanceRetry(fn, 3, 1)).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+  it('retryable이 아닌 에러는 즉시 던진다', async () => {
+    const fn = jest.fn(async () => { throw new Error('EEXIST: file already exists'); });
+    await expect(withLanceRetry(fn, 3, 1)).rejects.toThrow('EEXIST');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+  it('시도 횟수를 소진하면 마지막 에러를 던진다', async () => {
+    const fn = jest.fn(async () => { throw new Error('Please retry.'); });
+    await expect(withLanceRetry(fn, 2, 1)).rejects.toThrow('Please retry');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('RagStore', () => {
   let dir: string;

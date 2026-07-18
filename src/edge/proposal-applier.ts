@@ -9,9 +9,14 @@ export class ProposalApplier {
   constructor(private readonly wiki: WikiEngine, private readonly proposals: ProposalStore) {}
 
   async apply(p: Proposal): Promise<void> {
-    const existing = p.op === 'create' ? null : await this.wiki.getPage(p.targetSlug, p.userId);
-    if (p.op === 'create' || !existing) {
+    // create도 대상 존재를 먼저 본다 — 부분 실패(파일은 생겼는데 색인·승인 마킹 전 중단) 후
+    // 재승인이 'wx' EEXIST로 영구히 막히는 좀비 제안 방지(2026-07-19 실사고).
+    const existing = await this.wiki.getPage(p.targetSlug, p.userId);
+    if (!existing) {
       await this.create(p); // create거나, append/supersede인데 대상 없으면 신규로 강등
+    } else if (p.op === 'create' && existing.body.trim() === p.payload.trim()) {
+      // 같은 내용이 이미 있음 = 지난 승인의 부분 반영 — publishPage(멱등)로 게시·색인만 마저 치유.
+      await this.wiki.publishPage(p.targetSlug, p.userId);
     } else {
       const merged = [...new Set([...existing.frontmatter.sources, ...p.sources])];
       const marker = p.op === 'supersede'
