@@ -164,6 +164,7 @@
       <button class="nav-item" data-sec="sec-repos"><span class="tile" style="background:#ba7517"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 2h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10.5a1 1 0 0 1-1-1z"/></svg></span><span data-t="secRepos"></span></button>
       <button class="nav-item" data-sec="sec-sched"><span class="tile" style="background:#d4537e"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></span><span data-t="secSched"></span></button>
       <button class="nav-item" data-sec="sec-wiki"><span class="tile" style="background:#1d9e75"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 11.5a3 3 0 1 1 .4-5.97 4 4 0 0 1 7.6 1.2 2.5 2.5 0 0 1-.5 4.77z"/><path d="M8 13.5V9m0 0-1.8 1.8M8 9l1.8 1.8"/></svg></span><span data-t="secWiki"></span></button>
+      <button class="nav-item" data-sec="sec-mcp"><span class="tile" style="background:#0d9488"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 1.5v4M10.5 1.5v4M4 5.5h8v2.5a4 4 0 0 1-8 0z"/><path d="M8 12v2.5"/></svg></span><span>MCP</span></button>
       <button class="nav-item" data-sec="sec-messenger"><span class="tile" style="background:#5865f2"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5h12v8H6l-3 2.5v-2.5H2z"/></svg></span><span>Discord</span></button>
       <button class="nav-item" data-sec="sec-advanced"><span class="tile" style="background:#888780"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h12M2 11h12"/><circle cx="6" cy="5" r="1.6" fill="#fff"/><circle cx="10" cy="11" r="1.6" fill="#fff"/></svg></span><span data-t="secAdvanced"></span></button>
     </div>
@@ -304,6 +305,13 @@
     <p class="cap ok" id="wiki-hint" hidden></p>
   </section>
 
+  <section id="sec-mcp">
+    <h2>MCP</h2>
+    <div class="grp" id="mcp-grp"></div>
+    <div class="cap" data-t="mcpCap"></div>
+    <p class="cap ok" id="mcp-hint" hidden></p>
+  </section>
+
   <section id="sec-messenger">
     <h2>Discord</h2>
     <div class="row">
@@ -390,6 +398,10 @@
       schedCap: "새 예약은 채팅에서 — '매일 아침 9시에 브리핑해줘'",
       schedRestart: '삭제는 재시작해야 완전히 적용돼요',
       wikiCap: '비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) · ENGRAM_WIKI_REMOTE 환경변수가 있으면 그게 우선이에요',
+      mcpCap: 'AI에 도구를 꽂는 표준(MCP) 서버 목록 — Claude Code의 .mcp.json과 같은 포맷이라 파일을 직접 편집해도 돼요',
+      mcpEmpty: '등록된 MCP 서버가 없어요',
+      mcpNameRule: '이름은 영소문자·숫자·-·_만, 중복 불가',
+      addServer: '서버 추가',
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Brain', secAdvanced: 'Advanced',
@@ -440,6 +452,10 @@
       schedCap: 'Create schedules in chat — "brief me every morning at 9"',
       schedRestart: 'Deletion fully applies after a restart',
       wikiCap: 'Empty = local only · auth is standard git (SSH/token) · the ENGRAM_WIKI_REMOTE env var wins if set',
+      mcpCap: "MCP servers — the standard way to plug tools into AI. Same format as Claude Code's .mcp.json, so editing the file directly works too",
+      mcpEmpty: 'No MCP servers',
+      mcpNameRule: 'Lowercase letters, digits, - and _ only; no duplicates',
+      addServer: 'Add server',
     };
 
     // 섹션 전환
@@ -460,6 +476,7 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
+      'sec-mcp': ['MCP', t.addServer, t.mcpCap, t.mcpEmpty],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -1140,12 +1157,82 @@
       $('wiki-hint').hidden = false;
     };
 
+    // ---- MCP: 서버 목록(name/command/args) + 추가/삭제. mcp.json 포맷(Claude Code와 동일) ----
+    let mcpServers = [];
+
+    function showMcpHint() { $('mcp-hint').textContent = t.saved; $('mcp-hint').hidden = false; }
+
+    function startMcpForm(addRow) {
+      const form = document.createElement('div'); form.className = 'li-form';
+      const nameInput = document.createElement('input'); nameInput.className = 'mono'; nameInput.placeholder = 'github'; nameInput.style.flex = '1';
+      const cmdInput = document.createElement('input'); cmdInput.className = 'mono'; cmdInput.placeholder = 'npx'; cmdInput.style.flex = '1';
+      const argsInput = document.createElement('input'); argsInput.className = 'mono'; argsInput.placeholder = '-y @modelcontextprotocol/server-github'; argsInput.style.flex = '2';
+      const inputsRow = document.createElement('div'); inputsRow.className = 'frow';
+      inputsRow.append(nameInput, cmdInput, argsInput);
+      form.appendChild(inputsRow);
+
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const cancelBtn = document.createElement('button'); cancelBtn.textContent = t.cancel;
+      cancelBtn.onclick = () => renderMcpServers();
+      const addBtn = document.createElement('button'); addBtn.className = 'primary'; addBtn.textContent = t.addServer;
+      const status = document.createElement('span'); status.className = 'status';
+      addBtn.onclick = async () => {
+        const name = nameInput.value.trim();
+        const command = cmdInput.value.trim();
+        const argsLine = argsInput.value.trim();
+        const ok = await window.engram.addMcpServer(name, command, argsLine);
+        if (!ok) { status.textContent = t.mcpNameRule; return; }
+        await loadMcpServers();
+        showMcpHint();
+      };
+      actions.append(cancelBtn, addBtn, status);
+      form.appendChild(actions);
+      addRow.replaceWith(form);
+      nameInput.focus();
+    }
+
+    function renderMcpServers() {
+      $('mcp-hint').hidden = true;
+      const grp = $('mcp-grp');
+      grp.textContent = '';
+      if (mcpServers.length === 0) {
+        const row = document.createElement('div'); row.className = 'li';
+        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.mcpEmpty;
+        row.appendChild(label); grp.appendChild(row);
+      }
+      for (const s of mcpServers) {
+        const row = document.createElement('div'); row.className = 'li';
+        const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
+        minus.setAttribute('aria-label', t.remove + ' ' + s.name);
+        minus.onclick = async () => {
+          await window.engram.removeMcpServer(s.name);
+          await loadMcpServers();
+          showMcpHint();
+        };
+        const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.textContent = s.name;
+        const summary = document.createElement('span');
+        summary.style.color = 'var(--muted)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
+        summary.style.overflow = 'hidden'; summary.style.textOverflow = 'ellipsis'; summary.style.whiteSpace = 'nowrap'; summary.style.maxWidth = '260px';
+        summary.textContent = s.args && s.args.length ? s.command + ' ' + s.args.join(' ') : s.command;
+        row.append(minus, name, summary); grp.appendChild(row);
+      }
+      const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + t.addServer;
+      add.onclick = () => startMcpForm(add);
+      grp.appendChild(add);
+    }
+
+    async function loadMcpServers() {
+      mcpServers = await window.engram.listMcpServers();
+      renderMcpServers();
+    }
+
     loadBrains();
     loadCmdMode();
     loadPermissions();
     loadCodeRepos();
     loadSchedules();
     loadWikiRemote();
+    loadMcpServers();
 
     refresh();
     detect();
