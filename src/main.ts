@@ -134,7 +134,7 @@ async function bootstrap(): Promise<void> {
         mcpDeps.write = makeWikiWrite(wiki);
       }
     }
-    self = new SelfMessenger(chatCfg, chatStore, { logger },
+    self = new SelfMessenger(chatCfg, chatStore, { logger, brainNames: () => listBrainNames(paths.getConfigDir()) },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
       authDeps, mcpDeps);
   }

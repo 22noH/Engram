@@ -17,6 +17,7 @@ export interface Channel {
   creatorId?: string;     // Phase 16b: 만든 사람(소유권 예외)
   visibility?: 'public' | 'private'; // Phase 16c: 비공개 = 초대된 사람만
   memberIds?: string[];   // Phase 16c: 비공개 채널 입장 허용 계정 id
+  brain?: string;         // Task 3: 채널이 쓰는 두뇌 이름. 미설정=기본 두뇌.
 }
 
 export interface Message {
@@ -62,6 +63,7 @@ export type ClientFrame =
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
+  | { t: 'setChannelBrain'; id: string; brain: string | null }
   | { t: 'wikiList' }
   | { t: 'wikiGet'; slug: string }
   | { t: 'wikiSearch'; query: string }
@@ -86,7 +88,7 @@ export type ClientFrame =
 
 // 서버 → 클라
 export type ServerFrame =
-  | { t: 'channels'; list: Channel[] }
+  | { t: 'channels'; list: Channel[]; brainNames: string[] }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
   | { t: 'authOk'; user: UserDto }

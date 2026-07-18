@@ -247,6 +247,27 @@ describe('SelfMessenger 프로토콜 확장', () => {
     expect('repoPath' in events[0]).toBe(false);
   });
 
+  it('브레인이 설정된 채널 send는 mention 이벤트에 brain을 싣는다(스펙 §3.2, 멘션 흐름 스파이)', async () => {
+    const ch = store.createChannel('coding')!;
+    store.setChannelBrain(ch.id, 'qwen');
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect(events[0].brain).toBe('qwen');
+  });
+
+  it('브레인 미설정 채널 send는 mention 이벤트에 brain 필드가 아예 없다(미설정 채널=회귀 0)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect(events[0].brain).toBeUndefined();
+    expect('brain' in events[0]).toBe(false);
+  });
+
   it('setRepoPath 프레임이 채널에 경로를 바인딩하고 channels를 브로드캐스트한다', async () => {
     const ch = store.createChannel('build', 'code')!;
     client.send(JSON.stringify({ t: 'setRepoPath', id: ch.id, repoPath: 'C:/repo/app' }));
@@ -267,6 +288,160 @@ describe('SelfMessenger 프로토콜 확장', () => {
     const f = await nextFrame(client);
     expect(f.t).toBe('channels');
     expect(f.list.find((c: { name: string }) => c.name === 'people').mode).toBe('team');
+  });
+});
+
+describe('setChannelBrain(Task 3)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger;
+  let client: WebSocket;
+  const names = ['qwen', 'gemma'];
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brainch-'));
+    store = new ChatStore(dir);
+    store.listChannels();
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+  });
+  afterEach(async () => {
+    client.terminate();
+    await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('등록된 이름으로 설정 성공 → channels 브로드캐스트에 brain·brainNames 동봉', async () => {
+    const ch = store.createChannel('coding')!;
+    client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'qwen' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.brainNames).toEqual(names);
+    expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBe('qwen');
+  });
+
+  it('미등록 이름은 조용히 무시(필드 미반영)', async () => {
+    const ch = store.createChannel('coding2')!;
+    client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'bogus' }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  it('brain: null은 검증 없이 허용 — 기존 지정을 해제', async () => {
+    const ch = store.createChannel('coding3')!;
+    store.setChannelBrain(ch.id, 'qwen');
+    client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: null }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  it('비문자열·비null brain은 무시', async () => {
+    const ch = store.createChannel('coding4')!;
+    client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 123 }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  it('channels 요청 응답에도 brainNames가 동봉된다', async () => {
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.brainNames).toEqual(names);
+  });
+
+  it('brainNames 미주입이면 빈 목록(회귀 없음)', async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brainch2-'));
+    const store2 = new ChatStore(dir2);
+    store2.listChannels();
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store2, { logger: noLog });
+    await sm2.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(c);
+    expect(f.brainNames).toEqual([]);
+    c.terminate();
+    await sm2.stop();
+    fs.rmSync(dir2, { recursive: true, force: true });
+  });
+});
+
+describe('setChannelBrain 권한 게이트(Task 3)', () => {
+  let dir: string;
+  let sm: SelfMessenger | undefined;
+  let clients: WebSocket[];
+  let deps: AuthDeps;
+  const names = ['qwen'];
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-brain-'));
+    clients = [];
+    deps = makeAuthDeps(dir);
+  });
+  afterEach(async () => {
+    for (const c of clients) c.terminate();
+    clients = [];
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function connect(): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm!.addressPort()}`);
+    await once(c, 'open');
+    clients.push(c);
+    return c;
+  }
+
+  it('channels.manage 보유 member는 남의 채널에도 brain 설정 가능(권한 있는 소켓 성공)', async () => {
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    deps.accounts.setPermissions(acc.id, ['channels.manage']);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('theirs', 'chat', 'other')!;
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names }, undefined, deps);
+    await sm.start();
+    const c = await connect();
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c); // authOk
+    c.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'qwen' }));
+    const f = await nextFrame(c);
+    expect(f.list.find((x: { id: string; brain?: string }) => x.id === ch.id)?.brain).toBe('qwen');
+  });
+
+  it('권한 없는 member의 남의 채널 setChannelBrain은 무시(권한 없는 소켓)', async () => {
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('theirs', 'chat', 'other')!;
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names }, undefined, deps);
+    await sm.start();
+    const c = await connect();
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c);
+    c.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'qwen' }));
+    const f = await nextFrame(c);
+    expect(f.list.find((x: { id: string; brain?: string }) => x.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  it('내가 만든 채널은 channels.manage 없이도 brain 설정 가능(소유권 예외)', async () => {
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, brainNames: () => names }, undefined, deps);
+    await sm.start();
+    const c = await connect();
+    const sess = deps.sessions.issue(acc.id);
+    c.send(JSON.stringify({ t: 'auth', token: sess.token }));
+    await nextFrame(c);
+    c.send(JSON.stringify({ t: 'createChannel', name: 'mine' }));
+    const f1 = await nextFrame(c);
+    const ch = f1.list.find((x: { name: string }) => x.name === 'mine');
+    c.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 'qwen' }));
+    const f2 = await nextFrame(c);
+    expect(f2.list.find((x: { id: string; brain?: string }) => x.id === ch.id)?.brain).toBe('qwen');
   });
 });
 

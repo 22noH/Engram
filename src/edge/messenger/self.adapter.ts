@@ -72,6 +72,9 @@ export class SelfMessenger implements MessengerPort {
     private readonly opts: {
       engramName?: string;
       logger: { warn(msg: string, ctx?: string): void };
+      // Task 3: 등록된 두뇌 이름 목록(configDir 접근은 main.ts 몫 — 여기는 주입만 받는다).
+      // 미주입 시 빈 목록(무등록=setChannelBrain은 항상 무시, channels 응답의 brainNames=[]).
+      brainNames?: () => string[];
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
@@ -235,13 +238,19 @@ export class SelfMessenger implements MessengerPort {
     if (!me) return false;
     return ch.creatorId === me.id || (ch.memberIds ?? []).includes(me.id);
   }
+  // Task 3: 등록 두뇌 이름 목록(요청 시점 재조회 — 캐시 금지, 두뇌 추가 직후 반영).
+  private brainNames(): string[] {
+    return this.opts.brainNames ? this.opts.brainNames() : [];
+  }
+
   // 소켓별로 접근 가능한 채널만 담아 channels 프레임을 각 인증 소켓에 전송.
   private broadcastChannels(): void {
     const all = this.store.listChannels();
+    const brainNames = this.brainNames();
     for (const c of this.wss?.clients ?? []) {
       if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
       const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(c, ch)) : all;
-      try { c.send(JSON.stringify({ t: 'channels', list })); } catch { /* 격리 */ }
+      try { c.send(JSON.stringify({ t: 'channels', list, brainNames })); } catch { /* 격리 */ }
     }
   }
   private adminList(): AdminUserDto[] {
@@ -286,7 +295,7 @@ export class SelfMessenger implements MessengerPort {
         case 'channels': {
           const all = this.store.listChannels();
           const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(ws, ch)) : all;
-          this.sendTo(ws, { t: 'channels', list });
+          this.sendTo(ws, { t: 'channels', list, brainNames: this.brainNames() });
           return;
         }
         case 'createChannel': {
@@ -323,6 +332,22 @@ export class SelfMessenger implements MessengerPort {
           if (typeof f.id === 'string' && (f.mode === 'all' || f.mode === 'mention')) {
             const ch = this.store.listChannels().find((c) => c.id === f.id);
             if (this.canAdminChannel(ws, ch)) this.store.setRespondMode(f.id, f.mode);
+          }
+          this.broadcastChannels();
+          return;
+        }
+        case 'setChannelBrain': {
+          // Task 3: setRespondMode와 동일 권한 게이트(canAdminChannel). brain=null은 해제(검증 없이 허용),
+          // 문자열이면 요청 시점에 등록 이름 목록을 재조회해 대조(캐시 금지) — 미등록/비문자열은 조용히 무시.
+          if (typeof f.id === 'string' && (f.brain === null || typeof f.brain === 'string')) {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) {
+              if (f.brain === null) {
+                this.store.setChannelBrain(f.id, null);
+              } else if (this.brainNames().includes(f.brain)) {
+                this.store.setChannelBrain(f.id, f.brain);
+              }
+            }
           }
           this.broadcastChannels();
           return;
@@ -526,6 +551,7 @@ export class SelfMessenger implements MessengerPort {
       authorId: msg.authorId,
       target: { channelId, anchorId: anchor } satisfies SelfTarget as ReplyTarget,
       ...(ch.mode === 'code' ? { mode: 'code' as const, repoPath: ch.repoPath } : {}),
+      ...(ch.brain ? { brain: ch.brain } : {}), // 스펙 §3.2: 채널의 brain을 이벤트에 실어나름(미설정 채널=회귀 0)
     };
     if (isMention) {
       if (this.handler) await this.handler(e);
