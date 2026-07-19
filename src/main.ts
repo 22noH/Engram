@@ -34,7 +34,8 @@ import { SessionStore } from './edge/auth/session-store';
 import { AuthHttp } from './edge/auth/auth-http';
 import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
 import { ensureSetupCode } from './edge/auth/setup-code';
-import type { AuthDeps } from './edge/messenger/self.adapter';
+import type { AuthDeps, AdminDeps } from './edge/messenger/self.adapter';
+import { AdminHttp } from './edge/admin/admin-http';
 import type { McpDeps } from './edge/mcp/engram-mcp';
 import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import * as fs from 'fs';
@@ -110,6 +111,7 @@ async function bootstrap(): Promise<void> {
     chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'));
     let authDeps: AuthDeps | undefined;
     let mcpDeps: McpDeps | undefined;
+    let adminDeps: AdminDeps | undefined;
     if (isServer) {
       const accounts = new AccountStore(paths.getStateDir());
       const sessions = new SessionStore(paths.getStateDir());
@@ -143,6 +145,11 @@ async function bootstrap(): Promise<void> {
       if (readMcpWriteMode(paths.getConfigDir()) === 'write') {
         mcpDeps.write = makeWikiWrite(wiki);
       }
+
+      // Task 2(서버 콘솔 S1): /admin(console/dist 정적 서빙+owner 게이트 개요 api). 메인 서버에만
+      // (brain 모드는 authDeps 자체가 없어 self.adapter가 /admin을 라우팅하지 않는다).
+      const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, wiki, proposals });
+      adminDeps = { http: adminHttp };
     }
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,
@@ -150,7 +157,7 @@ async function bootstrap(): Promise<void> {
       defaultBrain: () => defaultBrainName(paths.getConfigDir()),
     },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
-      authDeps, mcpDeps);
+      authDeps, mcpDeps, adminDeps);
   }
 
   // Discord(Phase 6a): messenger.json에 있으면 병행.

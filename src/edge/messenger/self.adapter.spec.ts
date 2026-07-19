@@ -16,6 +16,8 @@ import type { AuthDeps } from './self.adapter';
 import type { AdminSettings } from '../../../shared/protocol';
 import type { McpDeps } from '../mcp/engram-mcp';
 import * as mcpHttp from '../mcp/mcp-http';
+import { AdminHttp } from '../admin/admin-http';
+import type { AdminDeps } from './self.adapter';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -1923,5 +1925,86 @@ describe('/mcp HTTP 노출(Phase 8c-2)', () => {
     expect(got.sort()).toEqual(['proposalsChanged', 'wikiChanged']);
     await client.close();
     ws.terminate();
+  });
+});
+
+describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
+  let dir: string; let distDir: string;
+  let store: ChatStore;
+  let accounts: AccountStore; let sessions: SessionStore;
+  let sm: SelfMessenger | undefined;
+
+  function makeAdminDeps(): AdminDeps {
+    const http = new AdminHttp({
+      accounts, sessions, chat: store,
+      wiki: { listPages: async () => [] } as any,
+      proposals: { listPending: async () => [] } as any,
+      distDir,
+    });
+    return { http };
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-admin-'));
+    store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    accounts = new AccountStore(dir);
+    sessions = new SessionStore(dir);
+    distDir = path.join(dir, 'consoledist');
+    fs.mkdirSync(distDir);
+    fs.writeFileSync(path.join(distDir, 'index.html'), '<html>admin</html>');
+  });
+  afterEach(async () => {
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('authDeps+adminDeps 둘 다 있으면 /admin이 콘솔 index.html을 서빙한다', async () => {
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, makeAuthDeps(dir), undefined, makeAdminDeps(),
+    );
+    await sm.start();
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/admin`);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe('<html>admin</html>');
+  });
+
+  it('adminDeps 미주입(authDeps만) → /admin 404(기존 폴스루)', async () => {
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, makeAuthDeps(dir),
+    );
+    await sm.start();
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/admin`);
+    expect(r.status).toBe(404);
+  });
+
+  it('authDeps 미주입(brain 모드·adminDeps만 있어도) → /admin 404', async () => {
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'brain' } as any, store, { logger: noLog },
+      undefined, undefined, undefined, makeAdminDeps(),
+    );
+    await sm.start();
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/admin`);
+    expect(r.status).toBe(404);
+  });
+
+  it('/admin/api/overview 전 구간 배선: owner 세션 → 200', async () => {
+    const authDeps = makeAuthDeps(dir);
+    const owner = authDeps.accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+    const token = authDeps.sessions.issue(owner.id).token;
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, authDeps, undefined, makeAdminDeps(),
+    );
+    await sm.start();
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/admin/api/overview`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { members: number };
+    expect(body.members).toBe(1);
   });
 });

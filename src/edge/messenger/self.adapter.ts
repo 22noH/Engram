@@ -16,6 +16,7 @@ import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
 import type { AuthSettings } from '../auth/auth.config';
 import { can, type Permission } from '../auth/permissions';
+import type { AdminHttp } from '../admin/admin-http';
 import type { McpDeps } from '../mcp/engram-mcp';
 import { buildMcpServer } from '../mcp/engram-mcp';
 import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
@@ -28,6 +29,11 @@ export interface AuthDeps {
   accounts: AccountStore; sessions: SessionStore; http: AuthHttp;
   settings: { load(): AuthSettings; save(s: AuthSettings): void };
 }
+
+// 서버 콘솔 S1(플랜 docs/superpowers/plans/2026-07-19-server-console-s1.md Task 2): /admin 정적
+// 서빙+owner 게이트 api. authDeps와 세트로만 라우팅(콘솔=서버 에디션 물건 — brain 모드·authDeps
+// 미주입은 기존 404 폴스루 유지, adminDeps만 단독 주입돼도 라우팅 안 함).
+export interface AdminDeps { http: AdminHttp }
 
 function toPageMeta(p: WikiPage): WikiPageMeta {
   return { slug: p.slug, title: p.frontmatter.title, category: p.frontmatter.category, status: p.frontmatter.status, updated: p.frontmatter.updated };
@@ -86,6 +92,8 @@ export class SelfMessenger implements MessengerPort {
     private readonly authDeps?: AuthDeps,
     // Phase 8c-2: 메인 서버(isServer)에만 주입. 미주입(brain 모드·테스트)이면 /mcp는 404(현행과 동일).
     private readonly mcpDeps?: McpDeps,
+    // Task 2(서버 콘솔 S1): 메인 서버(isServer)에만 주입. authDeps와 함께여야 /admin이 라우팅된다.
+    private readonly adminDeps?: AdminDeps,
   ) {}
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
@@ -106,6 +114,14 @@ export class SelfMessenger implements MessengerPort {
       // Phase 16a: /auth/*는 AuthHttp로 위임(계정·세션 창구). authDeps 미주입=위임 없음(brain 모드).
       if (this.authDeps && (req.url ?? '').startsWith('/auth/')) {
         void this.authDeps.http.handle(req, res).catch(() => {
+          try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
+        });
+        return;
+      }
+      // Task 2(서버 콘솔 S1): /admin은 authDeps+adminDeps 둘 다 있을 때만(메인 서버) — auth-http.ts
+      // 위임과 같은 결. 한쪽만 있으면(brain 모드·미배선) 이 블록을 건너뛰어 기존 404로 떨어진다.
+      if (this.authDeps && this.adminDeps && (req.url ?? '').startsWith('/admin')) {
+        void this.adminDeps.http.handle(req, res).catch(() => {
           try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
         });
         return;
