@@ -20,6 +20,7 @@
   },
   "files": [
     "dist",
+    "console/dist",
     "prompts",
     "personas",
     "README.md",
@@ -40,7 +41,7 @@
     "renderer:install": "npm --prefix renderer install",
     "renderer:build": "npm --prefix renderer run build",
     "desktop:dev": "npm run renderer:build && nest build && electron .",
-    "desktop:build": "npm run renderer:build && nest build && electron-builder",
+    "desktop:build": "npm run renderer:build && npm run console:build && nest build && electron-builder",
     "console:install": "npm --prefix console install",
     "console:build": "npm --prefix console run build",
     "console:test": "npm --prefix console test"
