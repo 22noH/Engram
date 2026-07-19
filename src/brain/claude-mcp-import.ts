@@ -101,6 +101,8 @@ function readPluginMcpServers(homeDir: string): ClaudeMcpEntry[] {
   for (const registryKey of pluginKeys) {
     if (!Object.prototype.hasOwnProperty.call(plugins, registryKey)) continue;
     const pluginName = registryKey.split('@')[0];
+    // 서버명과 같은 slug 검증 — allowedTools 토큰(mcp__plugin_<플러그인>_<서버>)에 들어가는 값(최종리뷰 지적)
+    if (!isValidMcpName(pluginName)) continue;
     const pluginData = plugins[registryKey];
 
     // 플러그인 배열의 첫 원소만 사용
