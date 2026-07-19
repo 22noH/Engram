@@ -40,6 +40,8 @@ import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import * as fs from 'fs';
 import { listBrainNames, defaultBrainName } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
+import { readClaudeMcpServers } from './brain/claude-mcp-import';
+import { mirrorClaudeMcp } from './desktop/mcp-file';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
 // prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
@@ -73,6 +75,14 @@ async function bootstrap(): Promise<void> {
 
   const paths = app.get(PathResolver);
   const logger = app.get(PinoLogger);
+
+  // 클로드 MCP 패리티(설계 §3.2): 부트 1회, 두뇌 생성 이전. 미러 실패는 부팅을 막지 않는다.
+  try {
+    mirrorClaudeMcp(paths.getConfigDir(), readClaudeMcpServers());
+  } catch (e) {
+    logger.warn(`클로드 MCP 미러 실패(무시하고 계속): ${String(e)}`, 'McpParity');
+  }
+
   const orchestrator = app.get(Orchestrator);
   const policy = loadChannelPolicy(paths.getConfigDir());
 

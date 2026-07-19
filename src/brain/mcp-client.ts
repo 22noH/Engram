@@ -27,7 +27,10 @@ export class McpSession {
       name,
       () =>
         new StdioClientTransport({
-          command: cfg.command,
+          // command는 T2에서 옵셔널화(url형 항목 지원 §3.2) — http 전송은 T3(mcp-client HTTP 지원)에서
+          // 배선 예정. 그 전까지 url-only cfg가 여기 들어오면 빈 커맨드로 spawn 실패 → connect()가
+          // false를 반환해 조용히 스킵된다(never-throw 계약 유지, 기존 stdio 항목엔 영향 없음).
+          command: cfg.command ?? '',
           args: cfg.args,
           env: { ...getDefaultEnvironment(), ...cfg.env }, // 기본 안전 env(PATH 등) + 사용자 env
         }),

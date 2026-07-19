@@ -33,4 +33,19 @@ describe('mcp-config', () => {
     expect(isValidMcpName('한글')).toBe(false);
     expect(isValidMcpName('')).toBe(false);
   });
+
+  it('http형(url) 항목 로드: command 없이 url만 있으면 유효', () => {
+    write({ mcpServers: { remote: { url: 'https://example.com/mcp' } } });
+    expect(loadMcpServers(tmp)).toEqual({ remote: { args: [], env: {}, url: 'https://example.com/mcp' } });
+  });
+
+  it('command도 url도 없으면 스킵', () => {
+    write({ mcpServers: { neither: {}, blankUrl: { url: '  ' } } });
+    expect(loadMcpServers(tmp)).toEqual({});
+  });
+
+  it('source 필드는 로더에서 무시(McpServerConfig에 포함되지 않음)', () => {
+    write({ mcpServers: { gh: { command: 'npx', source: 'claude' } } });
+    expect(loadMcpServers(tmp)).toEqual({ gh: { command: 'npx', args: [], env: {} } });
+  });
 });

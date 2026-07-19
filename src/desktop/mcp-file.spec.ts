@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { listMcpServersFile, addMcpServer, removeMcpServer } from './mcp-file';
+import { listMcpServersFile, addMcpServer, removeMcpServer, mirrorClaudeMcp } from './mcp-file';
+import type { ClaudeMcpEntry } from '../brain/claude-mcp-import';
 
 describe('mcp-file', () => {
   let tmp: string;
@@ -30,5 +31,54 @@ describe('mcp-file', () => {
     const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
     expect(raw.mcpServers).toEqual({ b: { command: 'y' } });
     expect(raw.somethingElse).toBe(1);
+  });
+
+  describe('mirrorClaudeMcp', () => {
+    it('삽입: stdio·http 둘 다 source:claude 표시로 병합', () => {
+      const entries: ClaudeMcpEntry[] = [
+        { name: 'gh', command: 'npx', args: ['-y', 'server-github'], env: { TOKEN: 'x' } },
+        { name: 'remote', url: 'https://example.com/mcp' },
+      ];
+      mirrorClaudeMcp(tmp, entries);
+      const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+      expect(raw.mcpServers).toEqual({
+        gh: { command: 'npx', args: ['-y', 'server-github'], env: { TOKEN: 'x' }, source: 'claude' },
+        remote: { url: 'https://example.com/mcp', source: 'claude' },
+      });
+    });
+
+    it('재실행 시 클로드에서 지운 항목 제거·수동 항목 보존', () => {
+      fs.writeFileSync(path.join(tmp, 'mcp.json'), JSON.stringify({
+        mcpServers: {
+          manual: { command: 'usercmd' }, // source 없음 = 수동
+          a: { command: 'old-a', args: [], env: {}, source: 'claude' },
+          b: { command: 'old-b', args: [], env: {}, source: 'claude' },
+        },
+      }));
+      mirrorClaudeMcp(tmp, [{ name: 'a', command: 'new-a' }]); // b는 클로드에서 지워진 상태
+      const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+      expect(raw.mcpServers).toEqual({
+        manual: { command: 'usercmd' },
+        a: { command: 'new-a', args: [], env: {}, source: 'claude' },
+      });
+    });
+
+    it('이름 충돌=수동 승리(스킵)+console.warn', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      fs.writeFileSync(path.join(tmp, 'mcp.json'), JSON.stringify({
+        mcpServers: { foo: { command: 'usercmd' } }, // source 없음 = 수동
+      }));
+      mirrorClaudeMcp(tmp, [{ name: 'foo', command: 'claudecmd' }]);
+      const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+      expect(raw.mcpServers).toEqual({ foo: { command: 'usercmd' } });
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('mcp.json 없음 = 생성', () => {
+      mirrorClaudeMcp(tmp, [{ name: 'a', command: 'x' }]);
+      const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+      expect(raw.mcpServers).toEqual({ a: { command: 'x', args: [], env: {}, source: 'claude' } });
+    });
   });
 });

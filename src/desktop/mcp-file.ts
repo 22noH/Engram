@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { isValidMcpName } from '../brain/mcp-config';
+import type { ClaudeMcpEntry } from '../brain/claude-mcp-import';
 
 export interface McpServer {
   name: string;
@@ -78,6 +79,56 @@ export function addMcpServer(configDir: string, name: string, command: string, a
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'mcp.json'), JSON.stringify(cfg, null, 2));
   return true;
+}
+
+// 클로드 MCP 미러 병합(스펙 §3.2). mcp.json을 source='claude' 항목의 소유자로 삼는다:
+// ①기존 source==='claude' 항목 전부 제거 ②entries를 source:'claude'로 재삽입(stdio는
+// {command,args,env,source}·http는 {url,source}) ③이름이 수동 항목(source 없음)과 겹치면
+// 스킵+console.warn(수동 승리) ④그 외 top-level 키·수동 항목 보존. 쓰기 실패=warn(throw 금지).
+export function mirrorClaudeMcp(configDir: string, entries: ClaudeMcpEntry[]): void {
+  const cfg = readMcpConfig(configDir);
+  let servers = cfg.mcpServers;
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
+    servers = {};
+    Object.defineProperty(cfg, 'mcpServers', { value: servers, enumerable: true, writable: true, configurable: true });
+  }
+
+  // ① source==='claude'인 기존 항목 전부 제거(다음 동기화에서 새로 채움)
+  for (const name of Object.keys(servers)) {
+    if (!Object.prototype.hasOwnProperty.call(servers, name)) continue;
+    const s = (servers as Record<string, Record<string, unknown>>)[name];
+    if (s && typeof s === 'object' && !Array.isArray(s) && s.source === 'claude') {
+      delete (servers as Record<string, unknown>)[name];
+    }
+  }
+
+  // ② entries를 source:'claude'로 삽입 — 이름이 (남은=수동) 항목과 겹치면 스킵+warn
+  for (const entry of entries) {
+    if (!isValidMcpName(entry.name)) continue;
+    if (Object.prototype.hasOwnProperty.call(servers, entry.name)) {
+      console.warn(`[mcp-file] 클로드 MCP 미러 스킵: '${entry.name}' 이름이 수동 등록 항목과 충돌`);
+      continue;
+    }
+
+    const command = typeof entry.command === 'string' ? entry.command.trim() : '';
+    const url = typeof entry.url === 'string' ? entry.url.trim() : '';
+    if (!command && !url) continue; // 방어적 재검증(호출자가 이미 걸렀을 것)
+
+    const server: Record<string, unknown> = command
+      ? { command, args: entry.args ?? [], env: entry.env ?? {}, source: 'claude' }
+      : { url, source: 'claude' };
+
+    // own property로 대입(__proto__ 같은 이름도 보호)
+    Object.defineProperty(servers, entry.name, { value: server, enumerable: true, writable: true, configurable: true });
+  }
+
+  // ③ 저장(다른 top-level 키·수동 항목 보존) — 쓰기 실패는 throw 금지, warn만
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'mcp.json'), JSON.stringify(cfg, null, 2));
+  } catch (e) {
+    console.warn(`[mcp-file] mcp.json 저장 실패: ${String(e)}`);
+  }
 }
 
 // MCP 서버 제거(멱등, 없으면 no-op, 다른 필드 보존).
