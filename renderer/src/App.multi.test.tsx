@@ -52,6 +52,17 @@ function seedTwoConnections() {
   });
 }
 
+// 스탠드얼론 배포 형태 모의(config.PRESET=null, TEAM_CHAT=false).
+async function renderStandaloneApp() {
+  vi.resetModules();
+  vi.doMock('./config', () => ({
+    WS_URL: 'ws://127.0.0.1:47800', LANG: 'en', ko: false,
+    PRESET: null, TEAM_CHAT: false,
+  }));
+  const { default: StandaloneApp } = await import('./App');
+  return StandaloneApp;
+}
+
 it('2연결이 동명 채널을 가지면 논리 채널 1개로 합쳐 보이고, 각 연결의 기록이 머지되어 보인다', async () => {
   seedTwoConnections();
   render(<App />);
@@ -388,4 +399,20 @@ it('승인함 제안 승인 시 proposalApprove 전송', async () => {
   fireEvent.click(screen.getByText(/inbox|승인함/i));
   fireEvent.click(screen.getByRole('button', { name: /approve|승인/i }));
   await waitFor(() => expect(homeWS.sent.some((s) => s.includes('"proposalApprove"') && s.includes('"id":"p1"'))).toBe(true));
+});
+
+// 스탠드얼론 배포 형태에서 team 탭은 나타나지 않아야 한다(config.PRESET=null, TEAM_CHAT=false).
+it('스탠드얼론 배포에서 team 탭(채팅)은 문서에 없다', async () => {
+  seedTwoConnections();
+  const StandaloneApp = await renderStandaloneApp();
+  render(<StandaloneApp />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  act(() => {
+    homeWS.msg({ t: 'channels', list: [{ id: 'c1', name: '일반', respondMode: 'all', mode: 'chat' }] });
+  });
+  await waitFor(() => expect(screen.getByText('# 일반')).toBeInTheDocument());
+
+  // team 탭이 없어야 한다.
+  expect(screen.queryByText(T.tabTeam)).not.toBeInTheDocument();
 });

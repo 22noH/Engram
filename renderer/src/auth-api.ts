@@ -35,8 +35,6 @@ export const apiRegister = async (e: string, loginId: string, password: string, 
   const r = await jsonOrError<{ pending: true }>(post(e, '/auth/register', { loginId, password, displayName }));
   return 'error' in r ? r : { ok: true as const };
 };
-export const apiSetup = (e: string, code: string, loginId: string, password: string) =>
-  jsonOrError<{ token: string; user: UserDto }>(post(e, '/auth/setup', { code, loginId, password }));
 export const apiOidcBegin = (e: string) =>
   jsonOrError<{ authUrl: string; pollCode: string }>(post(e, '/auth/oidc/begin', {}));
 export async function apiOidcPoll(e: string, pollCode: string): Promise<{ token: string; user: UserDto } | { pending: true } | { error: string }> {
