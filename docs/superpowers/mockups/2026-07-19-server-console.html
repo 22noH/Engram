@@ -1,0 +1,510 @@
+<title>Engram 서버 웹 콘솔 목업</title>
+<style>
+  :root {
+    --bg:#f2f7fb; --panel:#ffffff; --line:#dce6f0; --text:#1c2733; --dim:#5c6b7a;
+    --accent:#3aa5de; --accent-soft:rgba(58,165,222,.12); --accent-line:rgba(58,165,222,.4);
+    --hover:rgba(28,39,51,.05); --danger:#e5534b; --ok:#2ea043; --warn:#c99117;
+    --shadow:0 10px 30px rgba(28,39,51,.10); --mono:Consolas,'Cascadia Code',monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b0e13; --panel:#12161d; --line:#222a35; --text:#e6edf3; --dim:#8b95a3;
+      --accent:#7ec8e3; --accent-soft:rgba(126,200,227,.13); --accent-line:rgba(126,200,227,.4);
+      --hover:rgba(255,255,255,.05); --danger:#f26d6d; --ok:#56d364; --warn:#e0b34e;
+      --shadow:0 10px 30px rgba(0,0,0,.45); }
+  }
+  :root[data-theme="dark"] { --bg:#0b0e13; --panel:#12161d; --line:#222a35; --text:#e6edf3; --dim:#8b95a3;
+      --accent:#7ec8e3; --accent-soft:rgba(126,200,227,.13); --accent-line:rgba(126,200,227,.4);
+      --hover:rgba(255,255,255,.05); --danger:#f26d6d; --ok:#56d364; --warn:#e0b34e;
+      --shadow:0 10px 30px rgba(0,0,0,.45); }
+  :root[data-theme="light"] { --bg:#f2f7fb; --panel:#ffffff; --line:#dce6f0; --text:#1c2733; --dim:#5c6b7a;
+      --accent:#3aa5de; --accent-soft:rgba(58,165,222,.12); --accent-line:rgba(58,165,222,.4);
+      --hover:rgba(28,39,51,.05); --danger:#e5534b; --ok:#2ea043; --warn:#c99117;
+      --shadow:0 10px 30px rgba(28,39,51,.10); }
+
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+         font-size:14px; margin:0; padding:28px 20px 60px; }
+  .intro { max-width:1020px; margin:0 auto 22px; }
+  .intro h1 { font-size:19px; margin:0 0 6px; }
+  .intro p { color:var(--dim); font-size:13px; margin:0; line-height:1.55; }
+  .cap { max-width:1020px; margin:26px auto 8px; font-size:12px; font-weight:700; color:var(--dim);
+         text-transform:uppercase; letter-spacing:.08em; }
+
+  /* ── 셋업(첫 접속) ── */
+  .setupwrap { max-width:1020px; margin:0 auto; background:var(--bg); border:1px solid var(--line);
+               border-radius:12px; height:430px; display:flex; align-items:center; justify-content:center;
+               box-shadow:var(--shadow); }
+  .setup { width:360px; background:var(--panel); border:1px solid var(--line); border-radius:12px;
+           padding:26px 26px 22px; display:flex; flex-direction:column; gap:12px; }
+  .wordmark { font-weight:700; color:var(--accent); letter-spacing:.4px; font-size:13px; }
+  .setup h2 { margin:0; font-size:18px; }
+  .setup .sub { color:var(--dim); font-size:12.5px; line-height:1.55; margin-top:-6px; }
+  .setup label { font-size:12px; font-weight:600; color:var(--dim); margin-bottom:-8px; }
+  .setup input { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:9px 11px;
+                 font:inherit; font-size:13.5px; color:var(--text); }
+  .setup input.code { font-family:var(--mono); letter-spacing:.06em; }
+  .setup button { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+                  padding:10px 0; border-radius:8px; margin-top:4px; cursor:pointer; }
+  .steps { display:flex; gap:6px; justify-content:center; margin-top:2px; }
+  .steps i { width:22px; height:3px; border-radius:2px; background:var(--line); }
+  .steps i.on { background:var(--accent); }
+
+  /* ── 콘솔 프레임 ── */
+  .frame { max-width:1020px; margin:0 auto; background:var(--panel); border:1px solid var(--line);
+           border-radius:12px; overflow:hidden; box-shadow:var(--shadow); display:flex; height:560px; }
+  .nav { width:216px; border-right:1px solid var(--line); display:flex; flex-direction:column; padding:14px 10px; gap:2px; }
+  .nav .head { padding:2px 10px 12px; }
+  .nav .head .srv { font-size:14.5px; font-weight:700; }
+  .nav .head .addr { font-size:11.5px; color:var(--dim); font-family:var(--mono); margin-top:2px; }
+  .nitem { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; color:var(--dim);
+           font-size:13px; font-weight:600; cursor:pointer; }
+  .nitem:hover { background:var(--hover); }
+  .nitem.on { background:var(--accent-soft); color:var(--accent); }
+  .nitem .nbadge { margin-left:auto; background:var(--warn); color:#fff; border-radius:8px; min-width:16px;
+                   text-align:center; font-size:10.5px; line-height:16px; padding:0 4px; }
+  .tile { width:20px; height:20px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center;
+          color:#fff; font-size:11px; flex:none; }
+  .nav .foot { margin-top:auto; padding:10px; font-size:11.5px; color:var(--dim); display:flex; align-items:center; gap:7px; }
+  .dotok { width:7px; height:7px; border-radius:50%; background:var(--ok); }
+
+  .main { flex:1; overflow-y:auto; padding:22px 26px; min-width:0; }
+  .main h2 { margin:0 0 4px; font-size:18px; }
+  .main .sub { color:var(--dim); font-size:12.5px; margin-bottom:16px; }
+  .grp-h { font-size:12px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:.06em;
+           margin:18px 0 8px; }
+  .grp { background:var(--bg); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .row { display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row .who { flex:1; min-width:0; }
+  .row .who .n { font-size:13.5px; font-weight:600; }
+  .row .who .id { font-size:11.5px; color:var(--dim); font-family:var(--mono); }
+  .chip { padding:2px 9px; border-radius:99px; font-size:11px; font-weight:600; border:1px solid var(--line); color:var(--dim); }
+  .chip.owner { color:var(--accent); border-color:var(--accent-line); background:var(--accent-soft); }
+  .chip.pend { color:var(--warn); border-color:var(--warn); }
+  .chip.susp { color:var(--danger); border-color:var(--danger); }
+  .row .btns { display:flex; gap:6px; }
+  .row .btns button { border:1px solid var(--line); background:transparent; color:var(--text); font:inherit;
+                      font-size:12px; padding:5px 11px; border-radius:7px; cursor:pointer; }
+  .row .btns button.pri { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .row .btns button.danger { color:var(--danger); }
+
+  /* 설정 폼·배포 카드 */
+  .form { display:flex; flex-direction:column; gap:0; }
+  .frow { display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--line); }
+  .frow:last-child { border-bottom:0; }
+  .frow label { width:130px; font-size:13px; color:var(--dim); flex:none; }
+  .frow input, .frow select { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:7px;
+                              padding:7px 10px; font:inherit; font-size:13px; color:var(--text); }
+  .frow .hint { font-size:11.5px; color:var(--dim); }
+  .deploy { display:flex; align-items:center; gap:14px; padding:14px; }
+  .deploy .d { flex:1; }
+  .deploy .d .t { font-weight:650; font-size:13.5px; margin-bottom:3px; }
+  .deploy .d .s { font-size:12px; color:var(--dim); line-height:1.5; }
+  .deploy button { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+                   padding:9px 16px; border-radius:8px; cursor:pointer; flex:none; }
+  .savebar { display:flex; justify-content:flex-end; margin-top:10px; }
+  .savebar button { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+                    padding:8px 22px; border-radius:8px; cursor:pointer; }
+</style>
+
+<div class="intro">
+  <h1>서버 웹 콘솔 목업 — 어느 컴퓨터에서든 브라우저로 <span style="font-family:var(--mono); font-size:13px">http://서버:47800/admin</span></h1>
+  <p>데스크톱 앱과 같은 제품군 룩(같은 색·문법). ① 설치 직후 첫 접속=셋업 마법사, ② 멤버 관리, ③ 서버 설정+클라이언트 배포.</p>
+</div>
+
+<div class="cap">① 첫 접속 — 셋업 마법사 (설치 출력물의 1회용 코드로 본인 확인)</div>
+<div class="setupwrap">
+  <div class="setup">
+    <div class="wordmark">ENGRAM SERVER</div>
+    <h2>서버 만들기</h2>
+    <div class="sub">설치할 때 터미널에 출력된 셋업 코드를 입력하세요. 이 서버의 소유자 계정을 만듭니다.</div>
+    <label>셋업 코드</label>
+    <input class="code" value="9059-405f-5740" />
+    <label>아이디</label>
+    <input placeholder="아이디" />
+    <label>비밀번호</label>
+    <input type="password" placeholder="비밀번호" />
+    <button>서버 만들기</button>
+    <div class="steps"><i class="on"></i><i></i></div>
+  </div>
+</div>
+
+<div class="cap">② 개요 — 접속하면 처음 보는 화면</div>
+<div class="frame" style="height:460px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem on"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>개요</h2>
+    <div class="sub">서버 한눈에 보기.</div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:16px">
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">멤버</div><div style="font-size:20px;font-weight:700;margin-top:2px">3</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">채널</div><div style="font-size:20px;font-weight:700;margin-top:2px">5</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">위키 페이지</div><div style="font-size:20px;font-weight:700;margin-top:2px">12</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">오늘 대화</div><div style="font-size:20px;font-weight:700;margin-top:2px">148</div></div>
+    </div>
+    <div class="grp-h">처리할 일</div>
+    <div class="grp">
+      <div class="row"><div class="who"><div class="n">가입 대기 2건</div><div class="id" style="font-family:inherit">김민수, 박지연</div></div><div class="btns"><button class="pri">멤버로 이동</button></div></div>
+      <div class="row"><div class="who"><div class="n">위키 승인 대기 1건</div><div class="id" style="font-family:inherit">Deployment split: standalone / preset client / server</div></div><div class="btns"><button class="pri">위키로 이동</button></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">③ 멤버</div>
+<div class="frame">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem on"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <div style="display:flex; align-items:flex-start; gap:12px">
+      <div style="flex:1">
+        <h2>멤버</h2>
+        <div class="sub">직접 만들어 주거나, 가입 요청을 승인하세요.</div>
+      </div>
+      <button style="background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer; flex:none">＋ 멤버 추가</button>
+    </div>
+    <div class="grp-h">멤버 추가 (＋ 버튼을 누르면 열리는 폼)</div>
+    <div class="grp form">
+      <div class="frow"><label>아이디</label><input placeholder="아이디" style="max-width:200px" /></div>
+      <div class="frow"><label>표시 이름</label><input placeholder="이름" style="max-width:200px" /></div>
+      <div class="frow"><label>임시 비밀번호</label><input value="init-7f2k" style="max-width:200px; font-family:var(--mono)" /><span class="hint">첫 로그인 때 본인이 변경</span></div>
+      <div class="frow"><label>그룹</label><select style="max-width:200px"><option>개발팀</option><option>디자인팀</option><option>(그룹 없음)</option></select></div>
+      <div class="frow" style="justify-content:flex-end"><button style="background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600; padding:7px 18px; border-radius:7px; cursor:pointer">만들기</button></div>
+    </div>
+    <div class="grp-h">가입 대기 2</div>
+    <div class="grp">
+      <div class="row">
+        <div class="who"><div class="n">김민수</div><div class="id">minsu</div></div>
+        <span class="chip pend">대기</span>
+        <div class="btns"><button class="pri">승인</button><button>거절</button></div>
+      </div>
+      <div class="row">
+        <div class="who"><div class="n">박지연</div><div class="id">jiyeon</div></div>
+        <span class="chip pend">대기</span>
+        <div class="btns"><button class="pri">승인</button><button>거절</button></div>
+      </div>
+    </div>
+    <div class="grp-h">멤버 3</div>
+    <div class="grp">
+      <div class="row">
+        <div class="who"><div class="n">나 (서버 소유자)</div><div class="id">22no</div></div>
+        <span class="chip owner">owner</span>
+        <div class="btns"><button>권한</button></div>
+      </div>
+      <div class="row">
+        <div class="who"><div class="n">이서준</div><div class="id">seojun</div></div>
+        <span class="chip" style="color:var(--text)">개발팀</span>
+        <span class="chip">활성</span>
+        <div class="btns"><button>권한</button><button>비번 리셋</button><button class="danger">정지</button></div>
+      </div>
+      <div class="row">
+        <div class="who"><div class="n">최하늘</div><div class="id">haneul</div></div>
+        <span class="chip susp">정지</span>
+        <div class="btns"><button>복구</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">④ 그룹 — 묶어서 권한·채널 접근 관리</div>
+<div class="frame" style="height:520px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem on"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <div style="display:flex; align-items:flex-start; gap:12px">
+      <div style="flex:1">
+        <h2>그룹</h2>
+        <div class="sub">멤버를 묶어서 권한과 채널 접근을 한 번에 관리해요. 멤버는 여러 그룹에 속할 수 있어요.</div>
+      </div>
+      <button style="background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer; flex:none">＋ 그룹 만들기</button>
+    </div>
+    <div class="grp-h">그룹 2</div>
+    <div class="grp">
+      <div class="row">
+        <div class="who"><div class="n">개발팀</div><div class="id" style="font-family:inherit">4명 · 위키 승인 · 채널 관리</div></div>
+        <div class="btns"><button>편집</button><button class="danger">삭제</button></div>
+      </div>
+      <div class="row" style="background:var(--accent-soft)">
+        <div class="who"><div class="n">디자인팀</div><div class="id" style="font-family:inherit">2명 · 위키 수정</div></div>
+        <div class="btns"><button>편집</button><button class="danger">삭제</button></div>
+      </div>
+    </div>
+    <div class="grp-h">디자인팀 편집</div>
+    <div class="grp form">
+      <div class="frow"><label>그룹 이름</label><input value="디자인팀" style="max-width:200px" /></div>
+      <div class="frow"><label>멤버</label>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; flex:1">
+          <span class="chip" style="color:var(--text)">박지연 ✕</span>
+          <span class="chip" style="color:var(--text)">최하늘 ✕</span>
+          <span class="chip" style="border-style:dashed; cursor:pointer">＋ 추가</span>
+        </div>
+      </div>
+      <div class="frow"><label>권한</label>
+        <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--text)">
+          <label style="width:auto; color:var(--text)"><input type="checkbox" checked style="accent-color:var(--accent)" /> 위키 수정</label>
+          <label style="width:auto; color:var(--text)"><input type="checkbox" style="accent-color:var(--accent)" /> 위키 승인</label>
+          <label style="width:auto; color:var(--text)"><input type="checkbox" style="accent-color:var(--accent)" /> 채널 관리</label>
+        </div>
+      </div>
+      <div class="frow"><label>채널 접근</label>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; flex:1">
+          <span class="chip" style="color:var(--text)"># design ✕</span>
+          <span class="chip" style="color:var(--text)"># general ✕</span>
+          <span class="chip" style="border-style:dashed; cursor:pointer">＋ 채널 추가</span>
+        </div>
+      </div>
+      <div class="frow" style="justify-content:flex-end"><button style="background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600; padding:7px 18px; border-radius:7px; cursor:pointer">저장</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑤ 채널</div>
+<div class="frame" style="height:430px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem on"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>채널</h2>
+    <div class="sub">채널별 공개 범위·응답 모델을 관리해요. 대화 내용은 여기서 보지 않아요(감시 방지).</div>
+    <div class="grp">
+      <div class="row"><div class="who"><div class="n"># general</div><div class="id" style="font-family:inherit">멤버 전체 · 모델: 기본</div></div><span class="chip">공개</span><div class="btns"><button>모델</button><button>비공개 전환</button><button class="danger">삭제</button></div></div>
+      <div class="row"><div class="who"><div class="n"># design</div><div class="id" style="font-family:inherit">디자인팀 · 모델: qwen3-8b</div></div><span class="chip" style="color:var(--text)">그룹 한정</span><div class="btns"><button>모델</button><button>접근</button><button class="danger">삭제</button></div></div>
+      <div class="row"><div class="who"><div class="n"># exec</div><div class="id" style="font-family:inherit">멤버 2명 · 모델: 기본</div></div><span class="chip susp">비공개</span><div class="btns"><button>모델</button><button>멤버</button><button class="danger">삭제</button></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑥ 모델 — 서버가 채팅에 답하는 AI</div>
+<div class="frame" style="height:470px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem on"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>모델</h2>
+    <div class="sub">데스크톱 설정창의 모델 섹션과 같은 문법 — 웹에서.</div>
+    <div class="grp form">
+      <div class="frow"><label>하네스</label><select style="max-width:220px"><option>엔그램 하네스</option><option>CLI 하네스</option></select></div>
+      <div class="frow"><label>기본 모델</label><select style="max-width:220px"><option>qwen3-8b · qwen3:8b</option><option>claude-api</option></select></div>
+    </div>
+    <div class="grp-h">등록된 모델</div>
+    <div class="grp">
+      <div class="row"><div class="who"><div class="n">qwen3-8b</div><div class="id">openai-api · qwen3:8b · localhost:11434</div></div><span class="chip owner">기본</span><div class="btns"><button>편집</button></div></div>
+      <div class="row"><div class="who"><div class="n">claude-api</div><div class="id">anthropic-api · API 키 설정됨</div></div><span class="chip">활성</span><div class="btns"><button>편집</button><button class="danger">삭제</button></div></div>
+    </div>
+    <div class="grp-h">추가</div>
+    <div class="grp form">
+      <div class="frow"><label>로컬 모델</label><select style="max-width:200px"><option>qwen3:8b</option></select><input placeholder="모델 이름" style="max-width:150px" /><button style="background:var(--accent);border:0;color:#fff;font:inherit;font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer">추가</button></div>
+      <div class="frow"><label>Anthropic API 키</label><input type="password" placeholder="sk-ant-…" style="max-width:260px" /><button style="background:var(--accent);border:0;color:#fff;font:inherit;font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer">저장</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑦ MCP</div>
+<div class="frame" style="height:400px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem on"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>MCP</h2>
+    <div class="sub">서버의 모델이 쓸 수 있는 외부 도구.</div>
+    <div class="grp-h">등록된 서버</div>
+    <div class="grp">
+      <div class="row"><div class="who"><div class="n">github</div><div class="id">npx -y @modelcontextprotocol/server-github</div></div><div class="btns"><button class="danger">⊖</button></div></div>
+      <div class="row"><div class="who"><div class="n">notion</div><div class="id">https://mcp.notion.com/mcp</div></div><div class="btns"><button class="danger">⊖</button></div></div>
+    </div>
+    <div class="grp-h">추가</div>
+    <div class="grp form">
+      <div class="frow"><label>이름</label><input placeholder="이름" style="max-width:160px" /><label style="width:auto">명령 또는 URL</label><input placeholder="npx -y … 또는 https://…" /><button style="background:var(--accent);border:0;color:#fff;font:inherit;font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer">추가</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑧ 위키</div>
+<div class="frame" style="height:430px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem on"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>위키</h2>
+    <div class="sub">팀의 공유 지식. 페이지 열람·승인은 앱에서, 여기는 운영 설정.</div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px">
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">페이지</div><div style="font-size:20px;font-weight:700;margin-top:2px">12</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">승인 대기</div><div style="font-size:20px;font-weight:700;margin-top:2px;color:var(--warn)">1</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">마지막 동기화</div><div style="font-size:14px;font-weight:600;margin-top:6px">3분 전 ✓</div></div>
+    </div>
+    <div class="grp-h">git 원격 동기화</div>
+    <div class="grp form">
+      <div class="frow"><label>원격 저장소</label><input value="git@github.com:ourteam/wiki.git" /></div>
+      <div class="frow"><label>브랜치</label><input value="main" style="max-width:140px" /><span class="hint">60초마다 pull/push · 충돌은 자동 병합</span></div>
+      <div class="frow" style="justify-content:flex-end"><button style="background:var(--accent);border:0;color:#fff;font:inherit;font-weight:600;padding:7px 18px;border-radius:7px;cursor:pointer">저장</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑨ 서버 설정 + 클라이언트 배포</div>
+<div class="frame" style="height:500px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem on"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>서버 설정</h2>
+    <div class="sub">바꾼 설정은 저장 후 적용돼요.</div>
+    <div class="grp form">
+      <div class="frow"><label>서버 이름</label><input value="우리팀 서버" /></div>
+      <div class="frow"><label>포트</label><input value="47800" style="max-width:120px" /><span class="hint">클라이언트가 붙는 포트</span></div>
+      <div class="frow"><label>공개 범위</label>
+        <select style="max-width:220px"><option>내부망(LAN)까지</option><option>이 컴퓨터만</option><option>인터넷 공개</option></select>
+        <span class="hint">인터넷 공개는 HTTPS 구성 안내를 참고하세요</span></div>
+      <div class="frow"><label>SSO (선택)</label><input placeholder="OIDC 발급자 URL" /></div>
+      <div class="frow"><label>코딩 허용</label>
+        <label style="width:auto; color:var(--text); font-size:12.5px; display:flex; align-items:center; gap:7px">
+          <input type="checkbox" style="accent-color:var(--accent)" /> 꺼짐 (기본)
+        </label>
+        <span class="hint">켜면 AI가 이 서버 컴퓨터에서 코드를 실행해요 — 실행 모드·경로 제한 설정이 열립니다</span></div>
+      <div class="frow"><label>대화 보존</label>
+        <select style="max-width:220px"><option>채널당 최근 1,000개</option><option>최근 90일</option><option>무제한</option></select>
+        <span class="hint">넘치는 오래된 메시지는 자동 삭제 — 위키에 저장된 지식은 유지돼요</span></div>
+    </div>
+    <div class="savebar"><button>저장</button></div>
+    <div class="grp-h">클라이언트 배포</div>
+    <div class="grp">
+      <div class="deploy">
+        <div class="d">
+          <div class="t">팀원용 클라이언트 설정 내려받기</div>
+          <div class="s">이 파일(preset)을 엔그램 앱 설치 폴더에 넣으면, 그 앱은 켜자마자 이 서버의 로그인 화면으로 시작해요.
+             팀원에게 앱 설치 파일과 함께 전달하세요.</div>
+        </div>
+        <button>preset.json 다운로드</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cap">⑩ 상태·로그 — 예약·용량 포함</div>
+<div class="frame" style="height:500px">
+  <div class="nav">
+    <div class="head"><div class="srv">우리팀 서버</div><div class="addr">192.168.0.9:47800</div></div>
+    <div class="nitem"><span class="tile" style="background:#56d364">●</span>개요</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">👥</span>멤버<span class="nbadge">2</span></div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">▣</span>그룹</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">#</span>채널</div>
+    <div class="nitem"><span class="tile" style="background:#3aa5de">▦</span>모델</div>
+    <div class="nitem"><span class="tile" style="background:#7f77dd">⌘</span>MCP</div>
+    <div class="nitem"><span class="tile" style="background:#1d9e75">☁</span>위키</div>
+    <div class="nitem"><span class="tile" style="background:#888780">⚙</span>서버 설정</div>
+    <div class="nitem"><span class="tile" style="background:#ba7517">⬇</span>클라이언트 배포</div>
+    <div class="nitem on"><span class="tile" style="background:#56d364">≡</span>상태·로그</div>
+    <div class="foot"><span class="dotok"></span>정상 동작 중 · owner로 로그인됨</div>
+  </div>
+  <div class="main">
+    <h2>상태·로그</h2>
+    <div class="sub">서버 건강 상태와 걸려 있는 예약 작업.</div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:16px">
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">가동 시간</div><div style="font-size:16px;font-weight:700;margin-top:4px">6일 4시간</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">마지막 생존 신호</div><div style="font-size:16px;font-weight:700;margin-top:4px;color:var(--ok)">방금 ✓</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">대화 기록 용량</div><div style="font-size:16px;font-weight:700;margin-top:4px">84 MB</div></div>
+      <div class="grp" style="padding:12px 14px"><div style="font-size:11.5px;color:var(--dim);font-weight:600">위키+지식 용량</div><div style="font-size:16px;font-weight:700;margin-top:4px">312 MB</div></div>
+    </div>
+    <div class="grp-h">예약 작업 2</div>
+    <div class="grp">
+      <div class="row"><div class="who"><div class="n">아침 스탠드업 요약</div><div class="id" style="font-family:inherit">매일 09:00 · # general · seojun이 등록</div></div><div class="btns"><button class="danger">삭제</button></div></div>
+      <div class="row"><div class="who"><div class="n">주간 배포 체크리스트</div><div class="id" style="font-family:inherit">매주 월 10:00 · # design · jiyeon이 등록</div></div><div class="btns"><button class="danger">삭제</button></div></div>
+    </div>
+    <div class="grp-h">최근 로그</div>
+    <div class="grp" style="padding:12px 14px; font-family:var(--mono); font-size:11.5px; color:var(--dim); line-height:1.7">
+      21:40:12 INFO  Messenger — 메신저 가동 self(:47800)<br>
+      21:40:13 INFO  WikiSync — pull/push 완료 (변경 없음)<br>
+      21:41:02 INFO  Auth — seojun 로그인<br>
+      21:44:55 WARN  Brain — qwen3-8b 응답 지연 12.4s
+    </div>
+  </div>
+</div>
