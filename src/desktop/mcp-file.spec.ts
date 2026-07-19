@@ -80,5 +80,48 @@ describe('mcp-file', () => {
       const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
       expect(raw.mcpServers).toEqual({ a: { command: 'x', args: [], env: {}, source: 'claude' } });
     });
+
+    it('무변경: entries=[] 및 mcp.json 없음 → 파일 생성 안 함', () => {
+      mirrorClaudeMcp(tmp, []);
+      const file = path.join(tmp, 'mcp.json');
+      expect(fs.existsSync(file)).toBe(false);
+    });
+
+    it('무변경: entries=[] 및 수동 항목만 → 파일 내용·mtime 무변경', () => {
+      const file = path.join(tmp, 'mcp.json');
+      const content = JSON.stringify({
+        mcpServers: { manual: { command: 'usercmd' } },
+      });
+      fs.writeFileSync(file, content);
+      const statBefore = fs.statSync(file);
+      const contentBefore = fs.readFileSync(file, 'utf8');
+
+      // 약간의 지연(mtime 변경 감지 보장)
+      const delay = new Promise(resolve => setTimeout(resolve, 10));
+      delay.then(() => {
+        mirrorClaudeMcp(tmp, []);
+        const statAfter = fs.statSync(file);
+        const contentAfter = fs.readFileSync(file, 'utf8');
+
+        expect(contentAfter).toBe(contentBefore);
+        expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
+      });
+
+      return delay;
+    });
+
+    it('변경: entries=[] 이지만 stale source=claude 항목 → 제거 후 저장', () => {
+      const file = path.join(tmp, 'mcp.json');
+      fs.writeFileSync(file, JSON.stringify({
+        mcpServers: {
+          manual: { command: 'usercmd' },
+          stale: { command: 'old-claude', source: 'claude' },
+        },
+      }));
+
+      mirrorClaudeMcp(tmp, []);
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      expect(raw.mcpServers).toEqual({ manual: { command: 'usercmd' } });
+    });
   });
 });

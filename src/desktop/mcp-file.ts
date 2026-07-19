@@ -85,6 +85,7 @@ export function addMcpServer(configDir: string, name: string, command: string, a
 // ①기존 source==='claude' 항목 전부 제거 ②entries를 source:'claude'로 재삽입(stdio는
 // {command,args,env,source}·http는 {url,source}) ③이름이 수동 항목(source 없음)과 겹치면
 // 스킵+console.warn(수동 승리) ④그 외 top-level 키·수동 항목 보존. 쓰기 실패=warn(throw 금지).
+// 변경 추적: 기존 claude 항목 삭제 또는 신규 항목 삽입 시만 저장(무변경 시 쓰기 생략).
 export function mirrorClaudeMcp(configDir: string, entries: ClaudeMcpEntry[]): void {
   const cfg = readMcpConfig(configDir);
   let servers = cfg.mcpServers;
@@ -93,12 +94,15 @@ export function mirrorClaudeMcp(configDir: string, entries: ClaudeMcpEntry[]): v
     Object.defineProperty(cfg, 'mcpServers', { value: servers, enumerable: true, writable: true, configurable: true });
   }
 
+  let changed = false;
+
   // ① source==='claude'인 기존 항목 전부 제거(다음 동기화에서 새로 채움)
   for (const name of Object.keys(servers)) {
     if (!Object.prototype.hasOwnProperty.call(servers, name)) continue;
     const s = (servers as Record<string, Record<string, unknown>>)[name];
     if (s && typeof s === 'object' && !Array.isArray(s) && s.source === 'claude') {
       delete (servers as Record<string, unknown>)[name];
+      changed = true;
     }
   }
 
@@ -120,14 +124,17 @@ export function mirrorClaudeMcp(configDir: string, entries: ClaudeMcpEntry[]): v
 
     // own property로 대입(__proto__ 같은 이름도 보호)
     Object.defineProperty(servers, entry.name, { value: server, enumerable: true, writable: true, configurable: true });
+    changed = true;
   }
 
-  // ③ 저장(다른 top-level 키·수동 항목 보존) — 쓰기 실패는 throw 금지, warn만
-  try {
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(path.join(configDir, 'mcp.json'), JSON.stringify(cfg, null, 2));
-  } catch (e) {
-    console.warn(`[mcp-file] mcp.json 저장 실패: ${String(e)}`);
+  // ③ 변경이 있었으면 저장(다른 top-level 키·수동 항목 보존) — 쓰기 실패는 throw 금지, warn만
+  if (changed) {
+    try {
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'mcp.json'), JSON.stringify(cfg, null, 2));
+    } catch (e) {
+      console.warn(`[mcp-file] mcp.json 저장 실패: ${String(e)}`);
+    }
   }
 }
 
