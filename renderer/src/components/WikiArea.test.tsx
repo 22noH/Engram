@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { WikiArea } from './WikiArea';
+import { T } from '../i18n';
 import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
 
 const pages: WikiPageMeta[] = [
@@ -50,6 +51,25 @@ describe('WikiArea', () => {
     expect(screen.queryByText('Alpha')).toBeNull(); // 브라우즈 목록 아님
     fireEvent.click(screen.getByText('Xanadu'));
     expect(opened).toEqual(['x']);
+  });
+
+  it('세그먼트 배지가 승인 대기 건수를 보여준다', () => {
+    render(<WikiArea pages={pages} openPage={null} proposals={proposals} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
+    expect(screen.getByText(String(proposals.length))).toBeInTheDocument();
+  });
+
+  it('대기 제안이 없으면 세그먼트 배지를 표시하지 않는다', () => {
+    render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
+    expect(screen.queryByText('0')).toBeNull();
+  });
+
+  it('목록 항목은 제목과 상태 필을 별도 요소로 렌더한다', () => {
+    render(<WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
+    const title = screen.getByText('Alpha');
+    const pill = screen.getByText(T.wikiStatusPublished);
+    expect(title).toBeInTheDocument();
+    expect(pill).toBeInTheDocument();
+    expect(title).not.toBe(pill);
   });
 
   it('검색어 있고 결과 없으면 "결과 없음"', () => {

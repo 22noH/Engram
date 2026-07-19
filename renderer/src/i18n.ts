@@ -53,6 +53,12 @@ export const T = {
   wikiSave: ko ? '저장' : 'Save',
   wikiCancel: ko ? '취소' : 'Cancel',
   wikiDeleteConfirm: ko ? '이 페이지를 영구 삭제합니다. 되돌릴 수 없습니다. 계속할까요?' : 'Permanently delete this page? This cannot be undone.',
+  // 2026-07-19 위키 UI 재구현(목업 기준) — 세그먼트 배지·승인함 헤더·전체 내용 보기·상태 필
+  wikiPendingCount: (n: number) => (ko ? `승인 대기 ${n}건` : `${n} pending`),
+  wikiInboxSub: ko ? 'AI가 제안한 지식입니다 — 승인해야 위키에 실립니다.' : 'AI-proposed knowledge — review and approve before it publishes to the wiki.',
+  wikiViewFull: ko ? '전체 내용 보기' : 'View full content',
+  wikiStatusPublished: ko ? '게시됨' : 'Published',
+  wikiStatusDraft: ko ? '초안' : 'Draft',
   // Phase 16a — 계정
   signIn: ko ? '로그인' : 'Sign in',
   signInTitle: (name: string) => (ko ? `${name}에 로그인` : `Sign in to ${name}`),

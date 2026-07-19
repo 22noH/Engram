@@ -2,8 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit } from '../../../shared/protocol';
 import { renderMarkdown } from '../render/markdown';
 import { T } from '../i18n';
+import { ko } from '../config';
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(ko ? 'ko-KR' : 'en-US', { month: 'short', day: 'numeric' });
+}
+
+function StatusPill({ status }: { status: WikiPageMeta['status'] }) {
+  const label = status === 'published' ? T.wikiStatusPublished : T.wikiStatusDraft;
+  return <span className={'pill' + (status === 'published' ? ' pub' : '')}>{label}</span>;
+}
 
 // 위키 영역: ① 페이지 읽기·의미검색(+게시 페이지 파괴적 행위) ② 승인함(두뇌 제안 승인/거부). 순수 프레젠테이션.
+// 2026-07-19: 목업(docs/superpowers/mockups/2026-07-19-wiki-ui.html) 기준 시각 재구현 — 세그먼트+목록 위계·문서 타이포·승인함 카드.
+// 기존 props/동작/권한 게이트는 전부 그대로, DOM 구조와 클래스만 목업에 맞춰 교체.
 export function WikiArea(props: {
   pages: WikiPageMeta[];
   openPage: WikiPageDto | null;
@@ -25,6 +39,7 @@ export function WikiArea(props: {
   const [filter, setFilter] = useState('');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const bodyRef = useRef<HTMLDivElement>(null);
   // onSearch의 최신 참조(App이 매 렌더 새 콜백을 넘겨도 디바운스 effect를 재실행하지 않기 위함 — App의 ref 패턴).
   const onSearchRef = useRef(props.onSearch); onSearchRef.current = props.onSearch;
@@ -49,50 +64,77 @@ export function WikiArea(props: {
   const q = filter.trim();
   const open = props.openPage;
   const canAct = !!open && open.status === 'published'; // 게시 페이지만 대상
+  const pendingCount = props.proposals.length;
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div id="wikiArea">
-      <div id="wikiTabs">
-        <div className={'wtab' + (tab === 'pages' ? ' sel' : '')} onClick={() => setTab('pages')}>{T.wikiPages}</div>
-        <div className={'wtab' + (tab === 'inbox' ? ' sel' : '')} onClick={() => setTab('inbox')}>
-          {T.wikiInbox}{props.proposals.length > 0 ? ` (${props.proposals.length})` : ''}
+      <div className="wikiSide">
+        <div className="wikiSeg">
+          <button type="button" className={'segBtn' + (tab === 'pages' ? ' on' : '')} onClick={() => setTab('pages')}>
+            {T.wikiPages}
+          </button>
+          <button type="button" className={'segBtn' + (tab === 'inbox' ? ' on' : '')} onClick={() => setTab('inbox')}>
+            {T.wikiInbox}
+            {pendingCount > 0 && <span className="segBadge">{pendingCount}</span>}
+          </button>
         </div>
-      </div>
-
-      {tab === 'pages' ? (
-        <div id="wikiPagesView">
-          <div id="wikiList">
-            <input type="text" placeholder={T.wikiSearchPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
-            {q === '' ? (
+        <div className="wikiSearch">
+          <input type="text" placeholder={T.wikiSearchPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </div>
+        <div className="wikiList">
+          {tab === 'pages' && (
+            q === '' ? (
               props.pages.map((p) => (
-                <div key={p.slug} className={'wikiRow' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
-                  <span className="title">{p.title}</span>
-                  <span className={'badge ' + p.status}>{p.status}</span>
-                  <span className="cat">{p.category}</span>
+                <div key={p.slug} className={'pitem' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
+                  <div className="t">{p.title}</div>
+                  <div className="m">
+                    <StatusPill status={p.status} />
+                    <span className="cat">{p.category}</span>
+                    <span className="date">{formatDate(p.updated)}</span>
+                  </div>
                 </div>
               ))
             ) : props.searchResults.length === 0 ? (
               <div className="empty">{T.wikiNoResults}</div>
             ) : (
               props.searchResults.map((h) => (
-                <div key={h.slug} className={'wikiRow' + (open?.slug === h.slug ? ' sel' : '')} onClick={() => props.onOpenPage(h.slug)}>
-                  <span className="title">{h.title}</span>
-                  <span className="snippet">{h.snippet}</span>
+                <div key={h.slug} className={'pitem' + (open?.slug === h.slug ? ' sel' : '')} onClick={() => props.onOpenPage(h.slug)}>
+                  <div className="t">{h.title}</div>
+                  <div className="snippet">{h.snippet}</div>
                 </div>
               ))
-            )}
-          </div>
-          <div id="wikiDoc">
+            )
+          )}
+        </div>
+      </div>
+
+      <div className="wikiDocPane">
+        {tab === 'pages' ? (
+          <>
             {open && (
-              <div className="docHead">
-                <h1>{open.title}</h1>
-                <span className="cat">{open.category}</span>
+              <div className="dochdr">
+                <div className="titles">
+                  <h2>{open.title}</h2>
+                  <div className="meta">
+                    <StatusPill status={open.status} />
+                    <span className="cat">{open.category}</span>
+                    <span className="date">{formatDate(open.updated)}</span>
+                  </div>
+                </div>
                 {canAct && !editing && (
-                  <span className="docActions">
+                  <div className="acts">
                     {props.canEdit && <button type="button" onClick={() => { setDraft(open.body); setEditing(true); }}>{T.wikiEdit}</button>}
                     {props.canUnpublish && <button type="button" onClick={() => props.onUnpublish(open.slug)}>{T.wikiUnpublish}</button>}
                     {props.canDelete && <button type="button" className="danger" onClick={() => { if (window.confirm(T.wikiDeleteConfirm)) props.onDelete(open.slug); }}>{T.wikiDelete}</button>}
-                  </span>
+                  </div>
                 )}
               </div>
             )}
@@ -107,33 +149,34 @@ export function WikiArea(props: {
             ) : (
               <div className="docBody" ref={bodyRef} />
             )}
-          </div>
-        </div>
-      ) : (
-        <div id="wikiInbox">
-          {props.proposals.length === 0 && <div className="empty">{T.wikiInboxEmpty}</div>}
-          {props.proposals.map((p) => (
-            <div key={p.id} className="propCard">
-              <div className="propHead">
-                <span className={'opBadge ' + p.op}>{p.op}</span>
-                <span className="target">{p.title} · {p.targetSlug}</span>
-              </div>
-              <div className="propWhy">
-                <span className="reason">{p.reason}</span>
-                {` · ${Math.round(p.confidence * 100)}%`}
-                {p.conflictSlugs?.length ? ` · ⚠ ${p.conflictSlugs.join(', ')}` : ''}
-              </div>
-              <PropBody markdown={p.payload} />
-              {props.canApprove && (
-                <div className="propActions">
-                  <button type="button" onClick={() => props.onApprove(p.id)}>{T.wikiApprove}</button>
-                  <button type="button" className="danger" onClick={() => props.onReject(p.id)}>{T.wikiReject}</button>
+          </>
+        ) : (
+          <div className="inboxView">
+            <h2>{T.wikiPendingCount(pendingCount)}</h2>
+            <div className="sub">{T.wikiInboxSub}</div>
+            {pendingCount === 0 && <div className="empty">{T.wikiInboxEmpty}</div>}
+            {props.proposals.map((p) => (
+              <div key={p.id} className="card">
+                <div className="ct">{p.title}</div>
+                <div className="who">
+                  <span className={'opBadge ' + p.op}>{p.op}</span>
+                  {` ${p.targetSlug} · ${Math.round(p.confidence * 100)}%`}
+                  {p.conflictSlugs?.length ? ` · ⚠ ${p.conflictSlugs.join(', ')}` : ''}
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                <div className="reason">{p.reason}</div>
+                <div className={'snip' + (expanded.has(p.id) ? ' open' : '')}>
+                  <PropBody markdown={p.payload} />
+                </div>
+                <div className="cbtns">
+                  {props.canApprove && <button type="button" className="approve" onClick={() => props.onApprove(p.id)}>{T.wikiApprove}</button>}
+                  {props.canApprove && <button type="button" className="rejectb" onClick={() => props.onReject(p.id)}>{T.wikiReject}</button>}
+                  <button type="button" className="diffb" onClick={() => toggleExpand(p.id)}>{T.wikiViewFull}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
