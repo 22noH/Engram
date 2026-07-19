@@ -48,6 +48,30 @@ describe('mcp-file', () => {
     expect(raw.somethingElse).toBe(1);
   });
 
+  it('remove: source=claude 항목 삭제 거부(읽기 전용) + 수동 항목 삭제는 정상 동작', () => {
+    fs.writeFileSync(path.join(tmp, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        manual: { command: 'usercmd' },
+        synced: { command: 'npx', args: ['-y', 'x'], source: 'claude' },
+      },
+    }));
+
+    // source=claude 항목 삭제 시도 → 파일 무변경
+    removeMcpServer(tmp, 'synced');
+    let raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+    expect(raw.mcpServers).toEqual({
+      manual: { command: 'usercmd' },
+      synced: { command: 'npx', args: ['-y', 'x'], source: 'claude' },
+    });
+
+    // 수동 항목 삭제 → 정상 동작 (회귀 테스트)
+    removeMcpServer(tmp, 'manual');
+    raw = JSON.parse(fs.readFileSync(path.join(tmp, 'mcp.json'), 'utf8'));
+    expect(raw.mcpServers).toEqual({
+      synced: { command: 'npx', args: ['-y', 'x'], source: 'claude' },
+    });
+  });
+
   describe('mirrorClaudeMcp', () => {
     it('삽입: stdio·http 둘 다 source:claude 표시로 병합', () => {
       const entries: ClaudeMcpEntry[] = [

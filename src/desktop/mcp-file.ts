@@ -150,6 +150,7 @@ export function mirrorClaudeMcp(configDir: string, entries: ClaudeMcpEntry[]): v
 }
 
 // MCP 서버 제거(멱등, 없으면 no-op, 다른 필드 보존).
+// source==='claude'인 동기화 항목은 읽기 전용이므로 삭제 거부(스펙 준수).
 export function removeMcpServer(configDir: string, name: string): void {
   const file = path.join(configDir, 'mcp.json');
   let cfg: { mcpServers?: Record<string, unknown> } & Record<string, unknown>;
@@ -161,6 +162,10 @@ export function removeMcpServer(configDir: string, name: string): void {
 
   // hasOwnProperty로 검사(없으면 no-op)
   if (!Object.prototype.hasOwnProperty.call(servers, name)) return;
+
+  // 동기화 항목(source==='claude')은 읽기 전용 — 삭제 거부
+  const s = (servers as Record<string, Record<string, unknown>>)[name];
+  if (s && typeof s === 'object' && !Array.isArray(s) && s.source === 'claude') return;
 
   delete (servers as Record<string, unknown>)[name];
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
