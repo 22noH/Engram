@@ -172,10 +172,31 @@ async function probeServerMode(tmpBase: string, cleanup: Array<() => Promise<voi
     await waitHealthy('127.0.0.1', port, 60000);
     console.log(`   [setup] 서버 healthy on :${port} (role=server 기본, 0계정)`);
 
-    // ①GET /admin → 200 html
-    const adminRes = await fetch(`http://127.0.0.1:${port}/admin`);
+    // ①GET /admin(무슬래시) → 302 + Location: /admin/ (S1 최종리뷰: base='/admin/' 고정 마운트라
+    // 무슬래시로 index.html을 서빙하면 자산 URL이 사이트 루트로 풀려 404→빈 페이지가 됐다. redirect:
+    // 'manual'로 자동 추적을 끄고 302 자체를 검증한다.
+    const adminNoSlashRes = await fetch(`http://127.0.0.1:${port}/admin`, { redirect: 'manual' });
+    record('1', 'GET /admin(무슬래시) → 302 + Location: /admin/',
+      adminNoSlashRes.status === 302 && adminNoSlashRes.headers.get('location') === '/admin/',
+      `status=${adminNoSlashRes.status} location=${adminNoSlashRes.headers.get('location')}`);
+
+    // ①b GET /admin/(슬래시 포함) → 200 html + 그 안의 자산 URL(src="...")이 실제로 200으로 로드됨
+    // (base='/admin/' 고정 마운트 회귀 방지 — 상대경로 base였다면 /admin/ 아래서는 우연히 맞았지만
+    // 무슬래시에서 깨졌던 문제의 반대쪽 증거: 슬래시 있는 정상 경로에서도 자산이 실제로 뜨는지 확인).
+    const adminRes = await fetch(`http://127.0.0.1:${port}/admin/`);
     const adminBody = await adminRes.text();
-    record('1', 'GET /admin → 200 + html(index.html 서빙)', adminRes.status === 200 && /<html/i.test(adminBody), `status=${adminRes.status} ct=${adminRes.headers.get('content-type')} len=${adminBody.length}`);
+    const adminOk = adminRes.status === 200 && /<html/i.test(adminBody);
+    record('1a', 'GET /admin/ → 200 + html(index.html 서빙)', adminOk, `status=${adminRes.status} ct=${adminRes.headers.get('content-type')} len=${adminBody.length}`);
+
+    const assetMatch = /\bsrc="([^"]+)"/.exec(adminBody);
+    if (assetMatch) {
+      const assetUrl = new URL(assetMatch[1], `http://127.0.0.1:${port}/admin/`).toString();
+      const assetRes = await fetch(assetUrl);
+      record('1b', 'index.html의 자산 URL(src=)이 페이지 URL 기준으로 풀려 200으로 로드됨',
+        assetRes.status === 200, `assetUrl=${assetUrl} status=${assetRes.status}`);
+    } else {
+      record('1b', 'index.html의 자산 URL(src=)이 페이지 URL 기준으로 풀려 200으로 로드됨', false, `html에서 src="..." 매치 실패(len=${adminBody.length})`);
+    }
 
     // ②/auth/status → configured:false(계정 0개)
     const statusBefore = await (await fetch(`http://127.0.0.1:${port}/auth/status`)).json();

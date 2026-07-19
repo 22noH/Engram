@@ -82,6 +82,17 @@ export class AdminHttp {
     let url: string;
     try { url = decodeURIComponent(raw); } catch { this.notFound(res); return true; }
 
+    // Important(리뷰 지적): console 자산이 base='/admin/'(상대 경로가 아닌 고정 마운트)이라
+    // GET /admin(트레일링 슬래시 없이)로 index.html을 서빙하면 자산 URL이 사이트 루트 기준으로
+    // 풀려 404→빈 페이지가 됐다. 무슬래시 정확 매치는 쿼리스트링 보존한 채 /admin/로 302.
+    if (url === '/admin') {
+      const qIdx = (req.url ?? '').indexOf('?');
+      const query = qIdx >= 0 ? (req.url ?? '').slice(qIdx) : '';
+      res.writeHead(302, { location: '/admin/' + query });
+      res.end();
+      return true;
+    }
+
     if (url.startsWith('/admin/api/')) {
       if (url === '/admin/api/overview' && req.method === 'GET') {
         await this.overview(req, res);

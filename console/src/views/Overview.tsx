@@ -4,8 +4,8 @@ import { fetchOverview, type Overview as OverviewData } from '../api';
 import { Nav, type NavKey } from '../components/Nav';
 
 // ② 개요 — 목업 픽셀 그대로. 타일 4개(멤버·채널·위키 페이지·오늘 대화) + 처리할 일.
-// 목업의 "처리할 일" 행은 이름/제안 제목까지 보여주지만 T2 개요 계약(overview.ts)에는 카운트만
-// 있어 이름·제목은 못 그린다 — 건수만 표시(deviation, report 참조).
+// T2 개요 계약(overview.ts)이 pendingMemberNames/pendingProposalTitles(이름·제안 제목, 최초 5개
+// 미리보기)까지 포함하도록 확장돼 "처리할 일" 행에 이름/제목을 상세줄로 함께 그린다.
 export function Overview({ serverName, role }: { serverName: string; role: string }) {
   const [data, setData] = useState<OverviewData | null>(null);
   const [active, setActive] = useState<NavKey>('overview');

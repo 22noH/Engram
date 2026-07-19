@@ -80,6 +80,7 @@ body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-sys
 .row .who { flex:1; min-width:0; }
 .row .who .n { font-size:13.5px; font-weight:600; }
 .row .who .id { font-size:11.5px; color:var(--dim); font-family:var(--mono); }
+.row .who .d { font-size:11.5px; color:var(--dim); }
 .chip { padding:2px 9px; border-radius:99px; font-size:11px; font-weight:600; border:1px solid var(--line); color:var(--dim); }
 .chip.owner { color:var(--accent); border-color:var(--accent-line); background:var(--accent-soft); }
 .chip.pend { color:var(--warn); border-color:var(--warn); }
