@@ -93,12 +93,35 @@ describe('withBootRetry', () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 
-  it('재시도 불가능한 에러는 즉시 던진다(retry 낭비 없음)', async () => {
+  it('재시도 불가능한 에러는 즉시 던진다(retry 낭비 없음, retryAll 미지정 시 기존 시맨틱 유지)', async () => {
     const fn = jest.fn(async () => { throw new Error('ENOENT: no such file'); });
     await expect(
       withBootRetry(fn, { attempts: 5, baseDelayMs: 1 }),
     ).rejects.toThrow('ENOENT');
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  // 리뷰 후속(오탐 격리 방지): 부트는 retryAll:true로 Lance 패턴이 아닌 에러도 전체 스케줄로
+  // 재시도해야 한다 — 그래야 AV/OneDrive의 일시적 파일 락 같은 무관한 에러 1회차에 즉시
+  // quarantineAndReinit으로 떨어지는(건강한 스토어 오탐 격리) 일이 없다.
+  it('retryAll:true면 Lance 패턴이 아닌 에러도 재시도해 성공한다(①오탐 격리 방지)', async () => {
+    let n = 0;
+    const fn = jest.fn(async () => {
+      if (++n < 3) throw new Error('EBUSY: resource busy or locked'); // Lance 패턴이 아님
+      return 'ok';
+    });
+    await expect(
+      withBootRetry(fn, { attempts: 5, baseDelayMs: 1, maxDelayMs: 2, retryAll: true }),
+    ).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(3); // 3회차에 성공 — 격리로 떨어지지 않는다
+  });
+
+  it('retryAll:true여도 계속 실패하면 전체 스케줄을 소진한 뒤에야 던진다(②소진 후 격리 대상)', async () => {
+    const fn = jest.fn(async () => { throw new Error('EBUSY: resource busy or locked'); });
+    await expect(
+      withBootRetry(fn, { attempts: 4, baseDelayMs: 1, maxDelayMs: 2, retryAll: true }),
+    ).rejects.toThrow('EBUSY');
+    expect(fn).toHaveBeenCalledTimes(4); // 패턴 무관하게 attempts만큼 전부 재시도됐다
   });
 });
 
@@ -140,6 +163,25 @@ describe('RagStore', () => {
     const results = await store.search('글', 50);
     const slugs = results.map((r) => r.slug);
     expect(slugs).toEqual(expect.arrayContaining(['p1', 'p2']));
+  });
+
+  // 리뷰 후속(잔여 크래시 경로 봉쇄): 정상 부팅 경로(ok-path)의 reindexAll에서 한 페이지가
+  // throw해도 onModuleInit을 뚫고 나가지 않고, 나머지 페이지는 계속 색인되며 요약 로그가 남아야 한다.
+  it('reindexAll은 한 페이지가 실패해도 나머지는 색인하고 성공/실패 건수를 요약 로그로 남긴다(③)', async () => {
+    const logger = { warn: jest.fn(), log: jest.fn(), error: jest.fn(), debug: jest.fn(), verbose: jest.fn() };
+    const s = new RagStore(new PathResolver(dir), new FakeEmbedder(), logger as never);
+    await s.init();
+    const spy = jest.spyOn(s, 'indexPage').mockImplementation(async (p: IndexablePage) => {
+      if (p.slug === 'bad') throw new Error('boom: 색인 실패 시뮬레이션');
+    });
+
+    await expect(
+      s.reindexAll([page('p1', '첫째 글'), page('bad', '실패 대상'), page('p2', '둘째 글')]),
+    ).resolves.toBeUndefined();
+
+    expect(spy).toHaveBeenCalledTimes(3); // bad를 포함해 전부 시도됐다
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('bad'), 'RagStore');
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('2/3건'), 'RagStore');
   });
 
   it('재오픈 후 추가한 페이지도 검색된다(2회 init FTS stale 회귀)', async () => {

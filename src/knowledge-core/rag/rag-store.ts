@@ -38,21 +38,26 @@ export async function withLanceRetry<T>(fn: () => Promise<T>, attempts = 3, base
 // 부트 경로 전용 재시도(withLanceRetry와 별도) — 앱 부팅이 헤드리스 MCP보다 우선권을 갖도록
 // 더 오래·지수 백오프로 기다린다(기본 5회, 2s→4s→8s→8s… maxDelayMs로 상한, 총 ~30s 내외).
 // onRetry로 재시도마다 콜백을 받아 호출자(KnowledgeCoreModule)가 warn 로깅하게 한다.
+// retryAll(리뷰 후속, 오탐 격리 방지): 부트 경로는 Lance 패턴이 아닌 에러(AV/OneDrive의 일시적
+// 파일 락 등)까지 전 스케줄로 재시도한다 — 패턴 매칭만으로 즉시 포기하면 아직 건강한 스토어를
+// 1회차 실패만으로 격리(재임베드 비용+rag.corrupt-* 누적)해버리는 오탐이 난다. 쓰기 경로 헬퍼
+// (withLanceRetry)는 패턴 매칭 시맨틱을 그대로 유지한다 — retryAll은 이 함수에만 있는 boot 전용 옵션.
 export interface BootRetryOptions {
   attempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  retryAll?: boolean;
   onRetry?: (attempt: number, err: Error, delayMs: number) => void;
 }
 
 export async function withBootRetry<T>(fn: () => Promise<T>, opts: BootRetryOptions = {}): Promise<T> {
-  const { attempts = 5, baseDelayMs = 2000, maxDelayMs = 8000, onRetry } = opts;
+  const { attempts = 5, baseDelayMs = 2000, maxDelayMs = 8000, retryAll = false, onRetry } = opts;
   for (let i = 1; ; i++) {
     try {
       return await fn();
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      if (i >= attempts || !isLanceRetryable(err)) throw err;
+      if (i >= attempts || (!retryAll && !isLanceRetryable(err))) throw err;
       const delayMs = Math.min(baseDelayMs * 2 ** (i - 1), maxDelayMs);
       onRetry?.(i, err, delayMs);
       await new Promise((r) => setTimeout(r, delayMs));
@@ -227,12 +232,28 @@ export class RagStore implements PageIndexer {
     }));
   }
 
+  // 페이지별 try/catch(리뷰 후속): 정상 부팅 경로(ok-path)에서 한 페이지가 파싱·임베딩 실패 등으로
+  // throw하면 그대로 onModuleInit의 'ok' 분기를 뚫고 나가 크래시루프 증상이 다른 원인으로 재발한다.
+  // KnowledgeCoreModule.runFullReindex(격리 후 백그라운드 경로)가 이미 쓰는 것과 동일한 보호를
+  // 여기(정상 경로)에도 적용 — warn+skip, 성공/실패 건수를 요약 로그로 남긴다.
   async reindexAll(pages: IndexablePage[]): Promise<void> {
     if (!this.ready) {
       this.logger?.warn(`RAG 디그레이드 상태 — 전체 재색인 스킵(${pages.length}건)`, 'RagStore');
       return;
     }
-    for (const p of pages) await this.indexPage(p);
+    let ok = 0;
+    for (const p of pages) {
+      try {
+        await this.indexPage(p);
+        ok++;
+      } catch (err) {
+        this.logger?.warn(
+          `전체 재색인 중 페이지 실패(건너뜀): ${p.slug} — ${err instanceof Error ? err.message : String(err)}`,
+          'RagStore',
+        );
+      }
+    }
+    this.logger?.log(`전체 재색인 완료(${ok}/${pages.length}건)`, 'RagStore');
   }
 
   async search(query: string, limit = 5, userId: string = DEFAULT_USER): Promise<SearchResult[]> {

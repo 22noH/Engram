@@ -149,8 +149,13 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
   // 재시도 후 포기 — 그 경우도 여기서 잡아 디그레이드로 폴백한다(오늘보다 더 나쁘게 죽지 않는다).
   private async bootRag(): Promise<'ok' | 'healed' | 'degraded'> {
     try {
+      // retryAll: true(리뷰 후속) — 부트는 Lance 패턴이 아닌 에러(예: AV/OneDrive의 일시적 파일 락)도
+      // 전체 백오프 스케줄로 재시도한다. 패턴 매칭만 재시도하면 그 외 모든 에러가 1회차에 즉시
+      // quarantineAndReinit으로 떨어져 건강한 스토어를 오탐 격리(전체 재임베드 비용+rag.corrupt-* 누적)
+      // 해버린다 — 격리는 전 재시도를 소진한 뒤에만 일어나야 한다.
       await withBootRetry(() => this.rag.init(), {
         ...this.bootRetryOptions,
+        retryAll: true,
         onRetry: (attempt, err, delayMs) => {
           this.logger.warn(
             `KnowledgeCore RAG 초기화 재시도 ${attempt}회차(${delayMs}ms 후 재시도, 크로스 프로세스 경합 추정): ${err.message}`,

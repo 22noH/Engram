@@ -195,7 +195,11 @@ describe('KnowledgeCoreModule (integration)', () => {
       expect(rag.indexPage).not.toHaveBeenCalled();
     });
 
-    it('재시도 불가능한 에러도 즉시 격리를 시도한다(retry 낭비 없이 바로 자가치유 경로로)', async () => {
+    // 리뷰 후속(오탐 격리 방지): Lance 패턴이 아닌 에러(AV/OneDrive의 일시적 파일 락 등)라도 부트는
+    // 1회차에 즉시 포기하지 않는다 — 전체 재시도 스케줄을 다 소진한 뒤에야 격리(quarantineAndReinit)로
+    // 넘어간다. 예전 시맨틱(즉시 포기 후 즉시 격리)은 건강한 스토어를 일시적 에러 1회만으로
+    // 오탐 격리(전체 재임베드 비용+rag.corrupt-* 누적)했다.
+    it('재시도 불가능한 종류의 에러도 부트에서는 전체 재시도 스케줄을 소진한 뒤에야 격리한다(오탐 격리 방지)', async () => {
       const init = jest.fn(async () => { throw new Error('ENOENT: no such file'); });
       const quarantineAndReinit = jest.fn().mockResolvedValue(undefined);
       const rag = fakeRagStore(init, { quarantineAndReinit });
@@ -209,8 +213,29 @@ describe('KnowledgeCoreModule (integration)', () => {
       moduleRef = ref;
 
       await expect(ref.init()).resolves.toBeDefined();
-      expect(init).toHaveBeenCalledTimes(1); // 재시도 불가능한 에러라 withBootRetry는 즉시 포기
-      expect(quarantineAndReinit).toHaveBeenCalledTimes(1); // 그래도 자가치유는 시도한다
+      expect(init).toHaveBeenCalledTimes(5); // 패턴 무관하게 attempts(5)를 전부 소진한다
+      expect(quarantineAndReinit).toHaveBeenCalledTimes(1); // 소진 후에야 자가치유를 시도한다
+    });
+
+    // ①: 비-Lance 패턴 에러라도 스케줄 중간(3회차)에 회복되면 격리 없이 정상 부팅된다.
+    it('재시도 불가능한 종류의 에러도 스케줄 중 회복되면 격리 없이 정상 부팅된다(① 오탐 격리 방지)', async () => {
+      let n = 0;
+      const init = jest.fn(async () => {
+        if (++n < 3) throw new Error('EBUSY: resource busy or locked'); // Lance 패턴 아님
+      });
+      const quarantineAndReinit = jest.fn().mockResolvedValue(undefined);
+      const rag = fakeRagStore(init, { quarantineAndReinit });
+      const ref = await Test.createTestingModule({ imports: [KnowledgeCoreModule] })
+        .overrideProvider(PathResolver).useValue(new PathResolver(dir))
+        .overrideProvider(EMBEDDER).useClass(FakeEmbedder)
+        .overrideProvider(RagStore).useValue(rag)
+        .overrideProvider(BOOT_RETRY_OPTIONS).useValue({ attempts: 5, baseDelayMs: 1, maxDelayMs: 2 })
+        .compile();
+      moduleRef = ref;
+
+      await expect(ref.init()).resolves.toBeDefined();
+      expect(init).toHaveBeenCalledTimes(3); // 3회차에 회복
+      expect(quarantineAndReinit).not.toHaveBeenCalled(); // 격리 없음 — 오탐 방지 핵심
     });
 
     // ③ 백그라운드 재색인이 한 페이지 실패에도 나머지를 계속 진행하는지 검증.
