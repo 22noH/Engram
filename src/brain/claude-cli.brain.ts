@@ -3,6 +3,27 @@ import spawn from 'cross-spawn';
 import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
+import { readClaudeMcpServers } from './claude-mcp-import';
+
+// 고정 기본 4개(엔그램 자체 MCP·웹 도구) — 판독 실패 시 폴백값이자 항상 포함되는 하한선.
+const BASE_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'mcp__engram', 'mcp__plugin_engram_engram'];
+
+// 클로드의 등록된 MCP 서버 전체를 --allowedTools로 동적 구성(설계 §3.4). 스폰마다 재판독
+// (listBrainNames와 같은 요청시점 재조회 관성 — 설치 후 재시작 없이 반영). 판독 실패는
+// 어떤 사유든(깨진 JSON·권한 등) 현행 고정 기본 4개로 폴백 — 헤드리스 claude -p가 막히면 안 됨.
+function buildAllowedTools(): string {
+  try {
+    const entries = readClaudeMcpServers();
+    const extra: string[] = [];
+    for (const e of entries) {
+      extra.push(`mcp__${e.name}`);
+      if (e.pluginName) extra.push(`mcp__plugin_${e.pluginName}_${e.name}`);
+    }
+    return Array.from(new Set([...BASE_ALLOWED_TOOLS, ...extra])).join(',');
+  } catch {
+    return BASE_ALLOWED_TOOLS.join(',');
+  }
+}
 
 // stream-json 이벤트에서 화면에 흘릴 텍스트 조각을 뽑는다.
 // - assistant 메시지의 text 블록(메시지 단위 스트리밍)
@@ -40,10 +61,10 @@ export class ClaudeCliBrain implements BrainProvider {
   private spawnOnce(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return new Promise<BrainResult>((resolve) => {
       // 헤드리스 claude -p는 미지정 도구를 거부한다. 프로필/호출이 --allowedTools를 안 주면
-      // 웹검색·웹fetch(읽기전용, 안전)를 기본 허용 — 어떤 프로필(judge 등)이 빠뜨려도 막히지 않게.
-      // 엔그램 자체 MCP(mcp__engram=claude mcp add 등록명·mcp__plugin_engram_engram=플러그인 등록명)도
-      // 기본 허용 — CLI 하네스가 지휘자로서 ask_brain(다른 모델 호출)·위키 도구를 쓸 수 있게(루프백 자기 앱,
-      // 미등록 환경에선 무해한 no-op). 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
+      // 웹검색·웹fetch(읽기전용, 안전)+엔그램 자체 MCP(고정 4개, buildAllowedTools의 하한선)에 더해
+      // 클로드에 등록된 MCP 서버 전체(claude-mcp-import 판독, 설계 §3.4)를 기본 허용 — CLI 하네스가
+      // 지휘자로서 ask_brain(다른 모델 호출)·위키 도구·사용자가 클로드에 붙여둔 MCP를 두루 쓸 수 있게.
+      // 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
       const extra = [...this.profile.extraArgs, ...(opts?.extraArgs ?? [])];
       const hasAllowed = extra.includes('--allowedTools');
       const args = [
@@ -51,7 +72,7 @@ export class ClaudeCliBrain implements BrainProvider {
         '--output-format', 'stream-json',
         '--verbose',
         ...(this.profile.model ? ['--model', this.profile.model] : []),
-        ...(hasAllowed ? [] : ['--allowedTools', 'WebSearch,WebFetch,mcp__engram,mcp__plugin_engram_engram']),
+        ...(hasAllowed ? [] : ['--allowedTools', buildAllowedTools()]),
         ...extra,
       ];
       const child = spawn(this.profile.cli, args, {

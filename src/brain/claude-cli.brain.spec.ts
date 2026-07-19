@@ -1,8 +1,12 @@
 import { EventEmitter } from 'events';
 jest.mock('cross-spawn');
+jest.mock('./claude-mcp-import');
 import spawn from 'cross-spawn';
 import { ClaudeCliBrain } from './claude-cli.brain';
 import { BrainProfile } from './brain.config';
+import { readClaudeMcpServers } from './claude-mcp-import';
+
+const mockReadClaudeMcpServers = readClaudeMcpServers as jest.Mock;
 
 const PROFILE: BrainProfile = { provider: 'claude-cli', cli: 'claude', model: '', concurrency: 1, timeoutMs: 1000, extraArgs: [] };
 
@@ -15,6 +19,7 @@ function fakeChild() {
 }
 
 describe('ClaudeCliBrain', () => {
+  beforeEach(() => mockReadClaudeMcpServers.mockReturnValue([]));
   afterEach(() => jest.clearAllMocks());
 
   it('stream-json을 파싱해 텍스트 델타·최종 결과·비용을 정규화한다', async () => {
@@ -116,6 +121,57 @@ describe('ClaudeCliBrain', () => {
     expect(args.filter((a) => a === '--allowedTools')).toHaveLength(1);
     expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Bash']));
     expect(args).not.toContain('WebSearch,WebFetch');
+    // 프로필 지정 우선(회귀): 지정된 경로에서는 판독을 아예 참조하지 않는다.
+    expect(mockReadClaudeMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('클로드 MCP 판독 결과를 allowedTools에 mcp__<이름>·플러그인 변형으로 포함한다', async () => {
+    mockReadClaudeMcpServers.mockReturnValue([
+      { name: 'github', command: 'gh-mcp' },
+      { name: 'docs', command: 'docs-mcp', pluginName: 'vercel' },
+    ]);
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    const i = args.indexOf('--allowedTools');
+    const list = args[i + 1].split(',');
+    expect(list).toEqual(
+      expect.arrayContaining([
+        'WebSearch', 'WebFetch', 'mcp__engram', 'mcp__plugin_engram_engram',
+        'mcp__github', 'mcp__docs', 'mcp__plugin_vercel_docs',
+      ]),
+    );
+  });
+
+  it('클로드 MCP 판독이 throw하면 고정 기본 4개로 폴백한다', async () => {
+    mockReadClaudeMcpServers.mockImplementation(() => { throw new Error('boom'); });
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    const i = args.indexOf('--allowedTools');
+    expect(args[i + 1]).toBe('WebSearch,WebFetch,mcp__engram,mcp__plugin_engram_engram');
+  });
+
+  it('판독 이름이 고정 기본과 중복되면 한 번만 포함한다', async () => {
+    mockReadClaudeMcpServers.mockReturnValue([{ name: 'engram', command: 'engram-mcp' }]);
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    const i = args.indexOf('--allowedTools');
+    const list = args[i + 1].split(',');
+    expect(list.filter((x) => x === 'mcp__engram')).toHaveLength(1);
   });
 
   it('opts.timeoutMs가 profile.timeoutMs를 덮어쓴다', async () => {
