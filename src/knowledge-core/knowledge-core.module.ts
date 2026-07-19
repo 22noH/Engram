@@ -1,11 +1,11 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PathResolver, DEFAULT_USER } from '../pal/path-resolver';
 import { WikiEngine } from './wiki/wiki-engine';
 import { WikiGit } from './wiki/wiki-git';
 import { EMBEDDER } from './rag/embedder.port';
 import { TransformersEmbedder } from './rag/transformers-embedder';
 import { CachingEmbedder } from './rag/caching-embedder';
-import { RagStore } from './rag/rag-store';
+import { RagStore, withBootRetry, BootRetryOptions } from './rag/rag-store';
 import { WikiWatcher } from './rag/wiki-watcher';
 import { PAGE_INDEXER } from './rag/rag.types';
 import { KeyedLock } from './keyed-lock';
@@ -20,10 +20,18 @@ import { CodingGit } from './coding-git';
 import { InsightStore } from './insight/insight-store';
 import { InsightContext } from './insight/insight-context';
 
+// 부트 재시도 튜닝값 — 테스트가 overrideProvider로 attempts/baseDelayMs/maxDelayMs를 작게 줄여
+// 실시간 대기 없이 재시도 경로를 검증할 수 있게 DI 토큰으로 분리(knowledge-core.module.spec.ts).
+export const BOOT_RETRY_OPTIONS = 'BOOT_RETRY_OPTIONS';
+export type BootRetryTuning = Pick<BootRetryOptions, 'attempts' | 'baseDelayMs' | 'maxDelayMs'>;
+
 // KnowledgeCore: 단일 진실원(설계 §5). 시작 시 위키 git + RAG 색인을 보장한다.
 @Module({
   providers: [
     { provide: PathResolver, useFactory: () => new PathResolver() },
+    // ★2026-07-19 실사고: 앱 부팅과 헤드리스 MCP가 동시에 같은 rag 폴더를 열면 RagStore.init()이
+    // "Panic in async function"으로 죽어 크래시루프를 탔다 — 앱 부팅이 우선권을 갖도록 재시도.
+    { provide: BOOT_RETRY_OPTIONS, useValue: { attempts: 5, baseDelayMs: 2000, maxDelayMs: 8000 } as BootRetryTuning },
     WikiGit,
     // 페이지별 쓰기 직렬화 락 — WikiEngine·WikiWatcher 공유(§10.3).
     KeyedLock,
@@ -72,12 +80,23 @@ export class KnowledgeCoreModule implements OnModuleInit {
     private readonly rag: RagStore,
     private readonly watcher: WikiWatcher,
     private readonly logger: PinoLogger,
+    @Inject(BOOT_RETRY_OPTIONS) private readonly bootRetryOptions: BootRetryTuning,
   ) {}
 
   async onModuleInit(): Promise<void> {
     try {
       await this.git.ensureRepo();
-      await this.rag.init();
+      // RAG open()을 부트 우선권으로 재시도 — 실패마다 warn 로깅, 소진되면 기존과 동일하게
+      // catch에서 error 로깅 후 throw(디그레이드, 무한 대기 없음).
+      await withBootRetry(() => this.rag.init(), {
+        ...this.bootRetryOptions,
+        onRetry: (attempt, err, delayMs) => {
+          this.logger.warn(
+            `KnowledgeCore RAG 초기화 재시도 ${attempt}회차(${delayMs}ms 후 재시도, 크로스 프로세스 경합 추정): ${err.message}`,
+            'KnowledgeCoreModule',
+          );
+        },
+      });
       // 시작 시 published 페이지 전체 재색인(모듈이 조율 → RagStore가 WikiEngine을 역의존하지 않음).
       // 현재 단일사용자 = DEFAULT_USER. reindexAll은 watcher.start() 전이라 동시 쓰기원이 없다(락 불필요).
       const pages = await this.wiki.listPages({ status: 'published' }, DEFAULT_USER);

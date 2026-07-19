@@ -96,7 +96,8 @@ describe('chooseMode', () => {
     await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
     const port = (probe.address() as AddressInfo).port;
     await new Promise<void>((resolve) => probe.close(() => resolve()));
-    expect(await chooseMode(port)).toBe('core');
+    // attempts:1 — 단발 프로브 분류만 검증(재시도 루프 자체는 아래 별도 describe).
+    expect(await chooseMode(port, 2000, { attempts: 1 })).toBe('core');
   });
 
   it('200이지만 {ok:true}가 아닌 응답 → "core"(다른 서비스가 그 포트를 쓰고 있을 가능성)', async () => {
@@ -107,7 +108,7 @@ describe('chooseMode', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
     try {
-      expect(await chooseMode(port)).toBe('core');
+      expect(await chooseMode(port, 2000, { attempts: 1 })).toBe('core');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -121,7 +122,7 @@ describe('chooseMode', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
     try {
-      expect(await chooseMode(port)).toBe('core');
+      expect(await chooseMode(port, 2000, { attempts: 1 })).toBe('core');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -133,12 +134,68 @@ describe('chooseMode', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
     try {
-      // 테스트 속도를 위해 짧은 타임아웃 — 프로덕션 기본값(2000ms)과 같은 코드 경로.
-      expect(await chooseMode(port, 300)).toBe('core');
+      // 테스트 속도를 위해 짧은 타임아웃 + attempts:1 — 프로덕션 기본값(2000ms)과 같은 코드 경로.
+      expect(await chooseMode(port, 300, { attempts: 1 })).toBe('core');
     } finally {
       // 행 중인 소켓이 close를 막지 않게 강제 정리.
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  describe('재시도 루프(★2026-07-19 실사고 — 앱이 막 부팅 중이면 바로 core로 폴백하지 않고 기다린다)', () => {
+    it('첫 시도가 성공하면 즉시 bridge — 빠른 경로 보존(대기 없음)', async () => {
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        // attempts 기본값(6)을 그대로 둬도 1회차 성공이면 대기 없이 바로 반환됨을 검증.
+        const start = Date.now();
+        expect(await chooseMode(port, 2000)).toBe('bridge');
+        expect(Date.now() - start).toBeLessThan(1000);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('3번째 시도에서 앱이 응답하면 bridge(앱이 그 사이 부팅을 마친 상황을 흉내)', async () => {
+      let attempt = 0;
+      const server = http.createServer((req, res) => {
+        attempt++;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: attempt >= 3 }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        // intervalMs를 짧게 줘 테스트 속도 확보 — 재시도 루프 로직 자체는 프로덕션과 동일.
+        const mode = await chooseMode(port, 2000, { attempts: 6, intervalMs: 5 });
+        expect(mode).toBe('bridge');
+        expect(attempt).toBe(3);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    it('끝까지 응답이 없으면 attempts회를 다 재시도한 뒤에야 "core"', async () => {
+      let attempt = 0;
+      const server = http.createServer((req, res) => {
+        attempt++;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false })); // 앱이 끝까지 안 뜨는 상황 흉내(항상 core)
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as AddressInfo).port;
+      try {
+        const mode = await chooseMode(port, 2000, { attempts: 6, intervalMs: 5 });
+        expect(mode).toBe('core');
+        expect(attempt).toBe(6);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
   });
 });

@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { RagStore, withLanceRetry } from './rag-store';
+import { RagStore, withLanceRetry, withBootRetry, isLanceRetryable } from './rag-store';
 import { FakeEmbedder } from './fake-embedder';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { IndexablePage } from './rag.types';
@@ -29,6 +29,76 @@ describe('withLanceRetry', () => {
     const fn = jest.fn(async () => { throw new Error('Please retry.'); });
     await expect(withLanceRetry(fn, 2, 1)).rejects.toThrow('Please retry');
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+  it('"Panic in async function"도 재시도 대상으로 분류한다(2026-07-19 부트 경합 실사고)', async () => {
+    let n = 0;
+    const fn = jest.fn(async () => {
+      if (++n < 2) throw new Error('Error: Panic in async function');
+      return 'ok';
+    });
+    await expect(withLanceRetry(fn, 3, 1)).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('isLanceRetryable', () => {
+  it('커밋 충돌·panic 메시지는 retryable', () => {
+    expect(isLanceRetryable(new Error('Retryable commit conflict. Please retry.'))).toBe(true);
+    expect(isLanceRetryable(new Error('Error: Panic in async function'))).toBe(true);
+  });
+  it('무관한 에러는 retryable이 아니다', () => {
+    expect(isLanceRetryable(new Error('ENOENT: no such file or directory'))).toBe(false);
+  });
+});
+
+describe('withBootRetry', () => {
+  it('panic 에러로 N번 실패 후 성공 — 재시도마다 onRetry(warn 로깅용) 호출', async () => {
+    let n = 0;
+    const fn = jest.fn(async () => {
+      if (++n < 3) throw new Error('Error: Panic in async function');
+      return 'ok';
+    });
+    const onRetry = jest.fn();
+    await expect(
+      withBootRetry(fn, { attempts: 5, baseDelayMs: 1, maxDelayMs: 4, onRetry }),
+    ).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(3);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    expect(onRetry.mock.calls[0][0]).toBe(1); // 1회차 재시도
+    expect(onRetry.mock.calls[1][0]).toBe(2); // 2회차 재시도
+  });
+
+  it('지수 백오프가 maxDelayMs로 상한된다', async () => {
+    let n = 0;
+    const fn = jest.fn(async () => {
+      if (++n < 4) throw new Error('Panic in async function');
+      return 'ok';
+    });
+    const delays: number[] = [];
+    await withBootRetry(fn, {
+      attempts: 5,
+      baseDelayMs: 1,
+      maxDelayMs: 3,
+      onRetry: (_a, _e, delayMs) => delays.push(delayMs),
+    });
+    // baseDelayMs=1: 1, 2, 4→상한 3 이렇게 증가하다 maxDelayMs(3)에서 멈춘다.
+    expect(delays).toEqual([1, 2, 3]);
+  });
+
+  it('재시도를 소진할 때까지 계속 실패하면 마지막 에러를 던진다(오늘과 동일한 degraded 동작)', async () => {
+    const fn = jest.fn(async () => { throw new Error('Panic in async function'); });
+    await expect(
+      withBootRetry(fn, { attempts: 3, baseDelayMs: 1, maxDelayMs: 2 }),
+    ).rejects.toThrow('Panic in async function');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('재시도 불가능한 에러는 즉시 던진다(retry 낭비 없음)', async () => {
+    const fn = jest.fn(async () => { throw new Error('ENOENT: no such file'); });
+    await expect(
+      withBootRetry(fn, { attempts: 5, baseDelayMs: 1 }),
+    ).rejects.toThrow('ENOENT');
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 

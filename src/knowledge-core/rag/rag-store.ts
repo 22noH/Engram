@@ -11,16 +11,49 @@ const TABLE = 'chunks';
 // LanceDB는 다른 프로세스(앱 상주 vs 헤드리스 MCP가 같은 데이터 폴더 공유)와 커밋이 경합하면
 // "Retryable commit conflict … Please retry"를 던진다 — in-process 큐로는 못 막으므로 재시도가 정답.
 // (2026-07-19 실사고: 승인 중 CreateIndex 경합 → 제안 좀비화)
-const LANCE_RETRYABLE = /retryable commit conflict|please retry/i;
+// "Panic in async function"도 같은 부류로 취급한다 — open() 단계에서 앱 부팅과 헤드리스 MCP가
+// 동시에 같은 rag 폴더를 열 때 나는 크로스 프로세스 경합이며, 보통 일시적이다(2026-07-19 실사고 2:
+// 헤드리스가 먼저 core 모드로 폴더를 열고 있으면 뒤이은 앱 부팅의 KnowledgeCoreModule.onModuleInit이
+// 이 에러로 죽어 크래시루프를 탔다 → 부트 경로도 재시도로 흡수, knowledge-core.module.ts 참조).
+const LANCE_RETRYABLE = /retryable commit conflict|please retry|panic in async function/i;
+
+export function isLanceRetryable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return LANCE_RETRYABLE.test(msg);
+}
 
 export async function withLanceRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 200): Promise<T> {
   for (let i = 1; ; i++) {
     try {
       return await fn();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (i >= attempts || !LANCE_RETRYABLE.test(msg)) throw e;
+      if (i >= attempts || !isLanceRetryable(e)) throw e;
       await new Promise((r) => setTimeout(r, baseDelayMs * i));
+    }
+  }
+}
+
+// 부트 경로 전용 재시도(withLanceRetry와 별도) — 앱 부팅이 헤드리스 MCP보다 우선권을 갖도록
+// 더 오래·지수 백오프로 기다린다(기본 5회, 2s→4s→8s→8s… maxDelayMs로 상한, 총 ~30s 내외).
+// onRetry로 재시도마다 콜백을 받아 호출자(KnowledgeCoreModule)가 warn 로깅하게 한다.
+export interface BootRetryOptions {
+  attempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  onRetry?: (attempt: number, err: Error, delayMs: number) => void;
+}
+
+export async function withBootRetry<T>(fn: () => Promise<T>, opts: BootRetryOptions = {}): Promise<T> {
+  const { attempts = 5, baseDelayMs = 2000, maxDelayMs = 8000, onRetry } = opts;
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      if (i >= attempts || !isLanceRetryable(err)) throw err;
+      const delayMs = Math.min(baseDelayMs * 2 ** (i - 1), maxDelayMs);
+      onRetry?.(i, err, delayMs);
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
 }
