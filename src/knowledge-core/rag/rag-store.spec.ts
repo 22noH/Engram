@@ -212,3 +212,99 @@ describe('RagStore', () => {
     }
   });
 });
+
+// 부트 자가치유(근본픽스 2026-07-20): withBootRetry가 소진된 뒤 호출되는 격리(rename)+재생성 경로.
+// rename 자체는 protected renameDir()로 시임을 분리해 spyOn으로 결정적으로 실패를 주입한다
+// (fs 모듈 네임스페이스 스파이는 esModuleInterop __importStar 하에서 신뢰할 수 없다 — 게터 프로퍼티는
+// 보통 configurable:false라 jest.spyOn이 재정의에 실패한다).
+describe('RagStore.quarantineAndReinit (부트 자가치유)', () => {
+  let dir: string;
+  let store: RagStore;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-rag-quarantine-'));
+    store = new RagStore(new PathResolver(dir), new FakeEmbedder());
+    await store.init();
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('격리(rename) 성공 → 원래 rag 폴더는 rag.corrupt-<timestamp>로 이동하고, 빈 폴더에 재생성돼 즉시 사용 가능하다', async () => {
+    await store.indexPage(page('before-heal', '격리 전 색인된 문서'));
+    const ragDir = path.join(dir, 'rag');
+
+    await store.quarantineAndReinit({ delayMs: 1 });
+
+    // 원래 위치엔 새 빈 스토어가 새로 생성돼 있다(디렉토리 자체는 다시 존재).
+    const ragStat = await fs.stat(ragDir);
+    expect(ragStat.isDirectory()).toBe(true);
+    // 격리된 폴더가 형제로 남아있다(rag.corrupt-yyyymmdd-HHmmss).
+    const siblings = await fs.readdir(dir);
+    expect(siblings.some((s) => /^rag\.corrupt-\d{8}-\d{6}$/.test(s))).toBe(true);
+
+    // 재생성된 스토어는 비어 있다 — 격리 전 색인은 새 코퍼스에 없다(disposable, wiki가 원본).
+    const afterHeal = await store.search('격리 전 색인된 문서', 50);
+    expect(afterHeal.map((r) => r.slug)).not.toContain('before-heal');
+
+    // 새로 색인·검색이 정상 동작한다(진짜로 재생성됐다는 증거).
+    await store.indexPage(page('after-heal', '격리 후 새로 색인된 문서'));
+    const results = await store.search('격리 후 새로 색인된 문서', 50);
+    expect(results.map((r) => r.slug)).toContain('after-heal');
+  });
+
+  it('rename이 계속 실패하면(EBUSY 등) 재시도 후 포기하고 예외를 던진다 — 오늘과 동일한 디그레이드로 폴백(더 강하게 크래시하지 않음)', async () => {
+    const renameSpy = jest
+      .spyOn(store as unknown as { renameDir(src: string, dest: string): Promise<void> }, 'renameDir')
+      .mockRejectedValue(new Error('EBUSY: resource busy or locked'));
+
+    await expect(store.quarantineAndReinit({ attempts: 3, delayMs: 1 })).rejects.toThrow('EBUSY');
+    expect(renameSpy).toHaveBeenCalledTimes(3); // 몇 차례 재시도 후 포기(무한 대기 없음)
+
+    // 격리도 실패했으니 스토어는 계속 디그레이드 상태 — 크래시 대신 안전한 폴백값을 반환한다.
+    expect(await store.search('아무거나')).toEqual([]);
+    await expect(store.indexPage(page('x', '아무 본문'))).resolves.toBeUndefined();
+  });
+
+  it('rename이 일시 실패 후 재시도로 성공하면 정상 격리·재생성된다', async () => {
+    let attempt = 0;
+    jest
+      .spyOn(store as unknown as { renameDir(src: string, dest: string): Promise<void> }, 'renameDir')
+      .mockImplementation(async (src: string, dest: string) => {
+        attempt++;
+        if (attempt < 2) throw new Error('EBUSY: resource busy or locked');
+        await fs.rename(src, dest);
+      });
+
+    await expect(store.quarantineAndReinit({ attempts: 3, delayMs: 1 })).resolves.toBeUndefined();
+    expect(attempt).toBe(2);
+
+    // 재생성 후 정상 동작 확인.
+    await store.indexPage(page('recovered', '재시도 끝에 복구'));
+    const results = await store.search('재시도 끝에 복구', 50);
+    expect(results.map((r) => r.slug)).toContain('recovered');
+  });
+});
+
+// init()이 한 번도 성공하지 못한(혹은 격리·재생성도 실패한) 디그레이드 상태 — 모든 소비 메서드가
+// 예외 없이 안전한 폴백값을 반환해야 한다(WikiEngine 등 소비자가 옵셔널 체이닝만으로는 막지
+// 못하는 지점 — RagStore 자체가 "smallest seam"으로 가드한다).
+describe('RagStore — init 미완료(디그레이드) 상태의 안전한 폴백', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-rag-degraded-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('init()을 호출하지 않은 스토어는 검색·색인·삭제·전체재색인 모두 예외 없이 안전하게 no-op/빈 값을 반환한다', async () => {
+    const store = new RagStore(new PathResolver(dir), new FakeEmbedder());
+
+    await expect(store.search('아무거나')).resolves.toEqual([]);
+    await expect(store.indexPage(page('a', '본문'))).resolves.toBeUndefined();
+    await expect(store.removePage('a')).resolves.toBeUndefined();
+    await expect(store.reindexAll([page('a', '본문')])).resolves.toBeUndefined();
+  });
+});

@@ -1,7 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import * as lancedb from '@lancedb/lancedb';
+import * as fs from 'fs/promises';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
+import { PinoLogger } from '../../pal/logger';
 import { EMBEDDER, IEmbedder } from './embedder.port';
 import { chunkBody } from './chunker';
 import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
@@ -70,13 +72,18 @@ export class RagStore implements PageIndexer {
   private reranker!: lancedb.rerankers.RRFReranker;
   // LanceDB 단일 라이터 — 쓰기를 직렬화한다(진짜 락은 Part 3).
   private queue: Promise<unknown> = Promise.resolve();
+  // init()이 끝까지 성공해야 true — 부트 자가치유(근본픽스 2026-07-20)가 격리 후 재생성마저
+  // 실패하면 false로 남아 모든 소비 메서드가 안전하게 no-op/빈 결과로 디그레이드한다(크래시 방지).
+  private ready = false;
 
   constructor(
     private readonly paths: PathResolver,
     @Inject(EMBEDDER) private readonly embedder: IEmbedder,
+    @Optional() private readonly logger?: PinoLogger,
   ) {}
 
   async init(): Promise<void> {
+    this.ready = false;
     this.db = await lancedb.connect(this.paths.getRagDir());
     const names = await this.db.tableNames();
     if (names.includes(TABLE)) {
@@ -92,6 +99,49 @@ export class RagStore implements PageIndexer {
       this.table = await this.db.createEmptyTable(TABLE, this.schema());
     }
     this.reranker = await lancedb.rerankers.RRFReranker.create();
+    this.ready = true;
+  }
+
+  // 부트 자가치유(근본픽스 2026-07-20): withBootRetry가 소진된 뒤(패닉·부분생성 잔해로 open도
+  // create도 실패하는 등 "Table 'chunks' was not found ... _versions" 부류 전부 포함) 호출된다.
+  // 손상된 rag 폴더를 통째로 격리(rename)하고 빈 폴더에 새로 init()한다 — RAG는 wiki에서 파생되는
+  // disposable 저장소라 데이터 손실 없이 안전하다(위키 원본은 wiki/*.md에 그대로 남는다).
+  // rename 자체가 실패하면(EBUSY/EPERM 등 다른 프로세스가 아직 핸들을 쥐고 있는 경우) 짧은 대기를
+  // 두고 몇 차례 재시도하고, 그래도 실패하면 예외를 던져 호출자가 오늘과 동일한 디그레이드로
+  // 폴백하게 한다(더 강하게 크래시루프를 타지 않는다 — 이 메서드 자체는 절대 무한 대기하지 않음).
+  async quarantineAndReinit(opts: { attempts?: number; delayMs?: number } = {}): Promise<void> {
+    const { attempts = 3, delayMs = 300 } = opts;
+    const dir = this.paths.getRagDir();
+    const dest = `${dir}.corrupt-${this.timestamp()}`;
+    let lastErr: unknown;
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        await this.renameDir(dir, dest);
+        lastErr = undefined;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (i < attempts) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    if (lastErr) {
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    }
+    this.logger?.warn(`손상 rag 폴더 격리 완료 → ${dest} — 빈 폴더에 재생성`, 'RagStore');
+    await this.init(); // 격리된 빈 폴더 위에 새 스토어 생성(오픈 경로가 createEmptyTable로 진입).
+  }
+
+  // rename 자체를 오버라이드 가능한 메서드로 분리 — 테스트가 rename 실패(EBUSY 등)를 결정적으로
+  // 주입할 수 있는 시임(fs 모듈 네임스페이스 스파이는 esModuleInterop 하에서 신뢰할 수 없다).
+  protected async renameDir(src: string, dest: string): Promise<void> {
+    await fs.rename(src, dest);
+  }
+
+  // 격리 폴더명용 타임스탬프(yyyymmdd-HHmmss, 로컬시간).
+  private timestamp(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
   private schema(): Schema {
@@ -129,6 +179,12 @@ export class RagStore implements PageIndexer {
   }
 
   async indexPage(page: IndexablePage): Promise<void> {
+    // 디그레이드 상태(init 실패·격리 재생성도 실패) — 색인 no-op. 소비자(WikiEngine 등)를
+    // 크래시시키지 않는 게 목적(근본픽스 2026-07-20, "smallest seam" — 프록시 대신 자체 가드).
+    if (!this.ready) {
+      this.logger?.warn(`RAG 디그레이드 상태 — 색인 스킵: ${page.slug}`, 'RagStore');
+      return;
+    }
     const userId = page.userId ?? DEFAULT_USER;
     // 본문 전체를 재시도 단위로 — delete/add/인덱스가 모두 멱등이라 통째 재실행이 안전하다.
     return this.enqueue(() => withLanceRetry(async () => {
@@ -158,6 +214,10 @@ export class RagStore implements PageIndexer {
   }
 
   async removePage(slug: string, userId: string = DEFAULT_USER): Promise<void> {
+    if (!this.ready) {
+      this.logger?.warn(`RAG 디그레이드 상태 — 삭제 스킵: ${slug}`, 'RagStore');
+      return;
+    }
     await this.enqueue(() => withLanceRetry(async () => {
       // userId 범위 한정 삭제: 타 유저 동명 페이지를 건드리지 않는다.
       await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(slug)}`);
@@ -168,10 +228,16 @@ export class RagStore implements PageIndexer {
   }
 
   async reindexAll(pages: IndexablePage[]): Promise<void> {
+    if (!this.ready) {
+      this.logger?.warn(`RAG 디그레이드 상태 — 전체 재색인 스킵(${pages.length}건)`, 'RagStore');
+      return;
+    }
     for (const p of pages) await this.indexPage(p);
   }
 
   async search(query: string, limit = 5, userId: string = DEFAULT_USER): Promise<SearchResult[]> {
+    // 디그레이드 상태 — 빈 결과로 폴백(검색 UI가 "결과 없음"으로 안전 처리, 크래시 없음).
+    if (!this.ready) return [];
     // FTS 인덱스가 없으면(아직 indexPage가 한 번도 호출되지 않은 상태) 빈 결과 반환.
     const indices = await this.table.listIndices();
     if (!indices.some((idx) => idx.columns.includes('text'))) return [];
