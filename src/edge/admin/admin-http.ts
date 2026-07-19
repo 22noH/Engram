@@ -72,8 +72,15 @@ export class AdminHttp {
   }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
-    const url = (req.url ?? '').split('?')[0];
-    if (url !== '/admin' && !url.startsWith('/admin/')) return false;
+    const raw = (req.url ?? '').split('?')[0];
+    if (raw !== '/admin' && !raw.startsWith('/admin/')) return false;
+
+    // Minor 1(리뷰 지적): 예전엔 api 접두 매칭은 raw(미디코딩) url로, 정적 서빙은 내부에서 따로
+    // decode해 둘이 다른 값을 보고 있었다 — 그래서 /admin/%61pi/overview(encoded 'a') 같은 요청이
+    // api 게이트(401/403)를 우회해 정적 서빙으로 새버렸다. 여기서 한 번만 decode해 이후 라우팅
+    // (api 접두 매칭 + 정적 경로 해석) 전부 그 decoded 값 하나로 통일한다. 깨진 인코딩은 404.
+    let url: string;
+    try { url = decodeURIComponent(raw); } catch { this.notFound(res); return true; }
 
     if (url.startsWith('/admin/api/')) {
       if (url === '/admin/api/overview' && req.method === 'GET') {
@@ -140,14 +147,16 @@ export class AdminHttp {
     return count;
   }
 
-  // console/dist 정적 서빙. traversal 차단: rawRel은 항상 '/'로 시작(또는 특수케이스 '/admin' 자체)
-  // 하므로 path.normalize가 절대경로 취급해 '..'를 루트 밖으로 못 나가게 collapse한다(Node 관성) —
-  // 그 뒤 선행 구분자를 벗겨 "루트 기준 상대경로"로만 join하므로 root 밖 이스케이프가 원천 불가.
+  // console/dist 정적 서빙. url은 handle()에서 이미 1회 decode됐다(Minor 1 — 여기서 다시 decode하지
+  // 않는다, 이중 디코딩은 별개 취약점). traversal 차단: rawRel은 항상 '/'로 시작(또는 특수케이스
+  // '/admin' 자체)하므로 path.normalize가 절대경로 취급해 '..'를 루트 밖으로 못 나가게 collapse한다
+  // (Node 관성) — 그 뒤 선행 구분자를 벗겨 "루트 기준 상대경로"로만 join하므로 root 밖 이스케이프가
+  // 원천 불가. 단 path.normalize는 선행 '//'(UNC 표식)는 collapse 없이 보존하는 케이스가 있어, 뒤이은
+  // 정규식이 그 UNC 표식까지 몽땅 벗겨내면 '..'가 안 지워진 채 남을 수 있다 — 그 경우도 아래
+  // filePath.startsWith(withSep) 방어선이 잡아낸다(정규화 방식과 무관하게 최종 결과 위치로 판정).
   private serveStatic(url: string, res: http.ServerResponse): void {
-    const rawRel = url === '/admin' ? '/index.html' : url.slice('/admin'.length);
-    let decoded: string;
-    try { decoded = decodeURIComponent(rawRel); } catch { this.notFound(res); return; }
-    const normalized = path.normalize(decoded).replace(/^[/\\]+/, '');
+    const rel = url === '/admin' ? '/index.html' : url.slice('/admin'.length);
+    const normalized = path.normalize(rel).replace(/^[/\\]+/, '');
     const filePath = path.resolve(this.root, normalized || 'index.html');
     const withSep = this.root.endsWith(path.sep) ? this.root : this.root + path.sep;
     if (filePath !== this.root && !filePath.startsWith(withSep)) { this.notFound(res); return; }

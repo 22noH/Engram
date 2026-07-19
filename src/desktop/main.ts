@@ -30,6 +30,11 @@ const childEnv = {
   ...process.env,
   ENGRAM_DATA_DIR: dataDir,
   ENGRAM_MODEL_CACHE_DIR: path.join(dataDir, 'models'),
+  // 리뷰 지적: 데스크톱 백엔드는 /admin(서버 콘솔)을 절대 서빙하지 않는다 — 콘솔은 서버 에디션
+  // 전용 물건. startChild(상주 main.js)·startLocalBrain(로컬 두뇌) 둘 다 이 childEnv를 물려받는다
+  // — 로컬 두뇌엔 무해(brain 모드는 애초에 adminDeps 미배선). main.ts가 isServer && 이 값 !== '1'
+  // 일 때만 adminDeps를 배선(src/main.ts), self.adapter.ts가 라우팅에서도 한 번 더 확인(방어 이중화).
+  ENGRAM_DESKTOP: '1',
 };
 
 let tray: Tray | null = null;

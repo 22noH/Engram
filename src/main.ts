@@ -148,8 +148,14 @@ async function bootstrap(): Promise<void> {
 
       // Task 2(서버 콘솔 S1): /admin(console/dist 정적 서빙+owner 게이트 개요 api). 메인 서버에만
       // (brain 모드는 authDeps 자체가 없어 self.adapter가 /admin을 라우팅하지 않는다).
-      const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, wiki, proposals });
-      adminDeps = { http: adminHttp };
+      // 리뷰 지적: 콘솔은 서버 에디션 물건 — 데스크톱 상주 백엔드(src/desktop/main.ts startChild가
+      // ENGRAM_DESKTOP='1'로 fork)는 isServer라도 /admin을 서빙하면 안 된다. 여기서 아예 adminDeps를
+      // 안 만들어 self.adapter에 안 넘긴다(생성 자체를 스킵 — 데스크톱에서 불필요한 AdminHttp 인스턴스도
+      // 안 만듦). 이 env 없는 헤드리스 서버 실행(미래 engram-server 엔트리 포함)은 기존대로 /admin 서빙.
+      if (process.env.ENGRAM_DESKTOP !== '1') {
+        const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, wiki, proposals });
+        adminDeps = { http: adminHttp };
+      }
     }
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,

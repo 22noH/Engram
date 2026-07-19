@@ -120,7 +120,10 @@ export class SelfMessenger implements MessengerPort {
       }
       // Task 2(서버 콘솔 S1): /admin은 authDeps+adminDeps 둘 다 있을 때만(메인 서버) — auth-http.ts
       // 위임과 같은 결. 한쪽만 있으면(brain 모드·미배선) 이 블록을 건너뛰어 기존 404로 떨어진다.
-      if (this.authDeps && this.adminDeps && (req.url ?? '').startsWith('/admin')) {
+      // 리뷰 지적(방어 이중화): 데스크톱 상주 백엔드는 ENGRAM_DESKTOP='1'로 뜬다(src/desktop/main.ts
+      // childEnv). main.ts가 이 값이면 애초에 adminDeps를 안 만들지만, 혹시라도 다시 배선되는 회귀가
+      // 나더라도 여기서 한 번 더 막는다 — 콘솔은 서버 에디션 전용, 데스크톱은 항상 404.
+      if (this.authDeps && this.adminDeps && process.env.ENGRAM_DESKTOP !== '1' && (req.url ?? '').startsWith('/admin')) {
         void this.adminDeps.http.handle(req, res).catch(() => {
           try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
         });

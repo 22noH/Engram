@@ -1991,6 +1991,27 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
     expect(r.status).toBe(404);
   });
 
+  it('ENGRAM_DESKTOP=1이면 authDeps+adminDeps 둘 다 있어도 /admin 404(데스크톱 방어 이중화)', async () => {
+    // 리뷰 지적: 콘솔은 서버 에디션 물건 — 데스크톱 상주 백엔드는 ENGRAM_DESKTOP='1'로 뜬다
+    // (src/desktop/main.ts childEnv). main.ts가 이 값이면 애초에 adminDeps를 안 만들지만, 여기선
+    // adminDeps를 일부러 주입한 채(=main.ts 배선이 잘못됐다고 가정) self.adapter 자체의 방어선을
+    // 직접 검증한다 — 두 계층 중 하나만 있어도 데스크톱은 항상 404여야 한다.
+    const ORIGINAL = process.env.ENGRAM_DESKTOP;
+    process.env.ENGRAM_DESKTOP = '1';
+    try {
+      sm = new SelfMessenger(
+        { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+        undefined, makeAuthDeps(dir), undefined, makeAdminDeps(),
+      );
+      await sm.start();
+      const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/admin`);
+      expect(r.status).toBe(404);
+    } finally {
+      if (ORIGINAL === undefined) delete process.env.ENGRAM_DESKTOP;
+      else process.env.ENGRAM_DESKTOP = ORIGINAL;
+    }
+  });
+
   it('/admin/api/overview 전 구간 배선: owner 세션 → 200', async () => {
     const authDeps = makeAuthDeps(dir);
     const owner = authDeps.accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });

@@ -34,6 +34,23 @@ describe('AdminHttp', () => {
     });
   }
 
+  // fetch()(WHATWG URL)는 '..'·%2e%2e 같은 dot-segment를 클라에서 먼저 정규화해버려 서버에 그
+  // 리터럴 문자열이 아예 안 닿는다(예: '/admin/%2e%2e/x'는 fetch가 이미 '/x'로 접어서 보낸다 —
+  // 서버측 방어를 검증한 게 아니라 클라 정규화를 검증한 꼴). http.request는 path를 있는 그대로
+  // 전송해 서버가 실제로 받는 raw url을 통제할 수 있다 — traversal 회귀 테스트는 이걸 쓴다.
+  function rawGet(pathStr: string): Promise<{ status: number }> {
+    const a = server.address();
+    const port = typeof a === 'object' && a ? a.port : 0;
+    return new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path: pathStr, method: 'GET' }, (res) => {
+        res.resume();
+        res.on('end', () => resolve({ status: res.statusCode ?? 0 }));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-http-'));
     accounts = new AccountStore(dir);
@@ -88,6 +105,23 @@ describe('AdminHttp', () => {
       expect(r.status).toBe(404);
     });
 
+    it('Minor 2-①: %5c(인코딩된 백슬래시) traversal → 404, 루트 밖 파일 유출 없음', async () => {
+      // Windows에서 %5c는 디코드되면 '\\' — 슬래시 대신 백슬래시로 위장한 상위 이탈 시도.
+      fs.writeFileSync(path.join(dir, 'secret.html'), 'OUTER SECRET');
+      await startServer();
+      const r = await rawGet('/admin/..%5c..%5csecret.html');
+      expect(r.status).toBe(404);
+    });
+
+    it('Minor 2-②: 이중 선행 슬래시(UNC 모양) traversal → 404, 루트 밖 파일 유출 없음', async () => {
+      // '//..//..//' 형태 — Windows path.normalize가 선행 '//'를 UNC 표식으로 보존해 뒤이은 '..'
+      // collapse 결과가 일반 케이스와 달라질 수 있는 지점(정규화 방식과 무관하게 최종 위치로 방어).
+      fs.writeFileSync(path.join(dir, 'secret.html'), 'OUTER SECRET');
+      await startServer();
+      const r = await rawGet('/admin//..//..//secret.html');
+      expect(r.status).toBe(404);
+    });
+
     it('화이트리스트 밖 확장자(.png)는 파일이 있어도 404', async () => {
       await startServer();
       const r = await fetch(base + '/admin/logo.png');
@@ -108,6 +142,14 @@ describe('AdminHttp', () => {
   });
 
   describe('overview API(owner 게이트)', () => {
+    it('Minor 2-③(Minor 1 회귀): /admin/%61pi/overview(encoded a) → api 게이트로 라우팅(401, 정적 서빙 아님)', async () => {
+      // 예전엔 api 접두 매칭이 raw url 기준이라 %61(='a')처럼 인코딩된 api 경로가 정적 서빙으로
+      // 새서 404/index.html 폴백을 탔다 — decode-once 수정 후엔 정상적으로 overview 게이트(401)를 탄다.
+      await startServer();
+      const r = await rawGet('/admin/%61pi/overview');
+      expect(r.status).toBe(401);
+    });
+
     it('미설정 서버(계정 0) → 401(토큰 없어도 데이터 노출 금지)', async () => {
       await startServer();
       const r = await fetch(base + '/admin/api/overview');
