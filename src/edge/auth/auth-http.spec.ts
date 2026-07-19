@@ -7,6 +7,7 @@ import { SessionStore } from './session-store';
 import { ensureSetupCode, readSetupCode } from './setup-code';
 import { AuthHttp } from './auth-http';
 import { OidcService, PollStore } from './oidc';
+import * as mcpHttp from '../mcp/mcp-http';
 
 describe('AuthHttp(비밀번호 경로)', () => {
   let dir: string; let server: http.Server; let base: string;
@@ -39,7 +40,25 @@ describe('AuthHttp(비밀번호 경로)', () => {
     const r = await fetch(base + '/auth/status');
     expect(r.status).toBe(200);
     expect(r.headers.get('access-control-allow-origin')).toBe('*');
-    expect(await r.json()).toEqual({ configured: false, oidc: false, serverName: 'T' });
+    // fetch(127.0.0.1)는 루프백이라 미설정+루프백=localFree true(스탠드얼론 §2.1, Task 1 케이스①과 동일 조건).
+    expect(await r.json()).toEqual({ configured: false, oidc: false, serverName: 'T', localFree: true });
+  });
+
+  it('status(Task 1 케이스②): 계정 1개+루프백 → localFree:false', async () => {
+    accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+    const r = await fetch(base + '/auth/status');
+    expect(await r.json()).toMatchObject({ configured: true, localFree: false });
+  });
+
+  it('status(Task 1 케이스③): 미설정+비루프백 → localFree:false', async () => {
+    // fetch는 항상 127.0.0.1로 접속하므로 소켓 판정 자체를 모킹(mcp-http의 isLoopback 재사용 지점 — 8c-2 관성).
+    const spy = jest.spyOn(mcpHttp, 'isLoopback').mockReturnValue(false);
+    try {
+      const r = await fetch(base + '/auth/status');
+      expect(await r.json()).toMatchObject({ configured: false, localFree: false });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('OPTIONS 프리플라이트 → 204', async () => {

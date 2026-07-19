@@ -65,6 +65,9 @@ export class SelfMessenger implements MessengerPort {
   private authed = new WeakSet<WebSocket>();
   private approving = new Set<string>();
   private users = new Map<WebSocket, Account>(); // 인증 소켓 → 계정(세션 모드)
+  // Task 1(스탠드얼론 §2.1): 소켓별 원격주소(연결 시점 1회 기록 — TCP 연결 중 불변이라 캐시해도 안전).
+  // isFreeSocket 판정의 절반(주소)만 캐시하고, accounts.count()는 매번 재조회(캐시 금지 — 계정 생성 즉시 반영).
+  private remoteAddrs = new WeakMap<WebSocket, string | undefined>();
 
   constructor(
     private readonly cfg: ChatConfig,
@@ -145,12 +148,14 @@ export class SelfMessenger implements MessengerPort {
     this.wss.on('error', (err) => {
       this.opts.logger.warn(`웹소켓 서버 오류(채팅 비활성 가능): ${String(err)}`, 'SelfChat');
     });
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      this.remoteAddrs.set(ws, req.socket.remoteAddress);
       if (!this.authDeps) {
         this.authed.add(ws); // 무인증(테스트·brain 모드) — 현행 무토큰과 동일
       } else {
         const timer = setTimeout(() => {
-          if (!this.authed.has(ws)) {
+          // Task 1: free 소켓(계정0+루프백)은 계속 free인 한 5초 타임아웃으로 끊지 않는다 — 매 순간 재판정.
+          if (!this.isConnected(ws)) {
             this.sendTo(ws, { t: 'authErr' });
             try { ws.close(); } catch { /* 격리 */ }
           }
@@ -175,10 +180,25 @@ export class SelfMessenger implements MessengerPort {
   private sendTo(ws: WebSocket, frame: ServerFrame): void {
     try { ws.send(JSON.stringify(frame)); } catch { /* 격리 */ }
   }
+  // Task 1(스탠드얼론 §2.1): 계정 0개+루프백 소켓 판정. 매 호출 accounts.count() 재조회(캐시 금지 —
+  // 계정이 생기는 순간 다음 프레임부터 즉시 반영돼야 한다). 주소는 연결 시점 캐시(불변이라 안전).
+  private isFreeSocket(ws: WebSocket): boolean {
+    return !!this.authDeps && isLoopback(this.remoteAddrs.get(ws)) && this.authDeps.accounts.count() === 0;
+  }
+  // brain 모드(authDeps 미주입)와 free 소켓을 한 갈래로 — 권한 체크는 전부 이 헬퍼를 재사용한다
+  // (새 분기 발명 금지, 스펙 §2.1). true면 계정/권한 검사를 건너뛰고 통과.
+  private bypassAuth(ws: WebSocket): boolean {
+    return !this.authDeps || this.isFreeSocket(ws);
+  }
+  // 메시지 수신/전송 자격(=authed 세션이거나 지금 이 순간 free 소켓). authed WeakSet에는 free
+  // 소켓을 영구히 넣지 않는다 — 계정이 생기면 다음 판정에서 즉시 거부로 돌아가야 하기 때문.
+  private isConnected(ws: WebSocket): boolean {
+    return this.authed.has(ws) || this.isFreeSocket(ws);
+  }
   private broadcast(frame: ServerFrame): void {
     const data = JSON.stringify(frame);
     for (const c of this.wss?.clients ?? []) {
-      if (c.readyState === WebSocket.OPEN && this.authed.has(c)) {
+      if (c.readyState === WebSocket.OPEN && this.isConnected(c)) {
         try { c.send(data); } catch { /* 격리 */ }
       }
     }
@@ -189,7 +209,7 @@ export class SelfMessenger implements MessengerPort {
     const ch = this.store.listChannels().find((c) => c.id === channelId);
     const data = JSON.stringify(frame);
     for (const c of this.wss?.clients ?? []) {
-      if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
+      if (c.readyState !== WebSocket.OPEN || !this.isConnected(c)) continue;
       if (ch && !this.canAccessChannel(c, ch)) continue;
       try { c.send(data); } catch { /* 격리 */ }
     }
@@ -207,14 +227,15 @@ export class SelfMessenger implements MessengerPort {
     return !!this.authDeps && me?.role === 'owner';
   }
 
-  // Phase 16b: 세분 권한 게이트. authDeps 미주입(무인증 모드)이면 전부 통과(현행 유지 — 회귀 금지).
+  // Phase 16b: 세분 권한 게이트. authDeps 미주입(무인증 모드) 또는 free 소켓(Task 1)이면 전부
+  // 통과(현행 유지 — 회귀 금지, bypassAuth가 두 경우를 한 갈래로 묶는다).
   private allowed(ws: WebSocket, perm: Permission): boolean {
-    if (!this.authDeps) return true;
+    if (this.bypassAuth(ws)) return true;
     return can(this.users.get(ws), perm);
   }
   // 채널 관리 게이트: channels.manage 보유 또는 그 채널을 만든 본인(소유권 예외).
   private canManageChannel(ws: WebSocket, ch: ChatChannel | undefined): boolean {
-    if (!this.authDeps) return true;
+    if (this.bypassAuth(ws)) return true;
     const me = this.users.get(ws);
     if (!me) return false;
     return can(me, 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
@@ -223,7 +244,7 @@ export class SelfMessenger implements MessengerPort {
   // owner·channels.manage 예외 없음(감시 방지: 관리 권한이 비공개 채널 멤버를 "정할" 권리를 주지 않는다).
   // 공개 채널은 기존 16b canManageChannel 규칙을 그대로 따른다.
   private canAdminChannel(ws: WebSocket, ch: ChatChannel | undefined): boolean {
-    if (!this.authDeps) return true;
+    if (this.bypassAuth(ws)) return true;
     if (!ch) return false;
     if ((ch.visibility ?? 'public') === 'private') {
       const me = this.users.get(ws);
@@ -231,11 +252,11 @@ export class SelfMessenger implements MessengerPort {
     }
     return this.canManageChannel(ws, ch);
   }
-  // Phase 16c: 채널 목록 가시성 게이트. authDeps 미주입(무인증)이면 전부 접근(회귀 금지).
-  // 공개는 전원. 비공개는 만든 사람 본인 또는 초대된 멤버만 — owner·channels.manage 예외 없음
-  // (감시 방지: 관리 권한이 비공개 채널을 "볼" 권리를 주지 않는다).
+  // Phase 16c: 채널 목록 가시성 게이트. authDeps 미주입(무인증) 또는 free 소켓(Task 1)이면 전부
+  // 접근(회귀 금지). 공개는 전원. 비공개는 만든 사람 본인 또는 초대된 멤버만 — owner·channels.manage
+  // 예외 없음(감시 방지: 관리 권한이 비공개 채널을 "볼" 권리를 주지 않는다).
   private canAccessChannel(ws: WebSocket, ch: ChatChannel): boolean {
-    if (!this.authDeps) return true;
+    if (this.bypassAuth(ws)) return true;
     if ((ch.visibility ?? 'public') !== 'private') return true;
     const me = this.users.get(ws);
     if (!me) return false;
@@ -256,7 +277,7 @@ export class SelfMessenger implements MessengerPort {
     const brainNames = this.brainNames();
     const defaultBrain = this.defaultBrain();
     for (const c of this.wss?.clients ?? []) {
-      if (c.readyState !== WebSocket.OPEN || !this.authed.has(c)) continue;
+      if (c.readyState !== WebSocket.OPEN || !this.isConnected(c)) continue;
       const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(c, ch)) : all;
       try { c.send(JSON.stringify({ t: 'channels', list, brainNames, defaultBrain })); } catch { /* 격리 */ }
     }
@@ -275,7 +296,8 @@ export class SelfMessenger implements MessengerPort {
   private async handleFrame(ws: WebSocket, raw: string): Promise<void> {
     let f: Record<string, unknown>;
     try { f = JSON.parse(raw) as Record<string, unknown>; } catch { return; } // 손상 무시
-    if (this.authDeps && !this.authed.has(ws)) {
+    // Task 1: free 소켓(계정0+루프백)은 authed에 없어도 매 프레임 재판정으로 이 게이트를 건너뛴다.
+    if (this.authDeps && !this.isConnected(ws)) {
       const sess = f?.t === 'auth' && typeof f.token === 'string' ? this.authDeps.sessions.resolve(f.token) : null;
       const acc = sess ? this.authDeps.accounts.get(sess.userId) : null;
       if (acc && acc.status === 'active') {

@@ -5,6 +5,7 @@ import { SessionStore } from './session-store';
 import type { AuthSettings, OidcSettings } from './auth.config';
 import { readSetupCode, clearSetupCode } from './setup-code';
 import { OidcService, PollStore } from './oidc';
+import { isLoopback } from '../mcp/mcp-http';
 
 // /auth/* http 창구(스펙 §2.3). 파싱/응답만 — 로직은 store에 위임. CORS 개방(*):
 // 자격증명은 본문으로만 오가고 쿠키를 안 쓰므로 교차출처 허용이 안전하다(렌더러는 file://).
@@ -92,10 +93,15 @@ export class AuthHttp {
 
     if (req.method === 'GET' && url === '/auth/status') {
       const s = this.deps.settings.load();
+      const accountCount = accounts.count();
+      // 스탠드얼론 설계 §2.1: 계정 0개+요청이 루프백이면 게이트 생략 가능(렌더러가 참조). 헤더는 절대
+      // 보지 않는다(신뢰 금지 — 8c-2 isLoopback 관성) — req.socket.remoteAddress만.
+      const localFree = accountCount === 0 && isLoopback(req.socket.remoteAddress);
       this.json(res, 200, {
-        configured: accounts.count() > 0,
+        configured: accountCount > 0,
         oidc: !!s.oidc,
         ...(s.serverName ? { serverName: s.serverName } : {}),
+        localFree,
       });
       return true;
     }

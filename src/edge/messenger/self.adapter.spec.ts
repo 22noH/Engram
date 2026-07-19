@@ -515,6 +515,9 @@ describe('세션 인증(Phase 16a)', () => {
 
   it('무효/만료 세션 → authErr + 종료', async () => {
     const deps = makeAuthDeps(dir);
+    // Task 1(스탠드얼론): 계정0+루프백은 free 소켓이라 이 시나리오와 무관 — 계정을 만들어 "설정된 서버"
+    // 전제를 명시적으로 성립시킨다(계정 0개였다면 이 wrong-token auth 자체가 free 경로로 무시된다).
+    deps.accounts.createPassword('someone', 'pw', 'Someone', { status: 'active' });
     await makeServer(deps);
     const c = await connect();
     c.send(JSON.stringify({ t: 'auth', token: 'wrong' }));
@@ -611,6 +614,8 @@ describe('세션 인증(Phase 16a)', () => {
   // 결정적이며(5초 타임아웃은 서버 상수) 매직도 없다. 테스트 자체 timeout만 여유있게 늘린다.
   it('5초간 침묵하면 auth 타임아웃 → authErr 전송 후 소켓을 닫는다', async () => {
     const deps = makeAuthDeps(dir);
+    // Task 1: 계정0+루프백이면 free 소켓이라 타임아웃으로 끊기지 않는다 — "설정된 서버" 전제를 성립.
+    deps.accounts.createPassword('someone', 'pw', 'Someone', { status: 'active' });
     await makeServer(deps);
     const c = await connect();
     const framePromise = nextFrame(c);
@@ -619,6 +624,80 @@ describe('세션 인증(Phase 16a)', () => {
     expect(f.t).toBe('authErr');
     await closePromise;
   }, 8000);
+});
+
+describe('스탠드얼론 무인증(Task 1, 설계 §2.1)', () => {
+  let dir: string;
+  let sm: SelfMessenger | undefined;
+  let clients: WebSocket[];
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-free-'));
+    clients = [];
+  });
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    for (const c of clients) c.terminate();
+    clients = [];
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function makeServer(deps: AuthDeps): Promise<ChatStore> {
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels(); // general 생성
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    return store;
+  }
+  async function connect(): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm!.addressPort()}`);
+    await once(c, 'open');
+    clients.push(c);
+    return c;
+  }
+
+  it('케이스④: 미설정+루프백 ws는 auth 프레임 없이 채널 프레임을 바로 사용한다(brain 권한 경로 재사용)', async () => {
+    const deps = makeAuthDeps(dir); // accounts.count() === 0
+    const store = await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'hi' })); // auth 프레임 생략
+    const f = await nextFrame(c);
+    expect(f.t).toBe('msg');
+    expect(f.message.authorId).toBe('owner'); // 무인증(brain 모드)과 동일한 귀속 규칙
+    expect(store.history('general')).toHaveLength(1);
+  });
+
+  it('케이스⑤: 계정 생성 후에는 같은(이미 연결된) 소켓도 다음 프레임부터 거부된다(캐시 없이 매번 재판정)', async () => {
+    const deps = makeAuthDeps(dir);
+    const store = await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'first' }));
+    const f1 = await nextFrame(c);
+    expect(f1.t).toBe('msg'); // 아직 계정 0개 → free 통과
+
+    deps.accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' }); // 최초 계정 생성
+
+    const closePromise = once(c, 'close');
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'second' })); // 같은 소켓, auth 프레임 없음
+    const f2 = await nextFrame(c);
+    expect(f2.t).toBe('authErr'); // 현행 거부(설정된 서버와 동일 취급)
+    await closePromise;
+    expect(store.history('general').map((m) => m.text)).toEqual(['first']); // second는 저장 안 됨
+  });
+
+  it('케이스⑥: 비루프백 소켓은 미설정(계정0)이어도 현행 게이트를 유지한다(isLoopback 모킹)', async () => {
+    jest.spyOn(mcpHttp, 'isLoopback').mockReturnValue(false);
+    const deps = makeAuthDeps(dir); // accounts.count() === 0
+    await makeServer(deps);
+    const c = await connect();
+    c.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'x' })); // auth 프레임 없음
+    const closePromise = once(c, 'close');
+    const f = await nextFrame(c);
+    expect(f.t).toBe('authErr');
+    await closePromise;
+  });
 });
 
 describe('admin 프레임(Phase 16a)', () => {
