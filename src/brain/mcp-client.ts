@@ -1,8 +1,23 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { WebToolDef } from './web-tools';
 import { McpServerConfig } from './mcp-config';
+
+// cfg.url이 있으면 Streamable HTTP, 없으면 기존 Stdio(스펙 §3.3) — 순수 함수라 유닛 테스트에서
+// 전송 타입을 직접 단언할 수 있는 seam으로 분리(McpSession.create 내부에 인라인하지 않음).
+// 401/OAuth 필요 서버는 connect() 쪽 catch에서 이미 console.error 로그 후 false 반환(호출부는 스킵).
+export function createMcpTransport(cfg: McpServerConfig): Transport {
+  if (cfg.url) return new StreamableHTTPClientTransport(new URL(cfg.url));
+  return new StdioClientTransport({
+    // command는 T2에서 옵셔널화(url형 항목 지원 §3.2) — url이 없을 때만 여기 도달하므로 command는
+    // 로더 계약상 항상 존재하지만, 방어적으로 빈 문자열 폴백을 유지(never-throw 원칙).
+    command: cfg.command ?? '',
+    args: cfg.args,
+    env: { ...getDefaultEnvironment(), ...cfg.env }, // 기본 안전 env(PATH 등) + 사용자 env
+  });
+}
 
 export const MCP_TOOL_PREFIX = 'mcp__';
 const MAX_OUTPUT = 50_000; // 웹도구와 동일 상한(web-tools.ts FETCH_CHAR_LIMIT)
@@ -23,18 +38,7 @@ export class McpSession {
   ) {}
 
   static create(name: string, cfg: McpServerConfig): McpSession {
-    return new McpSession(
-      name,
-      () =>
-        new StdioClientTransport({
-          // command는 T2에서 옵셔널화(url형 항목 지원 §3.2) — http 전송은 T3(mcp-client HTTP 지원)에서
-          // 배선 예정. 그 전까지 url-only cfg가 여기 들어오면 빈 커맨드로 spawn 실패 → connect()가
-          // false를 반환해 조용히 스킵된다(never-throw 계약 유지, 기존 stdio 항목엔 영향 없음).
-          command: cfg.command ?? '',
-          args: cfg.args,
-          env: { ...getDefaultEnvironment(), ...cfg.env }, // 기본 안전 env(PATH 등) + 사용자 env
-        }),
-    );
+    return new McpSession(name, () => createMcpTransport(cfg));
   }
 
   static createForTest(name: string, transport: Transport): McpSession {

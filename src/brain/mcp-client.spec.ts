@@ -1,7 +1,10 @@
+import * as net from 'net';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { McpSession, MCP_TOOL_PREFIX } from './mcp-client';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { McpSession, MCP_TOOL_PREFIX, createMcpTransport } from './mcp-client';
 
 interface TestBehavior { slow?: boolean; huge?: boolean; isError?: boolean; image?: boolean }
 
@@ -108,5 +111,39 @@ describe('McpSession', () => {
     const [clientT] = InMemoryTransport.createLinkedPair(); // 서버측 미접속 = initialize 영원히 무응답
     const s = McpSession.createForTest('test', clientT);
     expect(await s.connect(150)).toBe(false);
+  });
+
+  // T3: http 전송(§3.3) — cfg.url이 있으면 Streamable HTTP, 없으면 기존 Stdio.
+  describe('createMcpTransport (http 전송 seam)', () => {
+    it('url 항목 → StreamableHTTPClientTransport 생성', () => {
+      const t = createMcpTransport({ url: 'http://127.0.0.1:1/mcp', args: [], env: {} });
+      expect(t).toBeInstanceOf(StreamableHTTPClientTransport);
+      void t.close();
+    });
+
+    it('command 항목(url 없음) → 기존대로 StdioClientTransport 생성', () => {
+      const t = createMcpTransport({ command: 'node', args: ['-e', '0'], env: {} });
+      expect(t).toBeInstanceOf(StdioClientTransport);
+    });
+  });
+
+  describe('McpSession.create + http 전송 connect', () => {
+    // 닫힌(방금 리슨 후 close한) 로컬 포트 = ECONNREFUSED 보장 — 다른 프로세스와 충돌 없이 재현 가능.
+    async function closedLocalPort(): Promise<number> {
+      const srv = net.createServer();
+      const port = await new Promise<number>((resolve, reject) => {
+        srv.once('error', reject);
+        srv.listen(0, '127.0.0.1', () => resolve((srv.address() as net.AddressInfo).port));
+      });
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+      return port;
+    }
+
+    it('연결 거부(닫힌 포트) → connect false, throw 없음, 언핸들드 rejection 없음', async () => {
+      const port = await closedLocalPort();
+      const s = McpSession.create('remote', { url: `http://127.0.0.1:${port}/mcp`, args: [], env: {} });
+      await expect(s.connect(2_000)).resolves.toBe(false);
+      await s.close();
+    }, 5_000);
   });
 });
