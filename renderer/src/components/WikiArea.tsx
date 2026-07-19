@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit } from '../../../shared/protocol';
 import { renderMarkdown } from '../render/markdown';
 import { T } from '../i18n';
@@ -44,6 +45,13 @@ export function WikiArea(props: {
   // onSearch의 최신 참조(App이 매 렌더 새 콜백을 넘겨도 디바운스 effect를 재실행하지 않기 위함 — App의 ref 패턴).
   const onSearchRef = useRef(props.onSearch); onSearchRef.current = props.onSearch;
 
+  // 목업(2026-07-19) 레이아웃 픽스: 사이드바(세그먼트+검색+목록)는 #side(모드탭 아래) 안의 단일 컬럼에
+  // 살아야 한다. Channels가 위키 모드일 때 #wikiSideSlot을 그 자리에 마운트해 두면, 여기서 그 DOM
+  // 노드로 사이드바를 포털한다 — 별도 컬럼(#wikiArea 안 wikiSide)으로 새지 않는다.
+  // 슬롯이 없으면(예: 이 컴포넌트 단독 렌더 테스트) 기존처럼 #wikiArea 안에 그대로 인라인 렌더(회귀 없음).
+  const [sideSlot, setSideSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSideSlot(document.getElementById('wikiSideSlot')); }, []);
+
   // 다른 페이지로 전환하면 편집 모드 해제.
   useEffect(() => { setEditing(false); }, [props.openPage?.slug]);
 
@@ -74,47 +82,51 @@ export function WikiArea(props: {
     });
   };
 
+  const sidebar = (
+    <div className="wikiSide">
+      <div className="wikiSeg">
+        <button type="button" className={'segBtn' + (tab === 'pages' ? ' on' : '')} onClick={() => setTab('pages')}>
+          {T.wikiPages}
+        </button>
+        <button type="button" className={'segBtn' + (tab === 'inbox' ? ' on' : '')} onClick={() => setTab('inbox')}>
+          {T.wikiInbox}
+          {pendingCount > 0 && <span className="segBadge">{pendingCount}</span>}
+        </button>
+      </div>
+      <div className="wikiSearch">
+        <input type="text" placeholder={T.wikiSearchPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      </div>
+      <div className="wikiList">
+        {tab === 'pages' && (
+          q === '' ? (
+            props.pages.map((p) => (
+              <div key={p.slug} className={'pitem' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
+                <div className="t">{p.title}</div>
+                <div className="m">
+                  <StatusPill status={p.status} />
+                  <span className="cat">{p.category}</span>
+                  <span className="date">{formatDate(p.updated)}</span>
+                </div>
+              </div>
+            ))
+          ) : props.searchResults.length === 0 ? (
+            <div className="empty">{T.wikiNoResults}</div>
+          ) : (
+            props.searchResults.map((h) => (
+              <div key={h.slug} className={'pitem' + (open?.slug === h.slug ? ' sel' : '')} onClick={() => props.onOpenPage(h.slug)}>
+                <div className="t">{h.title}</div>
+                <div className="snippet">{h.snippet}</div>
+              </div>
+            ))
+          )
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div id="wikiArea">
-      <div className="wikiSide">
-        <div className="wikiSeg">
-          <button type="button" className={'segBtn' + (tab === 'pages' ? ' on' : '')} onClick={() => setTab('pages')}>
-            {T.wikiPages}
-          </button>
-          <button type="button" className={'segBtn' + (tab === 'inbox' ? ' on' : '')} onClick={() => setTab('inbox')}>
-            {T.wikiInbox}
-            {pendingCount > 0 && <span className="segBadge">{pendingCount}</span>}
-          </button>
-        </div>
-        <div className="wikiSearch">
-          <input type="text" placeholder={T.wikiSearchPh} value={filter} onChange={(e) => setFilter(e.target.value)} />
-        </div>
-        <div className="wikiList">
-          {tab === 'pages' && (
-            q === '' ? (
-              props.pages.map((p) => (
-                <div key={p.slug} className={'pitem' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
-                  <div className="t">{p.title}</div>
-                  <div className="m">
-                    <StatusPill status={p.status} />
-                    <span className="cat">{p.category}</span>
-                    <span className="date">{formatDate(p.updated)}</span>
-                  </div>
-                </div>
-              ))
-            ) : props.searchResults.length === 0 ? (
-              <div className="empty">{T.wikiNoResults}</div>
-            ) : (
-              props.searchResults.map((h) => (
-                <div key={h.slug} className={'pitem' + (open?.slug === h.slug ? ' sel' : '')} onClick={() => props.onOpenPage(h.slug)}>
-                  <div className="t">{h.title}</div>
-                  <div className="snippet">{h.snippet}</div>
-                </div>
-              ))
-            )
-          )}
-        </div>
-      </div>
+      {sideSlot ? createPortal(sidebar, sideSlot) : sidebar}
 
       <div className="wikiDocPane">
         {tab === 'pages' ? (

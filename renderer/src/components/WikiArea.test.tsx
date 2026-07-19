@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { WikiArea } from './WikiArea';
+import { Channels } from './Channels';
 import { T } from '../i18n';
 import type { WikiPageMeta, WikiPageDto, ProposalDto } from '../../../shared/protocol';
 
@@ -190,5 +191,34 @@ describe('WikiArea', () => {
     renderDoc({ openPage: draftPage, canEdit: true, canUnpublish: true, canDelete: true });
     expect(screen.queryByRole('button', { name: /edit|수정/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /unpublish|내리기/i })).toBeNull();
+  });
+
+  // 목업(2026-07-19) 레이아웃 픽스 회귀: 위키 모드에선 Channels가 그리는 #side(모드탭 아래) 안에
+  // 사이드바(세그먼트+검색+목록)가 포털돼야 한다 — #wikiArea 안 별도 컬럼(3컬럼 버그)이 아니라
+  // 단일 컬럼(모드탭+세그먼트+검색+목록)이어야 한다.
+  it('위키 모드: 사이드바가 #side 안(모드탭 아래)의 단일 컬럼에 렌더된다', () => {
+    const channelsBase = {
+      channels: [], current: null, mode: 'wiki' as const, canManageChannels: false,
+      onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {}, onManageMembers: () => {},
+    };
+    const { container } = render(
+      <>
+        <Channels {...channelsBase} />
+        <WikiArea pages={pages} openPage={null} proposals={[]} canApprove={true} {...noActions} onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />
+      </>,
+    );
+    const side = container.querySelector('#side');
+    expect(side).toBeTruthy();
+    // 모드탭과 세그먼트/검색/목록이 같은 #side 컬럼 안에.
+    expect(side!.querySelector('#modetabs')).toBeTruthy();
+    expect(side!.querySelector('.wikiSeg')).toBeTruthy();
+    expect(side!.querySelector('.wikiSearch')).toBeTruthy();
+    expect(side!.querySelector('.wikiList')).toBeTruthy();
+    expect(screen.getByText('Alpha')).toBeInTheDocument();
+    // 문서 페인(#wikiArea) 쪽엔 사이드바가 중복 렌더되지 않는다(별도 컬럼 제거 확인).
+    const wikiArea = container.querySelector('#wikiArea');
+    expect(wikiArea).toBeTruthy();
+    expect(wikiArea!.querySelector('.wikiSeg')).toBeNull();
+    expect(wikiArea!.querySelector('.wikiSearch')).toBeNull();
   });
 });

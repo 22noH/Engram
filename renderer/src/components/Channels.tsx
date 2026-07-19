@@ -78,6 +78,11 @@ export function Channels(props: {
           </div>
         ))}
       </div>
+      {mode === 'wiki' && (
+        // 목업(2026-07-19) 레이아웃 픽스: 위키 사이드바(세그먼트+검색+목록)는 WikiArea가 여기로
+        // 포털해 넣는다(#side=모드탭 아래 단일 컬럼) — WikiArea.tsx의 sideSlot 참고.
+        <div id="wikiSideSlot" />
+      )}
       {mode !== 'wiki' && mode !== 'admin' && (
         <div id="channels">
           {visible.map((c) => (
