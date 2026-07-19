@@ -5,8 +5,10 @@ import type { ClaudeMcpEntry } from '../brain/claude-mcp-import';
 
 export interface McpServer {
   name: string;
-  command: string;
+  command?: string;
   args?: string[];
+  url?: string;
+  source?: 'claude';
 }
 
 // mcp.json 읽기(fault-tolerant, 없거나 깨짐 → 기본 골격 {mcpServers:{}}).
@@ -21,7 +23,8 @@ function readMcpConfig(configDir: string): { mcpServers?: Record<string, unknown
   return { mcpServers: {} };
 }
 
-// MCP 서버 목록 (설정창 UI용). name·command·args(있으면) 반환.
+// MCP 서버 목록 (설정창 UI용). name·command 또는 url(command 없는 http형)·args(있으면)·
+// source(클로드 미러 항목이면 'claude') 반환.
 export function listMcpServersFile(configDir: string): McpServer[] {
   const cfg = readMcpConfig(configDir);
   const servers = cfg.mcpServers;
@@ -33,10 +36,18 @@ export function listMcpServersFile(configDir: string): McpServer[] {
     const s = (servers as Record<string, Record<string, unknown>>)[name];
     if (!s || typeof s !== 'object') continue;
     const command = typeof s.command === 'string' ? s.command.trim() : '';
-    if (!command) continue;
-    const server: McpServer = { name, command };
-    const args = Array.isArray(s.args) ? (s.args as unknown[]).filter((a): a is string => typeof a === 'string') : [];
-    if (args.length > 0) server.args = args; // 빈 args는 키 자체 생략(Claude Code 포맷 관례)
+    const url = typeof s.url === 'string' ? s.url.trim() : '';
+    if (!command && !url) continue; // 둘 다 없으면 표시할 게 없음 — 스킵
+
+    const server: McpServer = { name };
+    if (command) {
+      server.command = command;
+      const args = Array.isArray(s.args) ? (s.args as unknown[]).filter((a): a is string => typeof a === 'string') : [];
+      if (args.length > 0) server.args = args; // 빈 args는 키 자체 생략(Claude Code 포맷 관례)
+    } else {
+      server.url = url;
+    }
+    if (s.source === 'claude') server.source = 'claude';
     result.push(server);
   }
   return result;

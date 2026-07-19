@@ -10,7 +10,8 @@ import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
 import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
-import { listMcpServersFile, addMcpServer, removeMcpServer } from './mcp-file';
+import { listMcpServersFile, addMcpServer, removeMcpServer, mirrorClaudeMcp } from './mcp-file';
+import { readClaudeMcpServers } from '../brain/claude-mcp-import';
 import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList, getMcpWriteMode, setMcpWriteMode } from './permissions-file';
 import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
 import { listSchedules, removeScheduleFromFile } from './schedules-file';
@@ -299,6 +300,10 @@ function registerIpc(): void {
   ipcMain.handle('engram:add-mcp-server', (_e, name: string, command: string, argsLine: string) =>
     addMcpServer(configDir, name, command, argsLine));
   ipcMain.handle('engram:remove-mcp-server', (_e, name: string) => { removeMcpServer(configDir, name); });
+  ipcMain.handle('engram:sync-claude-mcp', () => {
+    mirrorClaudeMcp(configDir, readClaudeMcpServers());
+    return listMcpServersFile(configDir);
+  });
 }
 
 // ---- 부팅 ----

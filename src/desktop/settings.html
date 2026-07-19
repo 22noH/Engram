@@ -324,6 +324,14 @@
         </select></span>
       </div>
     </div>
+    <div class="grp-h" style="display:flex;align-items:center;gap:8px">
+      <span data-t="mcpSynced" style="flex:1"></span>
+      <button id="btn-mcp-sync" data-t="refresh" style="font-size:11px;padding:3px 10px;flex:none"></button>
+    </div>
+    <div class="grp" id="mcp-synced-grp"></div>
+    <div class="cap" data-t="mcpSyncedCap"></div>
+
+    <div class="grp-h" data-t="addManual"></div>
     <div class="grp" id="mcp-grp"></div>
     <div class="cap" data-t="mcpCap"></div>
     <p class="cap ok" id="mcp-hint" hidden></p>
@@ -429,6 +437,9 @@
       wikiCap: '비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) · ENGRAM_WIKI_REMOTE 환경변수가 있으면 그게 우선이에요',
       mcpCap: 'AI에 도구를 꽂는 표준(MCP) 서버 목록 — Claude Code의 .mcp.json과 같은 포맷이라 파일을 직접 편집해도 돼요',
       mcpEmpty: '등록된 MCP 서버가 없어요',
+      mcpSynced: 'Claude에서 동기화됨',
+      mcpSyncedEmpty: '동기화된 서버가 없어요',
+      mcpSyncedCap: 'Claude에서 관리하세요 — 여기서는 편집할 수 없어요. 새로고침해도 두뇌 연결은 다음 대화부터 적용돼요',
       mcpExpose: '이 엔그램을 외부 도구에서 쓰기',
       mcpExposeCap: '같은 PC의 Claude Code·Codex 등에서 위 명령으로 접속 — 위키 검색·읽기·제안과 모델 위임(ask_brain)이 도구로 제공돼요 (앱 실행 중일 때, 이 PC에서만). 구형 클라이언트는 node dist/src/mcp-bridge.js 브리지로도 접속 가능해요',
       mcpNameRule: '이름은 영소문자·숫자·-·_만, 중복 불가',
@@ -491,6 +502,9 @@
       wikiCap: 'Empty = local only · auth is standard git (SSH/token) · the ENGRAM_WIKI_REMOTE env var wins if set',
       mcpCap: "MCP servers — the standard way to plug tools into AI. Same format as Claude Code's .mcp.json, so editing the file directly works too",
       mcpEmpty: 'No MCP servers',
+      mcpSynced: 'Synced from Claude',
+      mcpSyncedEmpty: 'No synced servers',
+      mcpSyncedCap: 'Managed in Claude — read-only here. Refresh applies from your next conversation onward',
       mcpExpose: 'Use this Engram from external tools',
       mcpExposeCap: 'Connect from Claude Code, Codex, etc. on this PC with the command above — wiki search/read/propose and model delegation (ask_brain) become tools (while the app is running, this PC only). Older clients can use the node dist/src/mcp-bridge.js bridge',
       mcpNameRule: 'Lowercase letters, digits, - and _ only; no duplicates',
@@ -520,7 +534,8 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
-      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7', t.mcpWrite],
+      'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7', t.mcpWrite,
+        t.mcpSynced, t.mcpSyncedCap, t.mcpSyncedEmpty],
       'sec-messenger': ['Discord', t.save],
       'sec-advanced': [t.secAdvanced, t.openData, t.openLogs, t.openConfig],
     };
@@ -1295,16 +1310,45 @@
       nameInput.focus();
     }
 
+    // 서버 요약 문자열: command(+args)가 있으면 그걸, 없으면(http형) url을 표시.
+    function mcpSummary(s) {
+      if (s.command) return s.args && s.args.length ? s.command + ' ' + s.args.join(' ') : s.command;
+      return s.url || '';
+    }
+
+    // 읽기 전용: Claude에서 동기화된 서버(source==='claude') — 삭제·수정 불가.
+    function renderMcpSynced() {
+      const grp = $('mcp-synced-grp');
+      grp.textContent = '';
+      const synced = mcpServers.filter((s) => s.source === 'claude');
+      if (synced.length === 0) {
+        const row = document.createElement('div'); row.className = 'li';
+        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.mcpSyncedEmpty;
+        row.appendChild(label); grp.appendChild(row);
+        return;
+      }
+      for (const s of synced) {
+        const row = document.createElement('div'); row.className = 'li';
+        const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.textContent = s.name;
+        const summary = document.createElement('span');
+        summary.style.color = 'var(--muted)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
+        summary.style.overflow = 'hidden'; summary.style.textOverflow = 'ellipsis'; summary.style.whiteSpace = 'nowrap'; summary.style.maxWidth = '260px';
+        summary.textContent = mcpSummary(s);
+        row.append(name, summary); grp.appendChild(row);
+      }
+    }
+
     function renderMcpServers() {
       $('mcp-hint').hidden = true;
       const grp = $('mcp-grp');
       grp.textContent = '';
-      if (mcpServers.length === 0) {
+      const manual = mcpServers.filter((s) => s.source !== 'claude');
+      if (manual.length === 0) {
         const row = document.createElement('div'); row.className = 'li';
         const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.mcpEmpty;
         row.appendChild(label); grp.appendChild(row);
       }
-      for (const s of mcpServers) {
+      for (const s of manual) {
         const row = document.createElement('div'); row.className = 'li';
         const minus = document.createElement('button'); minus.className = 'minus'; minus.textContent = '−';
         minus.setAttribute('aria-label', t.remove + ' ' + s.name);
@@ -1317,7 +1361,7 @@
         const summary = document.createElement('span');
         summary.style.color = 'var(--muted)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
         summary.style.overflow = 'hidden'; summary.style.textOverflow = 'ellipsis'; summary.style.whiteSpace = 'nowrap'; summary.style.maxWidth = '260px';
-        summary.textContent = s.args && s.args.length ? s.command + ' ' + s.args.join(' ') : s.command;
+        summary.textContent = mcpSummary(s);
         row.append(minus, name, summary); grp.appendChild(row);
       }
       const add = document.createElement('div'); add.className = 'li add-row'; add.textContent = '＋ ' + t.addManual;
@@ -1328,8 +1372,22 @@
 
     async function loadMcpServers() {
       mcpServers = await window.engram.listMcpServers();
+      renderMcpSynced();
       renderMcpServers();
     }
+
+    $('btn-mcp-sync').onclick = async () => {
+      const btn = $('btn-mcp-sync');
+      btn.disabled = true;
+      try {
+        mcpServers = await window.engram.syncClaudeMcp();
+        renderMcpSynced();
+        renderMcpServers();
+        showMcpHint();
+      } finally {
+        btn.disabled = false;
+      }
+    };
 
     // ---- MCP Expose: 엔그램 외부 접속 명령 표시 ----
     function renderMcpExpose() {

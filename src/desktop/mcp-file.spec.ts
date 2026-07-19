@@ -24,6 +24,21 @@ describe('mcp-file', () => {
     expect(listMcpServersFile(tmp)[0].command).toBe('x');
   });
 
+  it('list: source=claude 항목·command 없는 url형도 포함', () => {
+    fs.writeFileSync(path.join(tmp, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        manual: { command: 'usercmd' },
+        synced: { command: 'npx', args: ['-y', 'x'], env: { A: '1' }, source: 'claude' },
+        remote: { url: 'https://example.com/mcp', source: 'claude' },
+      },
+    }));
+    expect(listMcpServersFile(tmp)).toEqual([
+      { name: 'manual', command: 'usercmd' },
+      { name: 'synced', command: 'npx', args: ['-y', 'x'], source: 'claude' },
+      { name: 'remote', url: 'https://example.com/mcp', source: 'claude' },
+    ]);
+  });
+
   it('remove 멱등 + 다른 항목·기존 파일 필드 보존', () => {
     fs.writeFileSync(path.join(tmp, 'mcp.json'), JSON.stringify({ somethingElse: 1, mcpServers: { a: { command: 'x' }, b: { command: 'y' } } }));
     removeMcpServer(tmp, 'a');

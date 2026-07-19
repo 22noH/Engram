@@ -38,4 +38,5 @@ contextBridge.exposeInMainWorld('engram', {
   listMcpServers: () => ipcRenderer.invoke('engram:list-mcp-servers'),
   addMcpServer: (name: string, command: string, argsLine: string) => ipcRenderer.invoke('engram:add-mcp-server', name, command, argsLine),
   removeMcpServer: (name: string) => ipcRenderer.invoke('engram:remove-mcp-server', name),
+  syncClaudeMcp: () => ipcRenderer.invoke('engram:sync-claude-mcp'),
 });
