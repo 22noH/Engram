@@ -226,11 +226,19 @@
     <div class="cap" id="api-note"></div>
 
     <div class="grp" style="margin-top:16px">
+      <div class="li" id="harness-row" hidden>
+        <label for="harness-sel" style="font-size:13px" data-t="harness"></label>
+        <select id="harness-sel" style="margin-left:auto">
+          <option value="cli" data-t="harnessCli"></option>
+          <option value="engram" data-t="harnessEngram"></option>
+        </select>
+      </div>
       <div class="li" id="default-brain-row" hidden>
         <label for="default-brain" style="font-size:13px" data-t="defaultBrain"></label>
         <select id="default-brain" style="margin-left:auto"></select>
       </div>
     </div>
+    <p class="cap" id="harness-empty" hidden></p>
   </section>
 
   <section id="sec-coding">
@@ -359,6 +367,7 @@
     let brainKeys = [];
     let brainDetailsList = [];
     let editingKey = null;
+    let harnessGroups = { cli: [], engram: [] };
     function updateAddButton() {
       const name = $('ollama-name').value.trim();
       $('btn-ollama').disabled = !name;
@@ -390,7 +399,8 @@
       discordHint: '봇이 아직 없다면 discord.com/developers/applications 에서 만들고 Bot 탭에서 토큰을 발급하세요. 저장한 뒤 "재시작"을 누르면 연결돼요.',
       openData: '데이터 폴더', openLogs: '로그 폴더', openConfig: '설정 폴더',
       advancedHint: '설정 폴더의 JSON 파일(brains · channels · coderepos · schedules)을 직접 고친 뒤에는 "재시작"으로 적용하세요.',
-      defaultBrain: '기본 모델', harnessCli: 'CLI 하네스', harnessEngram: '엔그램 하네스',
+      defaultBrain: '기본 모델', harness: '하네스', harnessCli: 'CLI 하네스', harnessEngram: '엔그램 하네스',
+      harnessEmpty: '이 하네스에 등록된 모델이 없어요 — 로컬 모델을 추가하거나 API 키를 저장하세요',
       secCoding: '코딩', cmdMode: '명령 실행', cmdAuto: '자동', cmdAllow: '제한', cmdOff: '끔',
       cmdHint: '자동 = 아무 명령이나 실행(클로드코드처럼). 제한 = 승인 목록만. 끔 = 파일만, 명령 없음.',
       writePaths: '쓰기 허용 경로', denyPaths: '거부 경로', cmdAllowlist: '명령 허용 목록',
@@ -451,7 +461,8 @@
       discordHint: 'No bot yet? Create one at discord.com/developers/applications and issue a token in the Bot tab. After saving, click Restart to connect.',
       openData: 'Data folder', openLogs: 'Log folder', openConfig: 'Config folder',
       advancedHint: 'If you edit the JSON files (brains · channels · coderepos · schedules) directly, click Restart to apply.',
-      defaultBrain: 'Default model', harnessCli: 'CLI harness', harnessEngram: 'Engram harness',
+      defaultBrain: 'Default model', harness: 'Harness', harnessCli: 'CLI harness', harnessEngram: 'Engram harness',
+      harnessEmpty: 'No models registered for this harness — add a local model or save an API key',
       secCoding: 'Coding', cmdMode: 'Command execution', cmdAuto: 'Auto', cmdAllow: 'Restricted', cmdOff: 'Off',
       cmdHint: 'Auto = run any command (like Claude Code). Restricted = allowlist only. Off = files only, no commands.',
       writePaths: 'Write paths', denyPaths: 'Deny paths', cmdAllowlist: 'Command allowlist',
@@ -502,7 +513,7 @@
     // 검색: 섹션명+설정 라벨 부분일치 → 일치 섹션만 표시
     const SECTION_LABELS = {
       'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
-      'sec-brain': [t.secBrain, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
+      'sec-brain': [t.secBrain, t.harness, t.harnessCli, t.harnessEngram, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
         t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel,
         t.fName, t.fModel, t.fBaseUrl, t.fApiKey, t.fMaxTokens, t.fSearch, t.fSearchKey, t.fUsdIn, t.fUsdOut],
       'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist, t.autoModeHint, t.cmdListCap, t.cmdBuiltin, t.resetDefault],
@@ -860,24 +871,24 @@
       const brains = await window.engram.listBrains();
       const sel = $('default-brain');
       sel.textContent = '';
-      const cli = brains.filter((b) => !/^(anthropic|openai)-api$/.test(b.provider));
-      const engram = brains.filter((b) => /^(anthropic|openai)-api$/.test(b.provider));
-      const addGroup = (label, items) => {
-        if (!items.length) return;
-        const og = document.createElement('optgroup');
-        og.label = label;
-        for (const b of items) {
-          const opt = document.createElement('option');
-          opt.value = b.key;
-          opt.textContent = b.model ? `${b.key} · ${b.model}` : b.key;
-          if (b.isDefault) opt.selected = true;
-          og.appendChild(opt);
-        }
-        sel.appendChild(og);
+      harnessGroups = {
+        cli: brains.filter((b) => !/^(anthropic|openai)-api$/.test(b.provider)),
+        engram: brains.filter((b) => /^(anthropic|openai)-api$/.test(b.provider)),
       };
-      addGroup(t.harnessCli, cli);
-      addGroup(t.harnessEngram, engram);
+      // 하네스는 별도 선택 — 기본 모델의 하네스가 현재값, 모델 드롭다운은 그 하네스의 모델만.
+      const def = brains.find((b) => b.isDefault);
+      const cur = def && /^(anthropic|openai)-api$/.test(def.provider) ? 'engram' : 'cli';
+      $('harness-sel').value = cur;
+      for (const b of harnessGroups[cur]) {
+        const opt = document.createElement('option');
+        opt.value = b.key;
+        opt.textContent = b.model ? `${b.key} · ${b.model}` : b.key;
+        if (b.isDefault) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      $('harness-row').hidden = brains.length === 0;
       $('default-brain-row').hidden = brains.length === 0;
+      $('harness-empty').hidden = true;
 
       brainKeys = brains.map((b) => b.key);
       brainDetailsList = await window.engram.listBrainDetails();
@@ -887,6 +898,21 @@
     }
     $('default-brain').onchange = async () => {
       await window.engram.setDefaultBrain($('default-brain').value);
+      await loadBrains();
+    };
+
+    // 하네스 전환 — 그 하네스의 모델(기존 기본이 있으면 유지 불가하므로 첫 항목)을 기본으로 지정.
+    // 빈 하네스면 안내만 띄우고 되돌린다(무변경).
+    $('harness-sel').onchange = async () => {
+      const v = $('harness-sel').value;
+      const items = harnessGroups[v] || [];
+      if (!items.length) {
+        await loadBrains(); // 선택 되돌림(loadBrains가 안내를 숨기므로 그 뒤에 띄운다)
+        $('harness-empty').textContent = t.harnessEmpty;
+        $('harness-empty').hidden = false;
+        return;
+      }
+      await window.engram.setDefaultBrain(items[0].key);
       await loadBrains();
     };
 
