@@ -69,6 +69,7 @@ export const apiLogin = (loginId: string, password: string) =>
 export interface Overview {
   members: number; pendingMembers: number; channels: number;
   wikiPages: number; pendingProposals: number; todayMessages: number;
+  pendingMemberNames: string[]; pendingProposalTitles: string[];
 }
 
 export async function fetchOverview(): Promise<Overview | null> {

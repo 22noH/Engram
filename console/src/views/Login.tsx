@@ -4,7 +4,7 @@ import { apiLogin, saveSession, type Session } from '../api';
 
 // 목업 갭: 로그인 화면은 원본 목업에 없다(①셋업만 있음) — 브리프 지시대로 .setup 카드의
 // 시각 문법을 그대로 재사용해 구현. 컨트롤러가 이 화면을 목업에 추가해 승인해야 한다(report 참조).
-export function Login({ serverName, onDone }: { serverName: string; onDone: (s: Session) => void }) {
+export function Login({ onDone }: { onDone: (s: Session) => void }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +33,7 @@ export function Login({ serverName, onDone }: { serverName: string; onDone: (s: 
     <div className="page">
       <form className="setup" onSubmit={submit}>
         <div className="wordmark">{T.wordmark}</div>
-        <h2>{T.signInTitle(serverName)}</h2>
+        <h2>{T.signInTitle}</h2>
         <label htmlFor="loginId">{T.loginIdLabel}</label>
         <input id="loginId" placeholder={T.loginIdLabel}
                value={loginId} onChange={(e) => setLoginId(e.target.value)} />

@@ -14,8 +14,8 @@ export const T = {
   loginIdLabel: ko ? '아이디' : 'ID',
   passwordLabel: ko ? '비밀번호' : 'Password',
   setupSubmit: ko ? '서버 만들기' : 'Create server',
-  // ── 로그인 (목업 갭 — setup 카드 문법 재사용, 컨트롤러 승인 대기) ──
-  signInTitle: (name: string) => (ko ? `${name} 로그인` : `Sign in to ${name}`),
+  // ── 로그인 ──
+  signInTitle: ko ? 'Engram 로그인' : 'Sign in to Engram',
   loginSubmit: ko ? '로그인' : 'Sign in',
   // ── 에러 ──
   errInvalid: ko ? '아이디 또는 비밀번호가 올바르지 않아요' : 'Incorrect ID or password',

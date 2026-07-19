@@ -23,6 +23,7 @@ it('setup 성공 시 Overview 전환+토큰 저장', async () => {
     }), { status: 200 })) // /auth/setup
     .mockResolvedValue(new Response(JSON.stringify({
       members: 1, pendingMembers: 0, channels: 0, wikiPages: 0, pendingProposals: 0, todayMessages: 0,
+      pendingMemberNames: [], pendingProposalTitles: [],
     }), { status: 200 })); // /admin/api/overview (이후 호출 전부)
 
   render(<App />);
@@ -42,7 +43,7 @@ it('configured+무세션=Login', async () => {
     new Response(JSON.stringify({ configured: true, oidc: false, serverName: 'Our Team Server' }), { status: 200 }),
   );
   render(<App />);
-  await waitFor(() => expect(screen.getByText('Sign in to Our Team Server')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Sign in to Engram')).toBeInTheDocument());
   expect(screen.getByLabelText('ID')).toBeInTheDocument();
   expect(screen.getByLabelText('Password')).toBeInTheDocument();
 });
@@ -55,6 +56,7 @@ it('로그인 성공=Overview(타일 4개+처리할 일)', async () => {
     }), { status: 200 })) // /auth/login
     .mockResolvedValue(new Response(JSON.stringify({
       members: 3, pendingMembers: 2, channels: 5, wikiPages: 12, pendingProposals: 1, todayMessages: 148,
+      pendingMemberNames: ['Alice', 'Bob'], pendingProposalTitles: ['New feature'],
     }), { status: 200 })); // /admin/api/overview
 
   render(<App />);
@@ -70,6 +72,8 @@ it('로그인 성공=Overview(타일 4개+처리할 일)', async () => {
   expect(screen.getByText('To-do')).toBeInTheDocument();
   expect(screen.getByText('2 pending members')).toBeInTheDocument();
   expect(screen.getByText('1 pending wiki proposals')).toBeInTheDocument();
+  expect(screen.getByText('Alice, Bob')).toBeInTheDocument();
+  expect(screen.getByText('New feature')).toBeInTheDocument();
 });
 
 it('api 401 응답=Login 복귀', async () => {
@@ -81,6 +85,6 @@ it('api 401 응답=Login 복귀', async () => {
     .mockResolvedValue(new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 })); // /admin/api/overview
 
   render(<App />);
-  await waitFor(() => expect(screen.getByText('Sign in to Our Team Server')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Sign in to Engram')).toBeInTheDocument());
   expect(localStorage.getItem('engram.console.session')).toBeNull();
 });

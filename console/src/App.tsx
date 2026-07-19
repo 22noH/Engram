@@ -36,6 +36,6 @@ export default function App() {
 
   if (view === 'loading') return null;
   if (view === 'setup') return <Setup onDone={onAuthed} />;
-  if (view === 'login') return <Login serverName={serverName} onDone={onAuthed} />;
+  if (view === 'login') return <Login onDone={onAuthed} />;
   return <Overview serverName={serverName} role={session?.user.role ?? 'member'} />;
 }

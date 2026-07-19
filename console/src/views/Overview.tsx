@@ -44,7 +44,10 @@ export function Overview({ serverName, role }: { serverName: string; role: strin
                   <div className="grp">
                     {data.pendingMembers > 0 && (
                       <div className="row">
-                        <div className="who"><div className="n">{T.pendingMembersRow(data.pendingMembers)}</div></div>
+                        <div className="who">
+                          <div className="n">{T.pendingMembersRow(data.pendingMembers)}</div>
+                          {data.pendingMemberNames.length > 0 && <div className="d">{data.pendingMemberNames.join(', ')}</div>}
+                        </div>
                         <div className="btns">
                           <button className="pri" disabled title={T.comingSoon}>{T.goToMembers}</button>
                         </div>
@@ -52,7 +55,10 @@ export function Overview({ serverName, role }: { serverName: string; role: strin
                     )}
                     {data.pendingProposals > 0 && (
                       <div className="row">
-                        <div className="who"><div className="n">{T.pendingProposalsRow(data.pendingProposals)}</div></div>
+                        <div className="who">
+                          <div className="n">{T.pendingProposalsRow(data.pendingProposals)}</div>
+                          {data.pendingProposalTitles.length > 0 && <div className="d">{data.pendingProposalTitles.join(', ')}</div>}
+                        </div>
                         <div className="btns">
                           <button className="pri" disabled title={T.comingSoon}>{T.goToWiki}</button>
                         </div>
