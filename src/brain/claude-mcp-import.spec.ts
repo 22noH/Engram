@@ -448,4 +448,114 @@ describe('claude-mcp-import', () => {
     expect(names).toEqual(['plugin-a-only', 'plugin-b-only', 'shared', 'user-only']);
     expect(entries.find((e) => e.name === 'shared')?.command).toBe('user');
   });
+
+  it('플러그인 .mcp.json 래핑 형태 (mcpServers 키) 판독', () => {
+    const installPath = path.join(tmp, '.claude', 'plugins', 'cache', 'notion', 'unknown');
+    writeFile(
+      path.join(tmp, '.claude', 'plugins', 'installed_plugins.json'),
+      {
+        version: 2,
+        plugins: {
+          'notion@claude-plugins-official': [
+            {
+              scope: 'user',
+              installPath,
+            },
+          ],
+        },
+      },
+    );
+
+    // 래핑 형태: { "mcpServers": { "notion": {...} } }
+    writeFile(path.join(installPath, '.mcp.json'), {
+      mcpServers: {
+        notion: {
+          command: 'npx',
+          args: ['-y', '@notion/mcp'],
+        },
+      },
+    });
+
+    const entries = readClaudeMcpServers(tmp);
+    expect(entries).toEqual([
+      {
+        name: 'notion',
+        command: 'npx',
+        args: ['-y', '@notion/mcp'],
+        pluginName: 'notion',
+      },
+    ]);
+  });
+
+  it('플러그인 .mcp.json 혼합 형태 (bare + wrapped) 판독', () => {
+    // 플러그인 1: bare 형태
+    const installPath1 = path.join(tmp, '.claude', 'plugins', 'cache', 'context7', 'v1');
+    // 플러그인 2: wrapped 형태
+    const installPath2 = path.join(tmp, '.claude', 'plugins', 'cache', 'vercel', 'v1');
+
+    writeFile(
+      path.join(tmp, '.claude', 'plugins', 'installed_plugins.json'),
+      {
+        version: 2,
+        plugins: {
+          'context7@claude-plugins-official': [{ scope: 'user', installPath: installPath1 }],
+          'vercel@claude-plugins-official': [{ scope: 'user', installPath: installPath2 }],
+        },
+      },
+    );
+
+    // bare 형태
+    writeFile(path.join(installPath1, '.mcp.json'), {
+      context7: {
+        command: 'npx',
+        args: ['-y', '@context7/mcp'],
+      },
+    });
+
+    // wrapped 형태
+    writeFile(path.join(installPath2, '.mcp.json'), {
+      mcpServers: {
+        vercel: {
+          command: 'npx',
+          args: ['-y', '@vercel/mcp'],
+        },
+      },
+    });
+
+    const entries = readClaudeMcpServers(tmp);
+    const names = entries.map((e) => e.name).sort();
+    expect(names).toEqual(['context7', 'vercel']);
+    expect(entries.find((e) => e.name === 'context7')?.pluginName).toBe('context7');
+    expect(entries.find((e) => e.name === 'vercel')?.pluginName).toBe('vercel');
+  });
+
+  it('installPath가 빈 문자열이면 플러그인 스킵', () => {
+    writeFile(
+      path.join(tmp, '.claude', 'plugins', 'installed_plugins.json'),
+      {
+        version: 2,
+        plugins: {
+          'empty-path@market': [{ scope: 'user', installPath: '' }],
+        },
+      },
+    );
+
+    const entries = readClaudeMcpServers(tmp);
+    expect(entries).toEqual([]);
+  });
+
+  it('installPath가 공백만 있으면 플러그인 스킵', () => {
+    writeFile(
+      path.join(tmp, '.claude', 'plugins', 'installed_plugins.json'),
+      {
+        version: 2,
+        plugins: {
+          'whitespace-path@market': [{ scope: 'user', installPath: '   ' }],
+        },
+      },
+    );
+
+    const entries = readClaudeMcpServers(tmp);
+    expect(entries).toEqual([]);
+  });
 });

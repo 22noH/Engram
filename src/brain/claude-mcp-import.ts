@@ -65,6 +65,7 @@ function readUserMcpServers(homeDir: string): ClaudeMcpEntry[] {
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return result;
 
     for (const name of Object.keys(servers)) {
+      if (!Object.prototype.hasOwnProperty.call(servers, name)) continue;
       const entry = parseServerEntry(name, servers[name]);
       if (entry) result.push(entry);
     }
@@ -98,6 +99,7 @@ function readPluginMcpServers(homeDir: string): ClaudeMcpEntry[] {
   const pluginKeys = Object.keys(plugins).sort();
 
   for (const registryKey of pluginKeys) {
+    if (!Object.prototype.hasOwnProperty.call(plugins, registryKey)) continue;
     const pluginName = registryKey.split('@')[0];
     const pluginData = plugins[registryKey];
 
@@ -107,21 +109,30 @@ function readPluginMcpServers(homeDir: string): ClaudeMcpEntry[] {
     if (!pluginEntry || typeof pluginEntry !== 'object') continue;
 
     const installPath = (pluginEntry as Record<string, unknown>).installPath;
-    if (typeof installPath !== 'string') continue;
+    if (typeof installPath !== 'string' || !installPath.trim()) continue;
 
     // <installPath>/.mcp.json 읽기
     const mcpJsonPath = path.join(installPath, '.mcp.json');
-    let mcpServers: Record<string, unknown> = {};
+    let mcpData: Record<string, unknown> = {};
 
     try {
-      mcpServers = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8'));
+      mcpData = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8'));
     } catch {
       // 파일 없음/깨진 JSON = skip this plugin
       continue;
     }
 
+    // .mcp.json의 wrapped 형태 처리: { "mcpServers": {...} } 또는 bare: { "server": {...} }
+    let mcpServers: Record<string, unknown> = {};
+    if (mcpData.mcpServers && typeof mcpData.mcpServers === 'object' && !Array.isArray(mcpData.mcpServers)) {
+      mcpServers = mcpData.mcpServers as Record<string, unknown>;
+    } else {
+      mcpServers = mcpData;
+    }
+
     // 각 서버명 파싱
     for (const serverName of Object.keys(mcpServers)) {
+      if (!Object.prototype.hasOwnProperty.call(mcpServers, serverName)) continue;
       const entry = parseServerEntry(serverName, mcpServers[serverName]);
       if (entry) {
         entry.pluginName = pluginName;
