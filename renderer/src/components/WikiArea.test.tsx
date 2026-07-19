@@ -104,6 +104,21 @@ describe('WikiArea', () => {
     expect(screen.getByRole('button', { name: /approve|승인/i })).toBeTruthy();
   });
 
+  it('"전체 내용 보기" 클릭 시 클램프가 해제되고 전체 본문이 보인다', () => {
+    const { container } = render(<WikiArea pages={[]} openPage={null} proposals={proposals} canApprove={true} {...noActions}
+      onOpenPage={() => {}} onApprove={() => {}} onReject={() => {}} />);
+    fireEvent.click(screen.getByText(/inbox|승인함/i));
+    const snip = container.querySelector('.snip');
+    expect(snip).toBeTruthy();
+    expect(snip!.className).not.toMatch(/\bopen\b/); // 초기엔 클램프 상태
+    expect(snip).toHaveTextContent('proposed body'); // 본문은 항상 DOM에 있음(CSS로만 클램프)
+    fireEvent.click(screen.getByRole('button', { name: T.wikiViewFull }));
+    expect(snip!.className).toMatch(/\bopen\b/); // 토글 후 펼침 클래스로 전환
+    expect(snip).toHaveTextContent('proposed body'); // 펼친 뒤에도 전체 본문이 그대로 보임
+    fireEvent.click(screen.getByRole('button', { name: T.wikiViewFull }));
+    expect(snip!.className).not.toMatch(/\bopen\b/); // 다시 클릭하면 클램프로 복귀(토글)
+  });
+
   const pubPage: WikiPageDto = { slug: 'alpha', title: 'Alpha', category: 'cat', status: 'published', updated: '2026-01-02T00:00:00Z', body: 'hello body' };
   const draftPage: WikiPageDto = { ...pubPage, slug: 'beta', title: 'Beta', status: 'draft', body: 'draft body' };
   const noop = () => {};

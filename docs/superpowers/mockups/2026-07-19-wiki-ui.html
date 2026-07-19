@@ -60,6 +60,7 @@
   .pitem .t { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pitem.sel .t { color:var(--accent); }
   .pitem .m { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--dim); }
+  .pitem .m .cat { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pill { display:inline-block; padding:1px 7px; border-radius:99px; font-size:10.5px; font-weight:600;
           border:1px solid var(--line); color:var(--dim); }
   .pill.ext { color:var(--accent); border-color:var(--accent-line); background:var(--accent-soft); }
@@ -92,6 +93,7 @@
   .card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
   .card .ct { font-size:14px; font-weight:650; }
   .card .who { font-size:11.5px; color:var(--dim); }
+  .card .reason { font-size:12.5px; color:var(--dim); }
   .card .snip { font-size:12.5px; color:var(--dim); line-height:1.55; max-height:3.1em; overflow:hidden;
                 border-left:2px solid var(--line); padding-left:10px; }
   .card .cbtns { display:flex; gap:8px; margin-top:2px; }
@@ -118,18 +120,18 @@
     <div class="search"><input placeholder="위키 검색…" /></div>
     <div class="plist">
       <div class="pitem"><div class="t">MCP external access</div>
-        <div class="m"><span class="pill ext">외부</span><span>7월 18일</span></div></div>
+        <div class="m"><span class="pill ext">외부</span><span class="cat">MCP</span><span>7월 18일</span></div></div>
       <div class="pitem"><div class="t">MCP instructions 필드로 기본 사용 규칙 배포하기</div>
-        <div class="m"><span class="pill ext">외부</span><span>7월 19일</span></div></div>
+        <div class="m"><span class="pill ext">외부</span><span class="cat">MCP</span><span>7월 19일</span></div></div>
       <div class="pitem sel"><div class="t">Per-channel brain selection</div>
-        <div class="m"><span class="pill ext">외부</span><span>7월 19일</span></div></div>
+        <div class="m"><span class="pill ext">외부</span><span class="cat">아키텍처</span><span>7월 19일</span></div></div>
     </div>
   </div>
   <div class="doc">
     <div class="dochdr">
       <div class="titles">
         <h2>Per-channel brain selection</h2>
-        <div class="meta"><span class="pill ext">외부</span><span>2026-07-19 · main f00dc7f</span></div>
+        <div class="meta"><span class="pill ext">외부</span><span class="cat">아키텍처</span><span>2026-07-19 · main f00dc7f</span></div>
       </div>
       <div class="acts"><button>수정</button><button>내리기</button><button class="danger">삭제</button></div>
     </div>
@@ -170,6 +172,7 @@
       <div class="card">
         <div class="ct">Deployment split: standalone / preset client / server</div>
         <div class="who">엔그램 제안 · 오늘 21:40</div>
+        <div class="reason">배포 형태가 이미 세 갈래로 갈라졌는데 문서가 없어 재발견 비용이 커 기록을 제안함.</div>
         <div class="snip">스탠드얼론은 채팅 탭과 로그인이 없고, preset 클라이언트는 지정된 서버에만 로그인한다.
           서버는 헤드리스 데몬으로 분리하며 웹 콘솔과 CLI로 관리…</div>
         <div class="cbtns">
@@ -180,6 +183,7 @@
       <div class="card">
         <div class="ct">Electron userData와 npm 패키지명</div>
         <div class="who">엔그램 제안 · 오늘 18:30</div>
+        <div class="reason">npm 개명 후 데이터 폴더가 갈라지는 회귀가 실제로 발생해 재발 방지용으로 기록을 제안함.</div>
         <div class="snip">Electron의 userData 폴더는 package.json 최상위 productName 또는 name을 따른다.
           npm 배포용으로 name을 바꾸면 데이터 폴더가 갈라지므로 productName을 명시…</div>
         <div class="cbtns">

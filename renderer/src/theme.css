@@ -241,7 +241,7 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #wikiArea .dochdr { padding:18px 26px 14px; border-bottom:1px solid var(--line);
                     display:flex; align-items:flex-start; gap:12px; }
 #wikiArea .dochdr .titles { flex:1; min-width:0; }
-#wikiArea .dochdr h2 { margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.01em; }
+#wikiArea .dochdr h2 { margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.01em; text-wrap:balance; }
 #wikiArea .dochdr .meta { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); }
 #wikiArea .acts { display:flex; gap:6px; flex:none; padding-top:2px; }
 #wikiArea .acts button { border:1px solid var(--line); background:transparent; color:var(--text);
