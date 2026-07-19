@@ -41,7 +41,9 @@ export class ClaudeCliBrain implements BrainProvider {
     return new Promise<BrainResult>((resolve) => {
       // 헤드리스 claude -p는 미지정 도구를 거부한다. 프로필/호출이 --allowedTools를 안 주면
       // 웹검색·웹fetch(읽기전용, 안전)를 기본 허용 — 어떤 프로필(judge 등)이 빠뜨려도 막히지 않게.
-      // 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
+      // 엔그램 자체 MCP(mcp__engram=claude mcp add 등록명·mcp__plugin_engram_engram=플러그인 등록명)도
+      // 기본 허용 — CLI 하네스가 지휘자로서 ask_brain(다른 모델 호출)·위키 도구를 쓸 수 있게(루프백 자기 앱,
+      // 미등록 환경에선 무해한 no-op). 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
       const extra = [...this.profile.extraArgs, ...(opts?.extraArgs ?? [])];
       const hasAllowed = extra.includes('--allowedTools');
       const args = [
@@ -49,7 +51,7 @@ export class ClaudeCliBrain implements BrainProvider {
         '--output-format', 'stream-json',
         '--verbose',
         ...(this.profile.model ? ['--model', this.profile.model] : []),
-        ...(hasAllowed ? [] : ['--allowedTools', 'WebSearch,WebFetch']),
+        ...(hasAllowed ? [] : ['--allowedTools', 'WebSearch,WebFetch,mcp__engram,mcp__plugin_engram_engram']),
         ...extra,
       ];
       const child = spawn(this.profile.cli, args, {

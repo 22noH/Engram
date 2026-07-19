@@ -102,7 +102,7 @@ describe('ClaudeCliBrain', () => {
     const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
     const i = args.indexOf('--allowedTools');
     expect(i).toBeGreaterThan(-1);
-    expect(args[i + 1]).toBe('WebSearch,WebFetch');
+    expect(args[i + 1]).toBe('WebSearch,WebFetch,mcp__engram,mcp__plugin_engram_engram');
   });
 
   it('프로필이 --allowedTools를 직접 주면 기본 주입을 안 한다(중복 방지)', async () => {
