@@ -23,6 +23,13 @@ export const CONDUCTOR_DEFAULT = [
   '- Coding delegation is not available yet — delegate only analysis, review, and writing tasks.',
 ].join('\n');
 
+// 도구 사용 지침(MCP-parity Task 4 리뷰 지적) — conductor 게이트(위임 지원 두뇌만)와 무관하게
+// 모든 ReaderAgent 프롬프트에 무조건 포함한다. CLI 하네스(canDelegate 없음 — --allowedTools로
+// MCP 전체가 열림)도 이 문장을 받아야 자동/예약 컨텍스트에서 쓰기 도구를 남용하지 않는다.
+// 문장 자체가 자기 범위 한정("자동/예약 컨텍스트에서만…")이라 일반 채팅에 섞여도 안전.
+export const TOOL_USAGE_GUIDANCE =
+  'In a scheduled or automatic-execution context, only use tools that write externally (sending messages, editing documents, etc.) when the task instruction explicitly calls for it — otherwise favor read-only actions.';
+
 // A 읽기(설계 §7.2). 질문 → RAG 검색 → 컨텍스트 종합 → 답 + 출처.
 // 에이전트 자체는 stateless — 연속성은 ConversationStore의 직전 n턴을 프롬프트에 주입해서 얻는다.
 @Injectable()
@@ -115,6 +122,7 @@ export class ReaderAgent {
       'If there are numbers/time series, include a chart block (the UI renders it as a graph): ```chart {"type":"bar|line|pie","title":"title","labels":["A","B"],"values":[1,2],"unit":"%"} ``` (bar/line = trend/compare, pie = share).',
       'Per-item comparisons also work as a markdown table (| header | ... |) — for changes attach arrows like ▲2.3% (up) / ▼1.1% (down) and the UI colors them green/red. Use - [ ] / - [x] checkboxes for to-do lists.',
       outputDirective('interactive'),
+      TOOL_USAGE_GUIDANCE,
       '',
       conductorBlock + recentBlock + insightBlock + `# Searched wiki\n${context || '(none)'}`,
       '',

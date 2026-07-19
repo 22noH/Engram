@@ -231,6 +231,30 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
     expect(seen[0].opts?.delegate).toBeUndefined();
     expect(seen[0].prompt).not.toContain('ask_brain');
   });
+
+  // MCP-parity Task 4 리뷰 지적: 도구 사용 지침은 conductor 게이트와 무관하게 항상 프롬프트에 있어야 한다.
+  const TOOL_USAGE_GUIDANCE_TEXT =
+    'In a scheduled or automatic-execution context, only use tools that write externally';
+
+  it('CLI 두뇌(canDelegate 없음)도 도구 사용 지침을 받는다(지휘자 오프여도)', async () => {
+    const { brain, seen } = recordingBrain(false);
+    const delegator = new BrainDelegator(() => worker8d, () => ['claude', 'ollama']);
+    const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.delegate).toBeUndefined(); // 지휘자는 여전히 오프(회귀)
+    expect(seen[0].prompt).toContain(TOOL_USAGE_GUIDANCE_TEXT);
+  });
+
+  it('지휘자 켜진 두뇌 — 도구 사용 지침이 정확히 한 번만 등장한다(conductor 블록과 중복 없음)', async () => {
+    const { brain, seen } = recordingBrain(true);
+    const delegator = new BrainDelegator(() => worker8d, () => ['claude', 'ollama']);
+    const reader = new ReaderAgent(rag8d, brain, logger8d, undefined, undefined, delegator);
+    await reader.handle(msg8d);
+    const prompt = seen[0].prompt;
+    expect(prompt).toContain('ask_brain'); // conductor 블록은 여전히 포함
+    const occurrences = prompt.split(TOOL_USAGE_GUIDANCE_TEXT).length - 1;
+    expect(occurrences).toBe(1);
+  });
 });
 
 describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
