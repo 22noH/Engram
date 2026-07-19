@@ -117,9 +117,9 @@ details.thread .msg { max-width:100%; }
 #chhdr { flex:none; padding:6px 16px; font-size:12px; color:var(--dim);
          border-bottom:1px solid var(--line); display:none; }
 #inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
-input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px;
+input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px;
                    padding:10px 12px; color:var(--text); outline:none; }
-input[type=text]:focus { border-color:var(--accent); }
+input[type=text]:focus, input[type=password]:focus { border-color:var(--accent); }
 button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; cursor:pointer;
          color:var(--accent-text); font-weight:600; }
 

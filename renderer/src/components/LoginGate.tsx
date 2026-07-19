@@ -2,15 +2,14 @@ import { useState } from 'react';
 import type { AuthStatus } from '../auth-api';
 import { T } from '../i18n';
 
-// 앱 로그인 게이트(Phase 16a). 미설정 서버=setup 폼("내 서버 만들기"), 설정됨=로그인/가입.
+// 앱 로그인 게이트(Phase 16a). 배포 형태 분리(2026-07-19 설계 §2.2)로 "내 서버 만들기" 셋업 폼은
+// 삭제 — 미설정 원격 서버는 안내 1줄로 대체(원격 owner 셋업은 서버 CLI 소관). 설정됨=로그인/가입.
 // 순수 UI — 실제 호출(fetch)은 App이 콜백으로 담당한다. XSS: 전부 React 텍스트 노드(innerHTML 없음).
 export function LoginGate(props: {
   connName: string;
   status: AuthStatus;
-  setupCode?: string | null;
   onLogin: (loginId: string, password: string) => void;
   onRegister: (loginId: string, password: string, displayName: string) => void;
-  onSetup: (code: string, loginId: string, password: string) => void;
   onSso: () => void;
   error?: string;
   notice?: string;
@@ -20,7 +19,6 @@ export function LoginGate(props: {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [code, setCode] = useState('');
 
   const errText = props.error === 'invalid' ? T.errInvalid
     : props.error === 'pending' ? T.errPending
@@ -45,14 +43,7 @@ export function LoginGate(props: {
     <div id="loginGate">
       <div id="loginCard">
         {!status.configured ? (
-          <>
-            <h2>{T.setupTitle}</h2>
-            {!props.setupCode && (
-              <input type="text" placeholder={T.setupCodePh} value={code} onChange={(e) => setCode(e.target.value)} />
-            )}
-            {fields}
-            <button type="button" onClick={() => props.onSetup(props.setupCode ?? code, loginId, password)}>{T.setupBtn}</button>
-          </>
+          <p className="notice">{T.serverNotSetup}</p>
         ) : view === 'login' ? (
           <>
             <h2>{titlePrefix}<b>{serverName}</b>{titleSuffix}</h2>

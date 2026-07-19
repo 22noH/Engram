@@ -6,11 +6,31 @@ const base = {
   current: 'a', canManageChannels: true, onSelect: () => {}, onSetMode: () => {}, onCreate: () => {}, onDelete: () => {}, onSetRespondMode: () => {}, onManageMembers: () => {},
 } as any;
 
-it('Ask·Code·Team 탭 모두 렌더된다(Phase 14: TEAM_CHAT=true)', () => {
-  render(<Channels {...base} mode="chat" />);
+// 배포 형태 분리(2026-07-19 설계 §2.2) — TEAM_CHAT은 preset(config.PRESET) 유무로 결정된다.
+// Channels.tsx가 모듈 로드 시점에 '../config'를 정적 import하므로, 값을 바꾸려면 doMock+resetModules
+// 후 동적 재import(connections.test.ts:28 패턴)해야 한다.
+it('PRESET 없음(스탠드얼론) → team 탭 미렌더', async () => {
+  vi.resetModules();
+  vi.doMock('../config', () => ({ TEAM_CHAT: false, ko: false }));
+  const { Channels: StandaloneChannels } = await import('./Channels');
+  render(<StandaloneChannels {...base} mode="chat" />);
   expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
-  expect(screen.getByText(/Team|^채팅$/)).toBeInTheDocument();
+  expect(screen.queryByText(/^(Team|채팅)$/)).toBeNull();
+  vi.doUnmock('../config');
+  vi.resetModules();
+});
+
+it('PRESET 있음 → team 탭 렌더', async () => {
+  vi.resetModules();
+  vi.doMock('../config', () => ({ TEAM_CHAT: true, ko: false }));
+  const { Channels: PresetChannels } = await import('./Channels');
+  render(<PresetChannels {...base} mode="chat" />);
+  expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
+  expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
+  expect(screen.getByText(/^(Team|채팅)$/)).toBeInTheDocument();
+  vi.doUnmock('../config');
+  vi.resetModules();
 });
 
 it('남의 채널이고 canManageChannels=false면 ⋯메뉴 숨김', () => {

@@ -63,9 +63,8 @@ export const T = {
   registerBtn: ko ? '가입 요청' : 'Request access',
   backToLogin: ko ? '로그인으로' : 'Back to sign in',
   ssoBtn: ko ? 'SSO로 로그인' : 'Sign in with SSO',
-  setupTitle: ko ? '내 서버 만들기' : 'Create your server',
-  setupCodePh: ko ? '설정 코드(서버 로그 참조)' : 'Setup code (see server log)',
-  setupBtn: ko ? '생성' : 'Create',
+  // 배포 형태 분리(2026-07-19 설계 §2.2) — "내 서버 만들기" 셋업 폼 삭제, 안내 1줄로 대체.
+  serverNotSetup: ko ? '아직 준비되지 않은 서버예요 — 서버 관리자에게 문의하세요.' : "This server isn't set up yet — ask the server owner.",
   errInvalid: ko ? '아이디 또는 비밀번호가 올바르지 않아요' : 'Incorrect ID or password',
   errPending: ko ? '가입 승인 대기 중이에요' : 'Waiting for approval',
   errSuspended: ko ? '정지된 계정이에요' : 'This account is suspended',

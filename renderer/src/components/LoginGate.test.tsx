@@ -2,16 +2,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LoginGate } from './LoginGate';
 
-const base = { connName: 'Local', onLogin: vi.fn(), onRegister: vi.fn(), onSetup: vi.fn(), onSso: vi.fn() };
+const base = { connName: 'Local', onLogin: vi.fn(), onRegister: vi.fn(), onSso: vi.fn() };
 
 describe('LoginGate', () => {
-  it('미설정 서버 → setup 폼(코드·아이디·비밀번호), 제출 시 onSetup', () => {
-    const onSetup = vi.fn();
-    render(<LoginGate {...base} onSetup={onSetup} status={{ configured: false, oidc: false }} setupCode="abc" />);
-    fireEvent.change(screen.getByPlaceholderText(/id/i), { target: { value: 'boss' } });
-    fireEvent.change(screen.getByPlaceholderText(/password/i), { target: { value: 'pw' } });
-    fireEvent.click(screen.getByRole('button', { name: /create/i }));
-    expect(onSetup).toHaveBeenCalledWith('abc', 'boss', 'pw'); // setupCode 자동 주입
+  // 배포 형태 분리(2026-07-19 설계 §2.2) — "내 서버 만들기" 셋업 폼 삭제, 안내 1줄로 대체.
+  it('미설정(원격) 서버 → 셋업 폼 없이 안내 문구만 렌더', () => {
+    render(<LoginGate {...base} status={{ configured: false, oidc: false }} />);
+    expect(screen.queryByPlaceholderText(/setup code/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /create/i })).toBeNull();
+    expect(screen.getByText(/ask the server owner|서버 관리자에게 문의/i)).toBeInTheDocument();
   });
 
   it('설정된 서버 → 로그인 폼, oidc면 SSO 버튼', () => {

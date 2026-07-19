@@ -4,7 +4,7 @@ import { loadConnections, saveConnections, setDefault, addConnection, removeConn
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
-import { fetchStatus, apiLogin, apiRegister, apiSetup, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
+import { fetchStatus, apiLogin, apiRegister, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
 import { Channels } from './components/Channels';
 import { ChannelMembers } from './components/ChannelMembers';
 import { Thread } from './components/Thread';
@@ -66,7 +66,6 @@ export default function App() {
   const [gateStatus, setGateStatus] = useState<AuthStatus | null>(null);
   const [gateError, setGateError] = useState<string | undefined>();
   const [gateNotice, setGateNotice] = useState<string | undefined>();
-  const [localSetupCode, setLocalSetupCode] = useState<string | null>(null);
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
 
@@ -372,14 +371,14 @@ export default function App() {
 
   // Phase 16a — 로그인 게이트. 기본 연결(defaultConnId)에 저장 세션이 없으면 그 연결의
   // /auth/status를 물어 게이트 표시 여부를 정한다(null=무인증 서버·brain → 게이트 없음).
+  // 배포 형태 분리(2026-07-19 설계 §2.2) — localFree(계정 0개+루프백)도 같은 결로 게이트 생략.
   const defId = connState.defaultConnId;
   const defConn = connState.connections.find((c) => c.id === defId);
   useEffect(() => {
     let alive = true;
     setGateStatus(null); setGateError(undefined); setGateNotice(undefined);
     if (!defConn || sessions[defId]) return; // 세션 있으면 게이트 없음(authErr가 오면 위에서 세션이 지워지고 재조회됨)
-    void fetchStatus(defConn.endpoint).then((s) => { if (alive) setGateStatus(s); });
-    void window.engramDesktop?.setupCode?.().then((c) => { if (alive) setLocalSetupCode(c ?? null); }).catch(() => {});
+    void fetchStatus(defConn.endpoint).then((s) => { if (alive) setGateStatus(s?.localFree ? null : s); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defId, defConn?.endpoint, sessions[defId]]);
@@ -411,7 +410,7 @@ export default function App() {
       <>
         <div id="titlebar"><span id="tbtitle">Engram Desktop</span></div>
         <LoginGate
-          connName={defConn.name} status={gateStatus} setupCode={localSetupCode}
+          connName={defConn.name} status={gateStatus}
           error={gateError} notice={gateNotice}
           onLogin={(l, p) => { void apiLogin(defConn.endpoint, l, p).then(handleAuthResult); }}
           onRegister={(l, p, d) => {
@@ -420,7 +419,6 @@ export default function App() {
               else { setGateNotice(T.registered); setGateError(undefined); }
             });
           }}
-          onSetup={(c, l, p) => { void apiSetup(defConn.endpoint, c, l, p).then(handleAuthResult); }}
           onSso={() => { void startSso(); }}
         />
       </>

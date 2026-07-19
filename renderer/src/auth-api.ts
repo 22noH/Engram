@@ -6,7 +6,9 @@ export function httpBase(endpoint: string): string {
   return endpoint.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:').replace(/\/$/, '');
 }
 
-export interface AuthStatus { configured: boolean; oidc: boolean; serverName?: string }
+// localFree: 배포 형태 분리(2026-07-19 설계 §2.1) — 계정 0개+루프백 요청이면 true(서버가 붙임).
+// true면 렌더러는 게이트를 생략한다(§2.2, 기존 null=무인증 서버와 같은 결).
+export interface AuthStatus { configured: boolean; oidc: boolean; serverName?: string; localFree?: boolean }
 
 async function jsonOrError<T>(p: Promise<Response>): Promise<T | { error: string }> {
   try {
