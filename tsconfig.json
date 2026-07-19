@@ -15,5 +15,5 @@
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true
   },
-  "exclude": ["node_modules", "dist", "renderer"]
+  "exclude": ["node_modules", "dist", "renderer", "console"]
 }
