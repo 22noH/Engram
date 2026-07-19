@@ -14,6 +14,10 @@ export interface McpDeps {
   // 주입 시 list_proposals/approve_proposal/reject_proposal 노출. write 주입 시 wiki_write 노출(--write-mode).
   proposals?: McpProposalsDeps | null;
   write?: ((input: { slug?: string; title: string; content: string }) => Promise<string>) | null;
+  // ★근본픽스(2026-07-20): 헤드리스 코어 모드는 RagStore를 절대 열지 않으므로 search가 텍스트 폴백
+  // (mcp-wiring.ts makeFileSearch)이다 — true면 wiki_search 도구 설명에 그 사실을 덧붙인다(사용자가
+  // "의미검색"을 기대하고 결과 품질을 오판하지 않게). 미지정/false=기존 설명 그대로(브리지·앱 무변경).
+  searchFallback?: boolean;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -32,19 +36,27 @@ function fail(text: string): CallToolResult {
   return { content: [{ type: 'text', text: cap(text) }], isError: true };
 }
 
-const WIKI_SEARCH_TOOL: Tool = {
-  name: 'wiki_search',
-  description:
-    'Semantic search over the Engram wiki (team knowledge base). Returns matching pages with slug/title/snippet.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      query: { type: 'string', description: 'search query' },
-      limit: { type: 'number', description: `max results, default ${DEFAULT_SEARCH_LIMIT}, capped at ${MAX_SEARCH_LIMIT}` },
+const WIKI_SEARCH_DESCRIPTION =
+  'Semantic search over the Engram wiki (team knowledge base). Returns matching pages with slug/title/snippet.';
+// 텍스트 폴백일 때 덧붙는 안내(코어 모드 — 근본픽스 2026-07-20, deps.searchFallback 참조).
+const WIKI_SEARCH_FALLBACK_NOTE =
+  ' NOTE: the Engram app is offline, so this is currently a plain case-insensitive text match over wiki pages ' +
+  '(title/slug/body), not semantic search — expect lower recall for paraphrased queries.';
+
+function wikiSearchTool(fallback: boolean): Tool {
+  return {
+    name: 'wiki_search',
+    description: WIKI_SEARCH_DESCRIPTION + (fallback ? WIKI_SEARCH_FALLBACK_NOTE : ''),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'search query' },
+        limit: { type: 'number', description: `max results, default ${DEFAULT_SEARCH_LIMIT}, capped at ${MAX_SEARCH_LIMIT}` },
+      },
+      required: ['query'],
     },
-    required: ['query'],
-  },
-};
+  };
+}
 
 const WIKI_READ_TOOL: Tool = {
   name: 'wiki_read',
@@ -281,7 +293,7 @@ export function buildMcpServer(deps: McpDeps): Server {
   });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools: Tool[] = [WIKI_SEARCH_TOOL, WIKI_READ_TOOL, WIKI_LIST_TOOL, WIKI_PROPOSE_TOOL];
+    const tools: Tool[] = [wikiSearchTool(!!deps.searchFallback), WIKI_READ_TOOL, WIKI_LIST_TOOL, WIKI_PROPOSE_TOOL];
     if (deps.askBrain) tools.push(askBrainTool(deps.brainNames()));
     if (deps.proposals) tools.push(LIST_PROPOSALS_TOOL, APPROVE_PROPOSAL_TOOL, REJECT_PROPOSAL_TOOL);
     if (deps.write) tools.push(WIKI_WRITE_TOOL);

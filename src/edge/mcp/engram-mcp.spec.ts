@@ -65,6 +65,25 @@ describe('buildMcpServer', () => {
     await s.close();
   });
 
+  it('tools/list: searchFallback 미지정 → wiki_search 설명은 기본 문구 그대로(브리지·앱 무변경)', async () => {
+    const s = await connectedSession(makeDeps());
+    const defs = await s.listToolDefs();
+    const wikiSearchDef = defs.find((d) => d.name === T('wiki_search'));
+    expect(wikiSearchDef?.description).toContain('Semantic search');
+    expect(wikiSearchDef?.description).not.toContain('offline');
+    await s.close();
+  });
+
+  it('tools/list: searchFallback:true → wiki_search 설명에 오프라인 텍스트폴백 안내 추가(근본픽스 2026-07-20)', async () => {
+    const s = await connectedSession(makeDeps({ searchFallback: true }));
+    const defs = await s.listToolDefs();
+    const wikiSearchDef = defs.find((d) => d.name === T('wiki_search'));
+    expect(wikiSearchDef?.description).toContain('Semantic search'); // 기본 설명은 유지(덧붙임이지 교체가 아님)
+    expect(wikiSearchDef?.description).toContain('offline');
+    expect(wikiSearchDef?.description?.toLowerCase()).toContain('text match');
+    await s.close();
+  });
+
   it('wiki_search: 기본 limit 5로 deps.search 호출·결과에 slug/title/snippet', async () => {
     const search = jest.fn().mockResolvedValue([{ slug: 's1', title: 'Title 1', snippet: 'snip 1' }]);
     const s = await connectedSession(makeDeps({ search }));

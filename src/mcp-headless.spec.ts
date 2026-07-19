@@ -1,6 +1,23 @@
 import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs/promises';
 import type { AddressInfo } from 'net';
+import { Test } from '@nestjs/testing';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { defaultDataDir, parseHeadlessArgs, chooseMode } from './mcp-headless';
+import { HeadlessCoreModule } from './knowledge-core/headless-core.module';
+import { RagStore } from './knowledge-core/rag/rag-store';
+import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
+import { ProposalStore } from './knowledge-core/proposal-store';
+import { ProposalApplier } from './edge/proposal-applier';
+import { PathResolver } from './pal/path-resolver';
+import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
+import { makeMcpProposals } from './edge/mcp/mcp-proposals';
+import { makeWikiMcpDepsCore } from './edge/mcp/mcp-wiring';
+import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
+
+const T = (bare: string) => `${MCP_TOOL_PREFIX}test__${bare}`;
 
 describe('defaultDataDir', () => {
   it('win32 — %APPDATA%\\Engram', () => {
@@ -197,5 +214,111 @@ describe('chooseMode', () => {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     });
+  });
+});
+
+// 근본픽스(2026-07-20): core 모드 배선(runCore가 조립하는 것과 동일한 조합 — HeadlessCoreModule +
+// makeWikiMcpDepsCore + buildMcpServer)을 실제 MCP 왕복으로 검증한다. RagStore는 HeadlessCoreModule
+// 그래프에 없으므로(headless-core.module.spec.ts가 DI 레벨로 이미 증명) 여기선 "그 배선으로 쌓은
+// 서버가 실제로 기대대로 동작하는지"(텍스트 폴백 검색 결과·다른 도구 무변경)에 집중한다.
+describe('core 모드 MCP 배선(HeadlessCoreModule 근본픽스)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-headless-core-mcp-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('RagStore는 이 조합에서 인스턴스화되지 않는다(DI 조회 실패로 증명)', async () => {
+    const app = await Test.createTestingModule({ imports: [HeadlessCoreModule] })
+      .overrideProvider(PathResolver).useValue(new PathResolver(dir))
+      .compile();
+    await app.init();
+    expect(() => app.get(RagStore, { strict: false })).toThrow();
+    await app.close();
+  });
+
+  it('wiki_search MCP 왕복: 도구 설명에 오프라인 안내 + 결과는 텍스트 매치', async () => {
+    const app = await Test.createTestingModule({ imports: [HeadlessCoreModule] })
+      .overrideProvider(PathResolver).useValue(new PathResolver(dir))
+      .compile();
+    await app.init();
+    const wiki = app.get(WikiEngine);
+    const proposals = app.get(ProposalStore);
+    await wiki.createPage({
+      slug: 'rust-tips', title: 'Rust 학습 팁', category: 'c',
+      body: '오너십과 대여를 먼저 익혀라.', status: 'published',
+    });
+    await wiki.createPage({
+      slug: 'cooking', title: '파스타 레시피', category: 'c',
+      body: '마늘과 올리브오일로 알리오 올리오를 만든다.', status: 'published',
+    });
+
+    const applier = new ProposalApplier(wiki, proposals);
+    const deps: McpDeps = {
+      ...makeWikiMcpDepsCore(wiki, proposals),
+      askBrain: null,
+      brainNames: () => [],
+      proposals: makeMcpProposals(proposals, applier),
+      write: null,
+    };
+
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const s = McpSession.createForTest('test', clientT);
+    await s.connect();
+
+    const defs = await s.listToolDefs();
+    const wikiSearchDef = defs.find((d) => d.name === T('wiki_search'));
+    expect(wikiSearchDef?.description).toContain('offline');
+
+    const out = await s.callTool(T('wiki_search'), { query: 'Rust' });
+    expect(out).toContain('rust-tips');
+    expect(out).not.toContain('cooking');
+
+    await s.close();
+    await app.close();
+  });
+
+  it('wiki_read/wiki_list/wiki_propose: core 모드에서도 기존과 동일하게 동작(회귀 없음)', async () => {
+    const app = await Test.createTestingModule({ imports: [HeadlessCoreModule] })
+      .overrideProvider(PathResolver).useValue(new PathResolver(dir))
+      .compile();
+    await app.init();
+    const wiki = app.get(WikiEngine);
+    const proposals = app.get(ProposalStore);
+    await wiki.createPage({
+      slug: 'p1', title: 'Page One', category: 'c', body: 'body one', status: 'published',
+    });
+
+    const applier = new ProposalApplier(wiki, proposals);
+    const deps: McpDeps = {
+      ...makeWikiMcpDepsCore(wiki, proposals),
+      askBrain: null,
+      brainNames: () => [],
+      proposals: makeMcpProposals(proposals, applier),
+      write: null,
+    };
+
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const s = McpSession.createForTest('test', clientT);
+    await s.connect();
+
+    const readOut = await s.callTool(T('wiki_read'), { slug: 'p1' });
+    expect(readOut).toContain('body one');
+
+    const listOut = await s.callTool(T('wiki_list'), {});
+    expect(listOut).toContain('p1');
+
+    const proposeOut = await s.callTool(T('wiki_propose'), { title: 'New', content: 'new body' });
+    expect(proposeOut).toMatch(/proposal .+ created/);
+    const pending = await proposals.listPending();
+    expect(pending).toHaveLength(1);
+
+    await s.close();
+    await app.close();
   });
 });

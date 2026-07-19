@@ -5,30 +5,33 @@ import * as path from 'path';
 import * as http from 'http';
 import { NestFactory } from '@nestjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { AppModule } from './app.module';
+import { HeadlessCoreModule } from './knowledge-core/headless-core.module';
 import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
 import { ProposalStore } from './knowledge-core/proposal-store';
 import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { makeMcpProposals } from './edge/mcp/mcp-proposals';
-import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
+import { makeWikiMcpDepsCore, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import { makeBridgeServer } from './mcp-bridge';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
 
 // 헤드리스 엔트리(설계 §3.1-3.2) — `node dist/src/mcp-headless.js [--data-dir D] [--write-mode] [--port N]`.
-// 앱(Electron) 없이 엔그램 지식 코어(위키+의미검색+제안 대기열)를 stdio MCP 서버로 노출한다.
+// 앱(Electron) 없이 엔그램 지식 코어(위키+제안 대기열)를 stdio MCP 서버로 노출한다.
 // 상주 앱이 이미 떠 있으면(§3.2 공존) 직접 코어를 열지 않고 기존 mcp-bridge로 자동 전환한다
 // (LanceDB 동시 접근 위험 회피 — 데이터는 항상 앱과 같은 한 곳).
 //
 // ★2026-07-19 실사고: 플러그인 세션이 6개+ 동시에 헤드리스 MCP를 스폰하는데, 예전엔 앱을 2초
 // 1회만 프로브하고 실패하면 바로 core 모드로 같은 rag 폴더를 열었다 — 앱이 막 부팅 중이면
 // 뒤이어 뜨는 KnowledgeCoreModule.onModuleInit이 "Panic in async function"(크로스 프로세스 경합)
-// 으로 죽어 크래시루프를 탔다. 그래서 chooseMode는 이제 2초 간격으로 최대 6회(총 ~12초) 앱을
-// 기다린 뒤에야 core로 폴백한다 — 몇 회차든 응답이 오면(1회차 포함) 그 즉시 bridge로 반환한다
-// (빠른 경로 보존, 앱이 정말 없을 때만 12초를 다 쓴다).
+// 으로 죽어 크래시루프를 탔다.
+// ★★근본픽스(2026-07-20): 위 재시도만으로는 "앱이 정말 안 뜬 상태에서 core로 폴백" 케이스의
+// 경합을 없애지 못했다(그런 폴백이 실제로 3건 사고를 냈다) — core 모드는 이제 AppModule이 아니라
+// RagStore가 아예 없는 HeadlessCoreModule을 부팅한다(그 모듈 파일 주석 참조). 헤드리스는 이제
+// LanceDB를 물리적으로 절대 열지 않는다 — Lance는 앱 전용. chooseMode의 재시도(2초 간격 최대
+// 6회≈12초, 앱 우선권)는 여전히 유효하지만, core로 폴백해도 더 이상 크로스 프로세스 위험이 없다.
 //
-// stdout은 MCP 와이어 전용 — 이 파일·이 파일이 부팅하는 AppModule 경로에서 절대 console.log/
-// process.stdout.write를 쓰지 않는다(모든 로그는 stderr 또는 PinoLogger 파일). Nest는
+// stdout은 MCP 와이어 전용 — 이 파일·이 파일이 부팅하는 HeadlessCoreModule 경로에서 절대
+// console.log/process.stdout.write를 쓰지 않는다(모든 로그는 stderr 또는 PinoLogger 파일). Nest는
 // { logger: false }로 부팅해 자체 콘솔 로그를 끈다.
 
 // Electron app.getPath('userData')와 동일 규칙(설치형 앱과 데이터 경로 일치 — 헤드리스로 먼저
@@ -156,15 +159,21 @@ async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
   // src/pal/heartbeat.ts 참조). 이미 설정돼 있으면(사용자 env) 존중 — 강제 덮어쓰기 안 함.
   process.env.ENGRAM_DATA_DIR ??= dataDir;
 
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  // ★근본픽스(2026-07-20): AppModule이 아니라 HeadlessCoreModule — RagStore/EMBEDDER/WikiWatcher가
+  // 아예 이 모듈 그래프에 없어 LanceDB가 물리적으로 열리지 않는다(headless-core.module.ts 참조).
+  const app = await NestFactory.createApplicationContext(HeadlessCoreModule, { logger: false });
   await app.init();
 
   const wiki = app.get(WikiEngine);
   const proposals = app.get(ProposalStore);
-  const applier = app.get(ProposalApplier);
+  // ProposalApplier는 DI 없이도 되는 순수 클래스(WikiEngine+ProposalStore만 소비) — HeadlessCoreModule에
+  // 등록해 EdgeModule 전체를 끌어올 필요 없이 직접 생성.
+  const applier = new ProposalApplier(wiki, proposals);
 
   const deps: McpDeps = {
-    ...makeWikiMcpDeps(wiki, proposals),
+    // ★근본픽스: makeWikiMcpDeps(wiki.search→RagStore 위임) 대신 makeWikiMcpDepsCore — search는
+    // 텍스트 폴백(makeFileSearch)이고 searchFallback:true로 wiki_search 도구 설명에 그 사실을 알린다.
+    ...makeWikiMcpDepsCore(wiki, proposals),
     askBrain: null, // 헤드리스에 두뇌(위임) 없음(설계 §3.1 — 비범위)
     brainNames: () => [],
     proposals: makeMcpProposals(proposals, applier), // 헤드리스 자체 in-flight Set(앱 ws와 별개 프로세스)
