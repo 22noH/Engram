@@ -38,7 +38,7 @@ export class InsightReporter {
     } catch {
       result = { text: '', costUsd: 0, isError: true };
     }
-    const report = result.isError ? '(리포트 생성 실패: 두뇌 오류 — 메트릭만 보존)' : result.text.trim();
+    const report = result.isError ? '(리포트 생성 실패: 모델 오류 — 메트릭만 보존)' : result.text.trim();
     const insight: DayInsight = { date: day, metrics, report };
     await this.store.save(userId, insight);
     // 미설정/빈값/0/음수 = 무제한(prune이 no-op), 양수 = 그만큼 일수 유지. 데이터 삭제는 명시 opt-in.

@@ -28,7 +28,7 @@ const MESSAGES: Record<string, Entry> = {
   noSchedules: { en: () => 'No schedules.', ko: () => '예약이 없어요.' },
   noTasks: { en: () => 'No tasks currently running or recently completed.', ko: () => '지금 진행 중이거나 최근 완료한 작업이 없어요.' },
   synthesizingOpinions: { en: () => '📝 Synthesizing input…', ko: () => '📝 의견 종합 중…' },
-  decomposing: { en: () => 'Breaking down the work… (calling the brain)', ko: () => '작업 분해 중… (두뇌 호출)' },
+  decomposing: { en: () => 'Breaking down the work… (calling the model)', ko: () => '작업 분해 중… (모델 호출)' },
   reviewingCriteria: { en: () => 'Reviewing acceptance criteria…', ko: () => '완성조건 리뷰 중…' },
   criteriaMet: { en: () => '✓ Acceptance criteria met — done', ko: () => '✓ 완성조건 충족 — 완료' },
   criteriaMetStored: { en: () => 'Acceptance criteria met — awaiting human merge', ko: () => '완성조건 충족 — 사람 머지 대기' },
@@ -48,9 +48,9 @@ const MESSAGES: Record<string, Entry> = {
   failureFallback: { en: () => 'failure', ko: () => '실패' },
   // reader / synthesizer / meeting
   noHitsHeader: { en: () => '⚠ No related content in the wiki — answering from general knowledge\n\n', ko: () => '⚠ 위키에 관련 내용 없음 — 일반 지식 기반 답변\n\n' },
-  answerGenFailedBrainError: { en: () => 'Answer generation failed: brain call error', ko: () => '답변 생성 실패: 두뇌 호출 오류' },
+  answerGenFailedBrainError: { en: () => 'Answer generation failed: model call error', ko: () => '답변 생성 실패: 모델 호출 오류' },
   noContributions: { en: () => 'No expert input to synthesize.', ko: () => '전문가 기여가 없어 종합할 내용이 없습니다.' },
-  synthesisFailed: { en: () => 'Synthesis failed: brain call error', ko: () => '종합 실패: 두뇌 호출 오류' },
+  synthesisFailed: { en: () => 'Synthesis failed: model call error', ko: () => '종합 실패: 모델 호출 오류' },
   agendaHeader: { en: () => '# Agenda', ko: () => '# 안건' },
   conclusionHeader: { en: () => '# Conclusion', ko: () => '# 결론' },
 

@@ -45,36 +45,36 @@ it('clicking "set default" on a non-default row calls onSetDefault(id)', () => {
   expect(onSetDefault).toHaveBeenCalledWith('b');
 });
 
-describe('Add local brain button', () => {
+describe('Add local model button', () => {
   afterEach(() => {
     delete (window as any).engramDesktop;
   });
 
-  it('does not render "Add local brain" button when window.engramDesktop is undefined', () => {
+  it('does not render "Add local model" button when window.engramDesktop is undefined', () => {
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={() => {}} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
-    expect(screen.queryByText('Add local brain')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add local model')).not.toBeInTheDocument();
   });
 
-  it('does not render "Add local brain" button when window.engramDesktop.addLocalBrain is undefined', () => {
+  it('does not render "Add local model" button when window.engramDesktop.addLocalBrain is undefined', () => {
     (window.engramDesktop as any) = {};
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={() => {}} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
-    expect(screen.queryByText('Add local brain')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add local model')).not.toBeInTheDocument();
   });
 
-  it('renders "Add local brain" button when window.engramDesktop.addLocalBrain exists', () => {
+  it('renders "Add local model" button when window.engramDesktop.addLocalBrain exists', () => {
     const mockAddLocalBrain = vi.fn();
     (window.engramDesktop as any) = { addLocalBrain: mockAddLocalBrain };
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={() => {}} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
-    expect(screen.getByText('Add local brain')).toBeInTheDocument();
+    expect(screen.getByText('Add local model')).toBeInTheDocument();
   });
 
-  it('clicking "Add local brain" calls window.engramDesktop.addLocalBrain and then onAdd with resolved values', async () => {
+  it('clicking "Add local model" calls window.engramDesktop.addLocalBrain and then onAdd with resolved values', async () => {
     const mockAddLocalBrain = vi.fn().mockResolvedValue({ name: 'My brain', endpoint: 'ws://127.0.0.1:47801' });
     const onAdd = vi.fn();
     (window.engramDesktop as any) = { addLocalBrain: mockAddLocalBrain };
 
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={onAdd} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
-    fireEvent.click(screen.getByText('Add local brain'));
+    fireEvent.click(screen.getByText('Add local model'));
 
     await waitFor(() => {
       expect(onAdd).toHaveBeenCalledWith('My brain', 'ws://127.0.0.1:47801');
@@ -82,14 +82,14 @@ describe('Add local brain button', () => {
     expect(mockAddLocalBrain).toHaveBeenCalledWith('Local brain');
   });
 
-  it('clicking "Add local brain" with a name input uses that name', async () => {
+  it('clicking "Add local model" with a name input uses that name', async () => {
     const mockAddLocalBrain = vi.fn().mockResolvedValue({ name: 'Custom brain', endpoint: 'ws://127.0.0.1:47802' });
     const onAdd = vi.fn();
     (window.engramDesktop as any) = { addLocalBrain: mockAddLocalBrain };
 
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={onAdd} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/Name/), { target: { value: 'MyBrain' } });
-    fireEvent.click(screen.getByText('Add local brain'));
+    fireEvent.click(screen.getByText('Add local model'));
 
     await waitFor(() => {
       expect(mockAddLocalBrain).toHaveBeenCalledWith('MyBrain');
@@ -102,7 +102,7 @@ describe('Add local brain button', () => {
     (window.engramDesktop as any) = { addLocalBrain: mockAddLocalBrain };
 
     render(<ManageEngrams connections={conns} defaultConnId="a" onAdd={onAdd} onRemove={() => {}} onSetDefault={() => {}} onClose={() => {}} />);
-    fireEvent.click(screen.getByText('Add local brain'));
+    fireEvent.click(screen.getByText('Add local model'));
 
     await waitFor(() => {
       expect(mockAddLocalBrain).toHaveBeenCalled();

@@ -35,7 +35,7 @@ export const T = {
   authFailed: ko ? '인증 실패 — 다시 로그인하세요' : 'Authentication failed — please sign in again',
   mentionHint: ko ? '@ 뒤에 이름을 넣으면 그 Engram에게만 보내요' : 'Type a name after @ to send to just that Engram',
   removeEngram: ko ? '삭제' : 'Remove',
-  addLocalBrain: ko ? '로컬 두뇌 추가' : 'Add local brain',
+  addLocalBrain: ko ? '로컬 모델 추가' : 'Add local model',
   close: ko ? '닫기' : 'Close',
   notConnected: (name: string) => (ko ? `'${name}' 연결이 없어요` : `'${name}' isn't connected`),
   // Phase 15a — 위키(페이지 읽기 + 승인함)
@@ -106,7 +106,7 @@ export const T = {
   makePublic: ko ? '공개로 전환' : 'Make public',
   membersClose: ko ? '닫기' : 'Close',
   // Task 4 — 채널별 두뇌
-  brain: ko ? '두뇌' : 'Brain',
+  brain: ko ? '모델' : 'Model',
   // Task 4(리뷰 지적) — 현재 기본 두뇌 이름을 알 때는 "Default (claude)"/"기본 (claude)" 형태,
   // 모를 때(defaultBrain='')는 이름 없이 "Default"/"기본"만.
   brainDefault: (name?: string) => (name ? `${defaultLabel} (${name})` : defaultLabel),
