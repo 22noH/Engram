@@ -66,6 +66,7 @@ export const T = {
   addMemberBtn: ko ? '＋ 멤버 추가' : '+ Add member',
   addMemberHeading: ko ? '멤버 추가' : 'Add member',
   displayNameLabel: ko ? '표시 이름' : 'Display name',
+  displayNamePlaceholder: ko ? '이름' : 'Name',
   tempPasswordLabel: ko ? '임시 비밀번호' : 'Temporary password',
   tempPasswordHint: ko ? '첫 로그인 때 본인이 변경' : "They'll change it at first sign-in",
   groupLabel: ko ? '그룹' : 'Group',

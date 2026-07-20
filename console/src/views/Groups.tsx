@@ -73,11 +73,14 @@ export function Groups({ serverName, role, active, onNavigate }: {
   const channelName = (id: string) => channels?.find((c) => c.id === id)?.name;
   const addableMembers = (members ?? []).filter((m) => !memberIds.includes(m.id));
   const addableChannels = (channels ?? []).filter((c) => !channelIds.includes(c.id));
+  // 대기 뱃지(Nav "멤버" 항목) — Members.tsx와 같은 결로 이미 fetch한 멤버 목록에서 파생.
+  const pendingMembers = (members ?? []).filter((m) => m.status === 'pending').length;
 
   return (
     <div className="page">
       <div className="frame">
-        <Nav serverName={serverName} address={window.location.host} active={active} onNavigate={onNavigate} role={role} />
+        <Nav serverName={serverName} address={window.location.host} active={active} onNavigate={onNavigate}
+             pendingMembers={pendingMembers} role={role} />
         <div className="main">
           <div className="head-row">
             <div className="t">
@@ -105,7 +108,7 @@ export function Groups({ serverName, role, active, onNavigate }: {
               <div className={`row${g.id === editingId ? ' hl' : ''}`} key={g.id}>
                 <div className="who">
                   <div className="n">{g.name}</div>
-                  <div className="id">
+                  <div className="id" style={{ fontFamily: 'inherit' }}>
                     {T.groupMemberCount(g.memberIds.length)}
                     {g.permissions.length > 0 && ` · ${g.permissions.map(permissionLabel).join(' · ')}`}
                   </div>

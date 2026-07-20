@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { T } from '../i18n';
 import {
   fetchChannels, fetchGroups, fetchMembers, fetchChannelDetail,
@@ -83,10 +83,15 @@ export function Channels({ serverName, role, active, onNavigate }: {
     load();
   };
 
+  // 대기 뱃지(Nav "멤버" 항목)는 화면마다 따로 계산 — 각 view가 이미 fetchMembers()로
+  // 멤버 목록을 들고 있으므로(Members.tsx와 같은 결) 여기서도 파생만 하면 된다.
+  const pendingMembers = (members ?? []).filter((m) => m.status === 'pending').length;
+
   return (
     <div className="page">
       <div className="frame">
-        <Nav serverName={serverName} address={window.location.host} active={active} onNavigate={onNavigate} role={role} />
+        <Nav serverName={serverName} address={window.location.host} active={active} onNavigate={onNavigate}
+             pendingMembers={pendingMembers} role={role} />
         <div className="main">
           <h2>{T.channelsTitle}</h2>
           <div className="sub">{T.channelsSub}</div>
@@ -94,11 +99,11 @@ export function Channels({ serverName, role, active, onNavigate }: {
             {(channels ?? []).map((c) => {
               const tier = tierOf(c);
               return (
-                <div key={c.id}>
+                <Fragment key={c.id}>
                   <div className="row">
                     <div className="who">
                       <div className="n"># {c.name}</div>
-                      <div className="id">
+                      <div className="id" style={{ fontFamily: 'inherit' }}>
                         {tier === 'public' && T.allMembers}
                         {tier === 'groupLimited' && c.groups.join(', ')}
                         {tier === 'private' && T.channelMemberCount(c.memberCount)}
@@ -153,7 +158,7 @@ export function Channels({ serverName, role, active, onNavigate }: {
                       </div>
                     </div>
                   )}
-                </div>
+                </Fragment>
               );
             })}
           </div>

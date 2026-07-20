@@ -58,6 +58,48 @@ it('3단계 배지: 공개/그룹 한정(groups.length>0)/비공개(groups.lengt
   expect(execRow.querySelector('.id')?.textContent).toBe('2 members · Model: Default');
 });
 
+it('채널 행은 .grp의 직계 자식 .row다(픽셀 리뷰 fix #1 — .row:last-child 구분선 버그 회귀 방지)', async () => {
+  mockFetch();
+  const { container } = render(<Channels serverName="Our Team" role="owner" active="channels" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('# general')).toBeInTheDocument());
+
+  const grp = container.querySelector('.grp') as HTMLElement;
+  const rows = Array.from(grp.children).filter((el) => el.classList.contains('row'));
+  // 채널 3개 모두 감싸는 wrapper 없이 .grp의 직계 .row여야 :last-child 구분선이 마지막 한 개에만 적용된다.
+  expect(rows.length).toBe(3);
+  for (const row of rows) expect(row.parentElement).toBe(grp);
+});
+
+it('Nav 멤버 뱃지: Channels 화면도 가입 대기 수를 보여준다(픽셀 리뷰 fix #4)', async () => {
+  mockFetch((url) => {
+    if (url === '/admin/api/members') {
+      return new Response(JSON.stringify({
+        members: [
+          ...membersPayload.members,
+          { id: 'm3', loginId: 'minsu', displayName: 'Minsu', role: 'member', status: 'pending', permissions: [], groups: [] },
+        ],
+      }), { status: 200 });
+    }
+    return null;
+  });
+  const { container } = render(<Channels serverName="Our Team" role="owner" active="channels" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('# general')).toBeInTheDocument());
+
+  const badge = await waitFor(() => container.querySelector('.nitem .nbadge') as HTMLElement);
+  expect(badge).toBeTruthy();
+  expect(badge.textContent).toBe('1');
+});
+
+it('채널 설명줄(.id)은 font-family:inherit 스타일이 있다(픽셀 리뷰 fix #2 — mono 상속 방지)', async () => {
+  mockFetch();
+  render(<Channels serverName="Our Team" role="owner" active="channels" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('# general')).toBeInTheDocument());
+
+  const row = screen.getByText('# general').closest('.row') as HTMLElement;
+  const idEl = row.querySelector('.id') as HTMLElement;
+  expect(idEl.style.fontFamily).toBe('inherit');
+});
+
 it('모델 버튼은 항상 비활성', async () => {
   mockFetch();
   render(<Channels serverName="Our Team" role="owner" active="channels" onNavigate={() => {}} />);

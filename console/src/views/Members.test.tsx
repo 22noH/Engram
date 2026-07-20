@@ -66,7 +66,8 @@ it('멤버 추가 폼 제출 → POST /admin/api/members 페이로드', async ()
 
   fireEvent.click(screen.getByRole('button', { name: '+ Add member' }));
   fireEvent.change(screen.getByPlaceholderText('ID'), { target: { value: 'newbie' } });
-  fireEvent.change(screen.getByPlaceholderText('Display name'), { target: { value: 'New' } });
+  // placeholder는 목업의 짧은 "Name"(라벨 "Display name"과는 별개 문자열) — 픽셀 리뷰 fix #6.
+  fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'New' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
   await waitFor(() => expect(captured).not.toBeNull());
@@ -160,4 +161,28 @@ it('정지된 멤버는 복구 버튼만', async () => {
   const suspRow = screen.getByText('Haneul').closest('.row') as HTMLElement;
   expect(within(suspRow).getByRole('button', { name: 'Restore' })).toBeInTheDocument();
   expect(within(suspRow).queryByRole('button', { name: 'Permissions' })).not.toBeInTheDocument();
+});
+
+it('임시 비밀번호 입력은 mono 폰트(픽셀 리뷰 fix #5) — 목업 line 205 font-family:var(--mono)', async () => {
+  mockFetch();
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Minsu')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: '+ Add member' }));
+  const tempPwInput = screen.getByDisplayValue(/^init-/) as HTMLInputElement;
+  expect(tempPwInput.style.fontFamily).toBe('var(--mono)');
+});
+
+it('권한 인라인 편집기: .perms가 .frow 조상 안에 있다(픽셀 리뷰 fix #3 — .frow .perms 스코프 CSS 적용)', async () => {
+  mockFetch();
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Seojun')).toBeInTheDocument());
+
+  const activeRow = screen.getByText('Seojun').closest('.row') as HTMLElement;
+  fireEvent.click(within(activeRow).getByRole('button', { name: 'Permissions' }));
+
+  const permsEl = await screen.findByText('Edit wiki');
+  const perms = permsEl.closest('.perms') as HTMLElement;
+  expect(perms).toBeTruthy();
+  expect(perms.closest('.frow')).toBeTruthy();
 });

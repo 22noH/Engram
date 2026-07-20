@@ -108,11 +108,11 @@ export function Members({ serverName, role, active, onNavigate }: {
                 </div>
                 <div className="frow">
                   <label>{T.displayNameLabel}</label>
-                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={T.displayNameLabel} />
+                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={T.displayNamePlaceholder} />
                 </div>
                 <div className="frow">
                   <label>{T.tempPasswordLabel}</label>
-                  <input value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} />
+                  <input value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
                   <span className="hint">{T.tempPasswordHint}</span>
                 </div>
                 <div className="frow">
@@ -173,13 +173,15 @@ export function Members({ serverName, role, active, onNavigate }: {
                 </div>
                 {permEditId === m.id && (
                   <div className="row">
-                    <div className="perms">
-                      {PERMISSIONS.map((p) => (
-                        <label key={p}>
-                          <input type="checkbox" checked={permDraft.includes(p)} onChange={() => togglePerm(p)} />
-                          {permissionLabel(p)}
-                        </label>
-                      ))}
+                    <div className="frow">
+                      <div className="perms">
+                        {PERMISSIONS.map((p) => (
+                          <label key={p}>
+                            <input type="checkbox" checked={permDraft.includes(p)} onChange={() => togglePerm(p)} />
+                            {permissionLabel(p)}
+                          </label>
+                        ))}
+                      </div>
                     </div>
                     <div className="btns">
                       <button className="pri" onClick={() => savePerms(m.id)}>{T.save}</button>
