@@ -54,6 +54,16 @@ describe('AccountStore', () => {
     expect(s2.setStatus('없는id', 'active')).toBe(false);
   });
 
+  it('remove: 계정 삭제·재로드 영속·없는 id는 false', () => {
+    const s = new AccountStore(dir);
+    const a = s.createPassword('kim', 'pw', 'Kim');
+    expect(s.remove(a.id)).toBe(true);
+    expect(s.get(a.id)).toBeNull();
+    const s2 = new AccountStore(dir); // 재로드
+    expect(s2.count()).toBe(0);
+    expect(s2.remove('없는id')).toBe(false);
+  });
+
   it('손상 파일 fault-tolerant: 빈 store로 시작', () => {
     fs.writeFileSync(path.join(dir, 'accounts.json'), '{broken');
     expect(new AccountStore(dir).count()).toBe(0);

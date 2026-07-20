@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomBytes } from 'crypto';
 import type * as http from 'http';
 import type { Account, AccountStore } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
@@ -53,6 +54,12 @@ const CONTENT_TYPES: Record<string, string> = {
   '.json': 'application/json',
   '.woff2': 'font/woff2',
 };
+
+// 임시 비밀번호(비번 리셋 응답으로 owner에게 반환 — 목업 "임시 비밀번호" 필드 관성).
+// base64url(7바이트) = 10자 고정폭(패딩 없음) — 사용자가 그대로 옮겨 적기 쉬운 길이.
+function generateTempPassword(): string {
+  return randomBytes(7).toString('base64url');
+}
 
 function bearer(req: http.IncomingMessage): string | null {
   const h = req.headers.authorization;
@@ -124,6 +131,10 @@ export class AdminHttp {
       if (m && method === 'POST') { await this.setMemberStatus(req, res, m[1]); return; }
       m = /^\/admin\/api\/members\/([^/]+)\/permissions$/.exec(url);
       if (m && method === 'POST') { await this.setMemberPermissions(req, res, m[1]); return; }
+      m = /^\/admin\/api\/members\/([^/]+)\/reset-password$/.exec(url);
+      if (m && method === 'POST') { await this.resetMemberPassword(req, res, m[1]); return; }
+      m = /^\/admin\/api\/members\/([^/]+)$/.exec(url);
+      if (m && method === 'DELETE') { await this.deleteMember(req, res, m[1]); return; }
 
       if (url === '/admin/api/groups' && method === 'GET') { await this.listGroups(req, res); return; }
       if (url === '/admin/api/groups' && method === 'POST') { await this.createGroup(req, res); return; }
@@ -134,7 +145,12 @@ export class AdminHttp {
       if (url === '/admin/api/channels' && method === 'GET') { await this.listChannelsApi(req, res); return; }
       m = /^\/admin\/api\/channels\/([^/]+)\/visibility$/.exec(url);
       if (m && method === 'POST') { await this.setChannelVisibility(req, res, m[1]); return; }
+      m = /^\/admin\/api\/channels\/([^/]+)\/members$/.exec(url);
+      if (m && method === 'POST') { await this.setChannelMembers(req, res, m[1]); return; }
+      m = /^\/admin\/api\/channels\/([^/]+)\/groups$/.exec(url);
+      if (m && method === 'POST') { await this.setChannelGroups(req, res, m[1]); return; }
       m = /^\/admin\/api\/channels\/([^/]+)$/.exec(url);
+      if (m && method === 'GET') { await this.getChannelDetail(req, res, m[1]); return; }
       if (m && method === 'DELETE') { await this.deleteChannelApi(req, res, m[1]); return; }
 
       this.notFound(res); // S1/S2 범위 밖 api 경로 + 메서드 불일치
@@ -355,6 +371,40 @@ export class AdminHttp {
     this.json(res, 200, { ok: true });
   }
 
+  // 비번 리셋(서버 콘솔 S2 Task 3b): 서버가 새 임시 비번을 생성해 setPassword로 반영하고,
+  // owner가 본인에게 전달할 수 있도록 응답 본문에 실어 돌려준다. 자기 자신 리셋도 허용
+  // (owner가 자기 로그인 pw를 재발급받는 정상 시나리오 — 상태 변경 자기가드와 다른 결).
+  private async resetMemberPassword(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    if (!this.deps.accounts.get(id)) { this.json(res, 404, { error: 'not_found' }); return; }
+    const tempPassword = generateTempPassword();
+    this.deps.accounts.setPassword(id, tempPassword);
+    this.json(res, 200, { tempPassword });
+  }
+
+  // 거절/삭제(서버 콘솔 S2 Task 3b). owner는 자기 자신도, 다른 owner 계정도 지울 수 없다
+  // (서버가 owner 없는 상태로 잠기는 사고 방지 — setMemberStatus 자기가드와 같은 결).
+  // 성공 시 그룹 memberIds에서도 이 계정을 빼(dangling 참조 방지) 세션도 전부 무효화한다.
+  private async deleteMember(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const target = this.deps.accounts.get(id);
+    if (!target) { this.json(res, 404, { error: 'not_found' }); return; }
+    if (target.id === acc.id || target.role === 'owner') {
+      this.json(res, 403, { error: 'cannot_delete_owner' }); return;
+    }
+    const { groups, sessions } = this.deps;
+    for (const g of groups.list()) {
+      if (g.memberIds.includes(id)) {
+        groups.setMembers(g.id, g.memberIds.filter((x) => x !== id));
+      }
+    }
+    this.deps.accounts.remove(id);
+    sessions.revokeAllFor(id); // 삭제된 계정의 세션은 즉시 무효화(session-store.ts 기존 API 재사용)
+    this.json(res, 200, { ok: true });
+  }
+
   // ── 그룹 api ────────────────────────────────────────────────────────
 
   private async listGroups(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -418,18 +468,41 @@ export class AdminHttp {
 
   // ── 채널 api(메타만 — 대화 내용은 절대 이 응답에 실리지 않는다) ──────────────
 
+  // 목업 3단계 배지(공개/그룹 한정/비공개) 판정에 필요한 재료: memberCount(비공개+멤버 직접지정용)
+  // + groups(그룹명 — 이 채널을 channelIds에 담은 그룹들). 콘솔 쪽 판정 규칙(브리프):
+  // public → 공개, private+groups.length>=1 → 그룹 한정, private+groups.length===0 → 비공개.
   private async listChannelsApi(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const acc = this.requireOwner(req, res);
     if (!acc) return;
+    const allGroups = this.deps.groups.list();
     const channels = this.deps.chat.listChannels().map((c) => ({
       id: c.id,
       name: c.name,
       mode: c.mode ?? 'chat',
       visibility: c.visibility ?? 'public',
       memberCount: c.memberIds?.length ?? 0,
+      groups: allGroups.filter((g) => g.channelIds.includes(c.id)).map((g) => g.name),
       ...(c.brain ? { brain: c.brain } : {}),
     }));
     this.json(res, 200, { channels });
+  }
+
+  // 단일 채널 상세(멤버 편집기용 — memberIds가 실리는 유일한 엔드포인트. 대화 내용은 여전히
+  // 절대 안 실림, PII 최소화 관성은 목록 API와 동일하되 "누가 이 채널에 들어와 있는지"는
+  // owner가 접근을 편집하려면 알아야 하는 정보라 여기서만 예외적으로 노출한다).
+  private async getChannelDetail(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const ch = this.deps.chat.listChannels().find((c) => c.id === id);
+    if (!ch) { this.json(res, 404, { error: 'not_found' }); return; }
+    const groupIds = this.deps.groups.list().filter((g) => g.channelIds.includes(id)).map((g) => g.id);
+    this.json(res, 200, {
+      id: ch.id,
+      name: ch.name,
+      visibility: ch.visibility ?? 'public',
+      memberIds: ch.memberIds ?? [],
+      groupIds,
+    });
   }
 
   private async setChannelVisibility(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
@@ -450,6 +523,49 @@ export class AdminHttp {
     const acc = this.requireOwner(req, res);
     if (!acc) return;
     if (!this.deps.chat.deleteChannel(id)) { this.json(res, 404, { error: 'not_found' }); return; }
+    this.json(res, 200, { ok: true });
+  }
+
+  // 목업 ⑤채널의 "멤버" 버튼(비공개+멤버 직접지정 채널) — 이 채널에 들어올 수 있는 계정 id 집합을
+  // 통째로 교체한다(PATCH groups의 memberIds 관성과 동일: 넘어온 배열이 곧 최종 상태).
+  // 실존하지 않는 계정 id는 조용히 걸러낸다(patchGroup의 validIds 필터와 같은 결).
+  private async setChannelMembers(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const { chat, accounts } = this.deps;
+    if (!chat.has(id)) { this.json(res, 404, { error: 'not_found' }); return; }
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    if (!Array.isArray(body.memberIds)) { this.json(res, 400, { error: 'invalid_body' }); return; }
+    const validIds = new Set(accounts.list().map((a) => a.id));
+    const ids = body.memberIds.filter((x): x is string => typeof x === 'string' && validIds.has(x));
+    chat.setMembers(id, ids);
+    this.json(res, 200, { ok: true });
+  }
+
+  // 목업 ⑤채널의 "접근" 버튼(그룹 한정 채널) — "이 채널에 접근 가능한 그룹" 집합을 groupIds로
+  // 통째로 교체한다. 채널 쪽엔 그룹 참조 필드가 없어(그룹이 channelIds로 채널을 담는 반대 방향
+  // 설계 — group-store.ts 관성) 전 그룹을 순회하며 이 채널 id를 채널명단에 넣거나 뺀다.
+  private async setChannelGroups(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const { chat, groups } = this.deps;
+    if (!chat.has(id)) { this.json(res, 404, { error: 'not_found' }); return; }
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    if (!Array.isArray(body.groupIds)) { this.json(res, 400, { error: 'invalid_body' }); return; }
+    const allGroups = groups.list();
+    const validGroupIds = new Set(allGroups.map((g) => g.id));
+    const targetSet = new Set(body.groupIds.filter((x): x is string => typeof x === 'string' && validGroupIds.has(x)));
+    for (const g of allGroups) {
+      const has = g.channelIds.includes(id);
+      const want = targetSet.has(g.id);
+      if (has === want) continue; // 변경 없음 — 불필요한 저장 왕복 skip
+      const nextChannelIds = want ? [...g.channelIds, id] : g.channelIds.filter((c) => c !== id);
+      groups.setChannels(g.id, nextChannelIds);
+    }
     this.json(res, 200, { ok: true });
   }
 }

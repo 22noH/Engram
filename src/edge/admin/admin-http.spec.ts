@@ -302,6 +302,75 @@ describe('AdminHttp', () => {
     });
   });
 
+  // 신규 엔드포인트 owner 게이트(서버 콘솔 S2 Task 3b — 비번 리셋·계정 삭제·채널 멤버/그룹).
+  // 기존 table(위 describe)은 순서 의존(뒤 entry가 앞 entry의 산출물을 재사용)이라 손대지 않고
+  // 별도 블록으로 4종 공통 계약(무토큰 401·비owner 403·owner 200·unknown id 404)만 검증한다.
+  describe('owner 게이트(신규 엔드포인트: 비번 리셋·계정 삭제·채널 멤버/그룹)', () => {
+    let owner: ReturnType<AccountStore['createPassword']>;
+    let member: ReturnType<AccountStore['createPassword']>;
+    let ownerTok: string; let memberTok: string;
+    beforeEach(async () => {
+      owner = accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+      member = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      ownerTok = sessions.issue(owner.id).token;
+      memberTok = sessions.issue(member.id).token;
+      await startServer();
+    });
+
+    const cases: Array<{ label: string; call: (tok: string | null, targetId: string) => Promise<Response> }> = [
+      { label: 'POST members/:id/reset-password', call: (tok, id) => post(`/admin/api/members/${id}/reset-password`, tok) },
+      { label: 'DELETE members/:id', call: (tok, id) => del(`/admin/api/members/${id}`, tok) },
+      { label: 'POST channels/:id/members', call: (tok, id) => post(`/admin/api/channels/${id}/members`, tok, { memberIds: [] }) },
+      { label: 'POST channels/:id/groups', call: (tok, id) => post(`/admin/api/channels/${id}/groups`, tok, { groupIds: [] }) },
+      { label: 'GET channels/:id', call: (tok, id) => authFetch(`/admin/api/channels/${id}`, tok) },
+    ];
+    const targetFor: Record<string, string> = {
+      'POST members/:id/reset-password': '__member__',
+      'DELETE members/:id': '__member__',
+      'POST channels/:id/members': 'general',
+      'POST channels/:id/groups': 'general',
+      'GET channels/:id': 'general',
+    };
+
+    for (const c of cases) {
+      it(`${c.label}: 무토큰 → 401`, async () => {
+        const target = targetFor[c.label] === '__member__' ? member.id : targetFor[c.label];
+        const r = await c.call(null, target);
+        expect(r.status).toBe(401);
+      });
+      it(`${c.label}: 비owner(member) 세션 → 403`, async () => {
+        const target = targetFor[c.label] === '__member__' ? owner.id : targetFor[c.label];
+        const r = await c.call(memberTok, target);
+        expect(r.status).toBe(403);
+      });
+      it(`${c.label}: 없는 id → 404`, async () => {
+        const r = await c.call(ownerTok, 'nope');
+        expect(r.status).toBe(404);
+      });
+    }
+
+    it('POST members/:id/reset-password: owner 세션 → 200', async () => {
+      const r = await post(`/admin/api/members/${member.id}/reset-password`, ownerTok);
+      expect(r.status).toBe(200);
+    });
+    it('DELETE members/:id: owner 세션 → 200(대상은 member — owner delete는 별도 가드 테스트)', async () => {
+      const r = await del(`/admin/api/members/${member.id}`, ownerTok);
+      expect(r.status).toBe(200);
+    });
+    it('POST channels/:id/members: owner 세션 → 200', async () => {
+      const r = await post('/admin/api/channels/general/members', ownerTok, { memberIds: [] });
+      expect(r.status).toBe(200);
+    });
+    it('POST channels/:id/groups: owner 세션 → 200', async () => {
+      const r = await post('/admin/api/channels/general/groups', ownerTok, { groupIds: [] });
+      expect(r.status).toBe(200);
+    });
+    it('GET channels/:id: owner 세션 → 200', async () => {
+      const r = await authFetch('/admin/api/channels/general', ownerTok);
+      expect(r.status).toBe(200);
+    });
+  });
+
   describe('멤버 API', () => {
     let owner: ReturnType<AccountStore['createPassword']>;
     let ownerTok: string;
@@ -398,6 +467,52 @@ describe('AdminHttp', () => {
       const r = await post('/admin/api/members/nope/permissions', ownerTok, { permissions: [] });
       expect(r.status).toBe(404);
     });
+
+    it('POST /admin/api/members/:id/reset-password → 새 임시 비번 반환, 새 비번은 통과·구 비번은 실패', async () => {
+      const mem = accounts.createPassword('reset-me', 'oldpw123', 'ResetMe', { role: 'member', status: 'active' });
+      const r = await post(`/admin/api/members/${mem.id}/reset-password`, ownerTok);
+      expect(r.status).toBe(200);
+      const body = await r.json() as { tempPassword: string };
+      expect(typeof body.tempPassword).toBe('string');
+      expect(body.tempPassword.length).toBeGreaterThanOrEqual(8); // ~10자
+      expect(accounts.verifyPassword('reset-me', body.tempPassword)?.id).toBe(mem.id);
+      expect(accounts.verifyPassword('reset-me', 'oldpw123')).toBeNull(); // 구 비번은 무효화
+    });
+
+    it('POST /admin/api/members/:id/reset-password → 없는 id는 404', async () => {
+      const r = await post('/admin/api/members/nope/reset-password', ownerTok);
+      expect(r.status).toBe(404);
+    });
+
+    it('DELETE /admin/api/members/:id → 삭제 + 그룹 memberIds 캐스케이드 정리', async () => {
+      const mem = accounts.createPassword('del-me', 'pw12345', 'DelMe', { role: 'member', status: 'active' });
+      const g1 = groups.create('그룹1'); const g2 = groups.create('그룹2');
+      groups.setMembers(g1.id, [mem.id, owner.id]);
+      groups.setMembers(g2.id, [mem.id]);
+      const r = await del(`/admin/api/members/${mem.id}`, ownerTok);
+      expect(r.status).toBe(200);
+      expect(accounts.get(mem.id)).toBeNull();
+      expect(groups.get(g1.id)?.memberIds).toEqual([owner.id]); // mem만 빠지고 owner는 남음
+      expect(groups.get(g2.id)?.memberIds).toEqual([]);
+    });
+
+    it('DELETE /admin/api/members/:id → 없는 id는 404', async () => {
+      const r = await del('/admin/api/members/nope', ownerTok);
+      expect(r.status).toBe(404);
+    });
+
+    it('DELETE /admin/api/members/:id → 자기 자신 삭제 금지(403)', async () => {
+      const r = await del(`/admin/api/members/${owner.id}`, ownerTok);
+      expect(r.status).toBe(403);
+      expect(accounts.get(owner.id)).not.toBeNull();
+    });
+
+    it('DELETE /admin/api/members/:id → 다른 owner 삭제 금지(403)', async () => {
+      const owner2 = accounts.createPassword('boss2', 'pw', 'Boss2', { role: 'owner', status: 'active' });
+      const r = await del(`/admin/api/members/${owner2.id}`, ownerTok);
+      expect(r.status).toBe(403);
+      expect(accounts.get(owner2.id)).not.toBeNull();
+    });
   });
 
   describe('그룹 API', () => {
@@ -489,6 +604,75 @@ describe('AdminHttp', () => {
       const general = body.channels.find((c) => c.id === 'general');
       expect(general).toMatchObject({ id: 'general', name: 'general', mode: 'chat', visibility: 'public' });
       expect(typeof general.memberCount).toBe('number');
+    });
+
+    it('GET /admin/api/channels → groups(그룹명 배열) 동봉 — 이 채널을 channelIds에 담은 그룹만', async () => {
+      const dev = chat.createChannel('dev')!;
+      const g1 = groups.create('디자인팀'); const g2 = groups.create('개발팀');
+      groups.setChannels(g1.id, [dev.id]);
+      groups.setChannels(g2.id, ['general', dev.id]);
+      const r = await authFetch('/admin/api/channels', ownerTok);
+      const body = await r.json() as { channels: any[] };
+      const devDto = body.channels.find((c) => c.id === dev.id);
+      expect(devDto.groups.sort()).toEqual(['개발팀', '디자인팀']);
+      const generalDto = body.channels.find((c) => c.id === 'general');
+      expect(generalDto.groups).toEqual(['개발팀']);
+    });
+
+    it('GET /admin/api/channels/:id → 상세(memberIds·groupIds 포함)', async () => {
+      const mem = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      const g = groups.create('그룹A');
+      chat.setMembers('general', [mem.id]);
+      groups.setChannels(g.id, ['general']);
+      const r = await authFetch('/admin/api/channels/general', ownerTok);
+      expect(r.status).toBe(200);
+      const body = await r.json() as { id: string; name: string; visibility: string; memberIds: string[]; groupIds: string[] };
+      expect(body).toMatchObject({ id: 'general', name: 'general', visibility: 'public' });
+      expect(body.memberIds).toEqual([mem.id]);
+      expect(body.groupIds).toEqual([g.id]);
+    });
+
+    it('GET /admin/api/channels/:id → 없는 채널 404', async () => {
+      const r = await authFetch('/admin/api/channels/nope', ownerTok);
+      expect(r.status).toBe(404);
+    });
+
+    it('POST /admin/api/channels/:id/members → 멤버 집합 교체, 실존하지 않는 id는 소독', async () => {
+      const mem = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      const r = await post('/admin/api/channels/general/members', ownerTok, { memberIds: [mem.id, 'ghost-id'] });
+      expect(r.status).toBe(200);
+      expect(chat.listChannels().find((c) => c.id === 'general')?.memberIds).toEqual([mem.id]);
+    });
+
+    it('POST /admin/api/channels/:id/members → 없는 채널 404', async () => {
+      const r = await post('/admin/api/channels/nope/members', ownerTok, { memberIds: [] });
+      expect(r.status).toBe(404);
+    });
+
+    it('POST /admin/api/channels/:id/members → 잘못된 본문(memberIds 배열 아님) 400', async () => {
+      const r = await post('/admin/api/channels/general/members', ownerTok, { memberIds: 'not-array' });
+      expect(r.status).toBe(400);
+    });
+
+    it('POST /admin/api/channels/:id/groups → 접근 그룹 집합 교체(추가+제거 양방향), 실존하지 않는 id는 소독', async () => {
+      const dev = chat.createChannel('dev')!;
+      const g1 = groups.create('그룹1'); // 처음엔 dev 접근 有
+      const g2 = groups.create('그룹2'); // 처음엔 dev 접근 無
+      groups.setChannels(g1.id, [dev.id]);
+      const r = await post(`/admin/api/channels/${dev.id}/groups`, ownerTok, { groupIds: [g2.id, 'ghost-group'] });
+      expect(r.status).toBe(200);
+      expect(groups.get(g1.id)?.channelIds).not.toContain(dev.id); // 빠짐
+      expect(groups.get(g2.id)?.channelIds).toContain(dev.id); // 추가됨
+    });
+
+    it('POST /admin/api/channels/:id/groups → 없는 채널 404', async () => {
+      const r = await post('/admin/api/channels/nope/groups', ownerTok, { groupIds: [] });
+      expect(r.status).toBe(404);
+    });
+
+    it('POST /admin/api/channels/:id/groups → 잘못된 본문(groupIds 배열 아님) 400', async () => {
+      const r = await post('/admin/api/channels/general/groups', ownerTok, { groupIds: 'not-array' });
+      expect(r.status).toBe(400);
     });
 
     it('POST /admin/api/channels/:id/visibility → 전환', async () => {

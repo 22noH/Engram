@@ -122,4 +122,15 @@ export class AccountStore {
     this.save(list);
     return true;
   }
+
+  // 계정 삭제(서버 콘솔 S2 Task 3b — 거절/삭제). 그룹·세션 캐스케이드는 호출자(admin-http) 몫
+  // — 여기는 accounts.json에서만 제거(단일 책임, group-store.remove()와 같은 결).
+  remove(id: string): boolean {
+    const list = this.load();
+    const idx = list.findIndex((x) => x.id === id);
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    this.save(list);
+    return true;
+  }
 }
