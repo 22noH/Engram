@@ -385,7 +385,7 @@ export class AdminHttp {
 
   // 거절/삭제(서버 콘솔 S2 Task 3b). owner는 자기 자신도, 다른 owner 계정도 지울 수 없다
   // (서버가 owner 없는 상태로 잠기는 사고 방지 — setMemberStatus 자기가드와 같은 결).
-  // 성공 시 그룹 memberIds에서도 이 계정을 빼(dangling 참조 방지) 세션도 전부 무효화한다.
+  // 성공 시 그룹 memberIds·비공개 채널 memberIds에서도 이 계정을 빼(dangling 참조 방지) 세션도 전부 무효화한다.
   private async deleteMember(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
     const acc = this.requireOwner(req, res);
     if (!acc) return;
@@ -394,10 +394,16 @@ export class AdminHttp {
     if (target.id === acc.id || target.role === 'owner') {
       this.json(res, 403, { error: 'cannot_delete_owner' }); return;
     }
-    const { groups, sessions } = this.deps;
+    const { groups, sessions, chat } = this.deps;
     for (const g of groups.list()) {
       if (g.memberIds.includes(id)) {
         groups.setMembers(g.id, g.memberIds.filter((x) => x !== id));
+      }
+    }
+    // 채널 memberIds에서도 제거 — 유령 참조/memberCount 오염 방지(리뷰 지적, 자가치유를 즉시화).
+    for (const ch of chat.listChannels()) {
+      if (Array.isArray(ch.memberIds) && ch.memberIds.includes(id)) {
+        chat.setMembers(ch.id, ch.memberIds.filter((x) => x !== id));
       }
     }
     this.deps.accounts.remove(id);

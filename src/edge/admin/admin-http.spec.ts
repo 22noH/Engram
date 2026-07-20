@@ -496,6 +496,19 @@ describe('AdminHttp', () => {
       expect(groups.get(g2.id)?.memberIds).toEqual([]);
     });
 
+    it('DELETE /admin/api/members/:id → 비공개 채널 memberIds도 캐스케이드 정리(유령 참조 방지)', async () => {
+      const mem = accounts.createPassword('ch-del', 'pw12345', 'ChDel', { role: 'member', status: 'active' });
+      chat.createChannel('room1'); chat.createChannel('room2');
+      const room1 = chat.listChannels().find((c) => c.name === 'room1')!;
+      const room2 = chat.listChannels().find((c) => c.name === 'room2')!;
+      chat.setMembers(room1.id, [mem.id, owner.id]);
+      chat.setMembers(room2.id, [mem.id]);
+      const r = await del(`/admin/api/members/${mem.id}`, ownerTok);
+      expect(r.status).toBe(200);
+      expect(chat.listChannels().find((c) => c.id === room1.id)?.memberIds).toEqual([owner.id]);
+      expect(chat.listChannels().find((c) => c.id === room2.id)?.memberIds).toEqual([]);
+    });
+
     it('DELETE /admin/api/members/:id → 없는 id는 404', async () => {
       const r = await del('/admin/api/members/nope', ownerTok);
       expect(r.status).toBe(404);
