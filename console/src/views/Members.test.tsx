@@ -39,6 +39,17 @@ it('목록 렌더 — 가입 대기·멤버(owner/활성/정지) 섹션', async 
   expect(screen.getByText('owner')).toBeInTheDocument();
 });
 
+it('owner 자기 행에는 파괴적 버튼(비번 리셋·정지·거절)이 없다 — 권한만', async () => {
+  mockFetch();
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Me (server owner)')).toBeInTheDocument());
+
+  const ownerRow = screen.getByText('Me (server owner)').closest('.row') as HTMLElement;
+  expect(within(ownerRow).getByRole('button', { name: 'Permissions' })).toBeInTheDocument();
+  expect(within(ownerRow).queryByRole('button', { name: 'Reset password' })).not.toBeInTheDocument();
+  expect(within(ownerRow).queryByRole('button', { name: 'Suspend' })).not.toBeInTheDocument();
+});
+
 it('멤버 추가 폼 제출 → POST /admin/api/members 페이로드', async () => {
   let captured: { url: string; body: unknown } | null = null;
   mockFetch((url, init) => {
@@ -66,7 +77,7 @@ it('멤버 추가 폼 제출 → POST /admin/api/members 페이로드', async ()
   expect(c.body.password).toMatch(/^init-/); // 클라이언트가 자동 생성한 임시 비밀번호
 });
 
-it('승인/거절 → status POST', async () => {
+it('승인 → status POST / 정지 → status POST', async () => {
   const calls: { url: string; body: unknown }[] = [];
   mockFetch((url, init) => {
     if (/\/admin\/api\/members\/.+\/status$/.test(url) && init?.method === 'POST') {
@@ -87,6 +98,59 @@ it('승인/거절 → status POST', async () => {
   fireEvent.click(within(activeRow).getByRole('button', { name: 'Suspend' }));
   await waitFor(() => expect(calls).toHaveLength(2));
   expect(calls[1]).toEqual({ url: '/admin/api/members/u-active/status', body: { status: 'suspended' } });
+});
+
+it('거절 → 확인 후 DELETE /admin/api/members/:id', async () => {
+  const calls: string[] = [];
+  mockFetch((url, init) => {
+    if (url === '/admin/api/members/u-pend' && init?.method === 'DELETE') {
+      calls.push(url);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return null;
+  });
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Minsu')).toBeInTheDocument());
+
+  const pendingRow = screen.getByText('Minsu').closest('.row') as HTMLElement;
+  fireEvent.click(within(pendingRow).getByRole('button', { name: 'Reject' }));
+
+  await waitFor(() => expect(calls).toEqual(['/admin/api/members/u-pend']));
+  expect(window.confirm).toHaveBeenCalled();
+});
+
+it('거절 확인창 취소 → DELETE 호출 안 함', async () => {
+  let called = false;
+  mockFetch((url, init) => {
+    if (url === '/admin/api/members/u-pend' && init?.method === 'DELETE') { called = true; }
+    return null;
+  });
+  vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Minsu')).toBeInTheDocument());
+
+  const pendingRow = screen.getByText('Minsu').closest('.row') as HTMLElement;
+  fireEvent.click(within(pendingRow).getByRole('button', { name: 'Reject' }));
+
+  await waitFor(() => expect(window.confirm).toHaveBeenCalled());
+  expect(called).toBe(false);
+});
+
+it('비번 리셋 → POST reset-password, 반환된 임시 비번을 인라인으로 표시', async () => {
+  mockFetch((url, init) => {
+    if (url === '/admin/api/members/u-active/reset-password' && init?.method === 'POST') {
+      return new Response(JSON.stringify({ tempPassword: 'temp-xyz9' }), { status: 200 });
+    }
+    return null;
+  });
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Seojun')).toBeInTheDocument());
+
+  const activeRow = screen.getByText('Seojun').closest('.row') as HTMLElement;
+  fireEvent.click(within(activeRow).getByRole('button', { name: 'Reset password' }));
+
+  await waitFor(() => expect(screen.getByText('temp-xyz9')).toBeInTheDocument());
 });
 
 it('정지된 멤버는 복구 버튼만', async () => {

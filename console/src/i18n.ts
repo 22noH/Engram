@@ -83,6 +83,14 @@ export const T = {
   resetPasswordBtn: ko ? '비번 리셋' : 'Reset password',
   suspendBtn: ko ? '정지' : 'Suspend',
   restoreBtn: ko ? '복구' : 'Restore',
+  rejectMemberConfirm: (name: string) => (ko
+    ? `${name}님의 가입 요청을 거절할까요? 계정이 삭제되며 되돌릴 수 없어요.`
+    : `Reject ${name}'s join request? The account will be deleted and this cannot be undone.`),
+  tempPasswordRevealHeading: ko ? '임시 비밀번호' : 'Temporary password',
+  tempPasswordRevealHint: ko
+    ? '복사해서 전달하세요. 창을 닫으면 다시 볼 수 없어요.'
+    : "Copy and share it. You won't be able to see it again after closing.",
+  closeBtn: ko ? '닫기' : 'Close',
 
   // ── 그룹 ──
   groupsTitle: ko ? '그룹' : 'Groups',
@@ -111,10 +119,17 @@ export const T = {
     : "Manage each channel's visibility and reply model. Conversation content is never shown here (anti-surveillance).",
   publicChip: ko ? '공개' : 'Public',
   privateChip: ko ? '비공개' : 'Private',
+  groupLimitedChip: ko ? '그룹 한정' : 'Group-limited',
   makePrivateBtn: ko ? '비공개 전환' : 'Make private',
-  makePublicBtn: ko ? '공개 전환' : 'Make public',
   allMembers: ko ? '멤버 전체' : 'All members',
   channelMemberCount: (n: number) => (ko ? `멤버 ${n}명` : `${n} members`),
   modelLabel: ko ? '모델' : 'Model',
   defaultModel: ko ? '기본' : 'Default',
+  modelBtn: ko ? '모델' : 'Model',
+  modelBtnTooltip: ko ? 'S3에서 제공돼요' : 'Coming in S3',
+  channelMembersBtn: ko ? '멤버' : 'Members',
+  accessBtn: ko ? '접근' : 'Access',
+  deleteChannelConfirm: (name: string) => (ko
+    ? `# ${name} 채널을 삭제할까요? 되돌릴 수 없어요.`
+    : `Delete #${name}? This cannot be undone.`),
 } as const;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { T } from '../i18n';
 import {
   fetchMembers, fetchGroups, createMember, setMemberStatus, setMemberPermissions,
+  resetMemberPassword, deleteMember,
   type MemberDto, type GroupDto,
 } from '../api';
 import { Nav, type NavKey } from '../components/Nav';
@@ -9,6 +10,10 @@ import { PERMISSIONS, permissionLabel } from '../permissions';
 
 // ③ 멤버 — 목업 픽셀 그대로(+ 버튼→인라인 폼, 가입 대기 그룹, 멤버 그룹, 권한 편집은 목업에
 // 상태가 안 그려져 있어 그룹 화면의 체크박스 문법을 재사용해 인라인으로 폈다 — report 참조).
+// S2 풍성판(task-3c): 거절=삭제(확인 후 DELETE, 승인 대기는 되돌릴 상태가 없어 정지가 아니라
+// 계정 자체를 지운다 — 백엔드 계약과 동일한 결)/비번 리셋=서버가 새 임시 비번을 만들어 돌려주면
+// 그 값을 owner에게만 인라인으로 잠깐 보여준다(재조회 불가 — 창을 닫으면 다시 못 봄, 목업엔 없는
+// 신규 UI라 report에 명시).
 
 function genTempPassword(): string {
   return 'init-' + Math.random().toString(36).slice(2, 6);
@@ -27,6 +32,8 @@ export function Members({ serverName, role, active, onNavigate }: {
   const [busy, setBusy] = useState(false);
   const [permEditId, setPermEditId] = useState<string | null>(null);
   const [permDraft, setPermDraft] = useState<string[]>([]);
+  const [resetBusyId, setResetBusyId] = useState<string | null>(null);
+  const [resetInfo, setResetInfo] = useState<{ id: string; value: string } | null>(null);
 
   const load = () => {
     fetchMembers().then(setMembers);
@@ -49,6 +56,19 @@ export function Members({ serverName, role, active, onNavigate }: {
   const changeStatus = async (id: string, status: 'active' | 'suspended') => {
     await setMemberStatus(id, status);
     load();
+  };
+
+  const rejectMember = async (m: MemberDto) => {
+    if (!window.confirm(T.rejectMemberConfirm(m.displayName))) return;
+    await deleteMember(m.id);
+    load();
+  };
+
+  const doResetPassword = async (id: string) => {
+    setResetBusyId(id);
+    const r = await resetMemberPassword(id);
+    setResetBusyId(null);
+    if (!('error' in r)) setResetInfo({ id, value: r.tempPassword });
   };
 
   const openPerms = (m: MemberDto) => { setPermEditId(m.id); setPermDraft(m.permissions); };
@@ -119,7 +139,7 @@ export function Members({ serverName, role, active, onNavigate }: {
                     <span className="chip pend">{T.pendingChip}</span>
                     <div className="btns">
                       <button className="pri" onClick={() => changeStatus(m.id, 'active')}>{T.approveBtn}</button>
-                      <button onClick={() => changeStatus(m.id, 'suspended')}>{T.rejectBtn}</button>
+                      <button onClick={() => rejectMember(m)}>{T.rejectBtn}</button>
                     </div>
                   </div>
                 ))}
@@ -144,7 +164,7 @@ export function Members({ serverName, role, active, onNavigate }: {
                     {m.status !== 'suspended' && <button onClick={() => openPerms(m)}>{T.permissionsBtn}</button>}
                     {m.role !== 'owner' && m.status === 'active' && (
                       <>
-                        <button disabled title={T.comingSoon}>{T.resetPasswordBtn}</button>
+                        <button disabled={resetBusyId === m.id} onClick={() => doResetPassword(m.id)}>{T.resetPasswordBtn}</button>
                         <button className="danger" onClick={() => changeStatus(m.id, 'suspended')}>{T.suspendBtn}</button>
                       </>
                     )}
@@ -164,6 +184,18 @@ export function Members({ serverName, role, active, onNavigate }: {
                     <div className="btns">
                       <button className="pri" onClick={() => savePerms(m.id)}>{T.save}</button>
                       <button onClick={() => setPermEditId(null)}>{T.cancel}</button>
+                    </div>
+                  </div>
+                )}
+                {resetInfo?.id === m.id && (
+                  <div className="row">
+                    <div className="who">
+                      <div className="n">{T.tempPasswordRevealHeading}</div>
+                      <div className="id">{resetInfo.value}</div>
+                      <div className="d">{T.tempPasswordRevealHint}</div>
+                    </div>
+                    <div className="btns">
+                      <button onClick={() => setResetInfo(null)}>{T.closeBtn}</button>
                     </div>
                   </div>
                 )}

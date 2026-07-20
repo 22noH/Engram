@@ -125,6 +125,22 @@ export async function setMemberPermissions(id: string, permissions: string[]): P
   } catch { return false; }
 }
 
+export async function resetMemberPassword(id: string): Promise<{ tempPassword: string } | { error: string }> {
+  try {
+    const r = await postJson(`/admin/api/members/${encodeURIComponent(id)}/reset-password`, {});
+    const b = await r.json().catch(() => ({})) as { tempPassword?: string; error?: string };
+    if (r.ok && typeof b.tempPassword === 'string') return { tempPassword: b.tempPassword };
+    return { error: b.error ?? `http ${r.status}` };
+  } catch { return { error: 'network' }; }
+}
+
+export async function deleteMember(id: string): Promise<boolean> {
+  try {
+    const r = await apiFetch(`/admin/api/members/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return r.ok;
+  } catch { return false; }
+}
+
 export interface GroupDto {
   id: string; name: string; memberIds: string[]; permissions: string[]; channelIds: string[]; createdAt: string;
 }
@@ -167,6 +183,7 @@ export async function deleteGroup(id: string): Promise<boolean> {
 
 export interface ChannelDto {
   id: string; name: string; mode: string; visibility: 'public' | 'private'; memberCount: number; brain?: string;
+  groups: string[]; // 이 채널을 접근 목록에 넣은 그룹명 — 콘솔 3단계 배지(공개/그룹 한정/비공개) 판정 재료.
 }
 
 export async function fetchChannels(): Promise<ChannelDto[] | null> {
@@ -178,9 +195,35 @@ export async function fetchChannels(): Promise<ChannelDto[] | null> {
   } catch { return null; }
 }
 
+export interface ChannelDetailDto {
+  id: string; name: string; visibility: 'public' | 'private'; memberIds: string[]; groupIds: string[];
+}
+
+export async function fetchChannelDetail(id: string): Promise<ChannelDetailDto | null> {
+  try {
+    const r = await apiFetch(`/admin/api/channels/${encodeURIComponent(id)}`);
+    if (!r.ok) return null;
+    return await r.json().catch(() => null) as ChannelDetailDto | null;
+  } catch { return null; }
+}
+
 export async function setChannelVisibility(id: string, visibility: 'public' | 'private'): Promise<boolean> {
   try {
     const r = await postJson(`/admin/api/channels/${encodeURIComponent(id)}/visibility`, { visibility });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function setChannelMembers(id: string, memberIds: string[]): Promise<boolean> {
+  try {
+    const r = await postJson(`/admin/api/channels/${encodeURIComponent(id)}/members`, { memberIds });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function setChannelGroups(id: string, groupIds: string[]): Promise<boolean> {
+  try {
+    const r = await postJson(`/admin/api/channels/${encodeURIComponent(id)}/groups`, { groupIds });
     return r.ok;
   } catch { return false; }
 }
