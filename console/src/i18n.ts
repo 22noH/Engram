@@ -133,4 +133,74 @@ export const T = {
   deleteChannelConfirm: (name: string) => (ko
     ? `# ${name} 채널을 삭제할까요? 되돌릴 수 없어요.`
     : `Delete #${name}? This cannot be undone.`),
+
+  // ── 모델 ──
+  modelsTitle: ko ? '모델' : 'Models',
+  modelsSub: ko
+    ? '데스크톱 설정창의 모델 섹션과 같은 문법 — 웹에서.'
+    : "Same grammar as the desktop settings app's model section — on the web.",
+  harnessLabel: ko ? '하네스' : 'Harness',
+  harnessEngram: ko ? '엔그램 하네스' : 'Engram harness',
+  harnessCli: ko ? 'CLI 하네스' : 'CLI harness',
+  defaultModelLabel: ko ? '기본 모델' : 'Default model',
+  registeredModelsHeading: ko ? '등록된 모델' : 'Registered models',
+  defaultBadge: ko ? '기본' : 'Default',
+  apiKeySetLabel: ko ? 'API 키 설정됨' : 'API key set',
+  deleteDefaultHint: ko ? '먼저 다른 모델을 기본으로 설정하세요' : 'Set another model as default first',
+  addHeading: ko ? '추가' : 'Add',
+  localModelLabel: ko ? '로컬 모델' : 'Local model',
+  modelNamePlaceholder: ko ? '모델 이름' : 'Model name',
+  addBtn: ko ? '추가' : 'Add',
+  anthropicApiKeyLabel: ko ? 'Anthropic API 키' : 'Anthropic API key',
+  apiKeyPlaceholder: 'sk-ant-…',
+  setLabel: ko ? '설정됨' : 'Set',
+
+  // ── MCP ──
+  mcpTitle: 'MCP',
+  mcpSub: ko ? '서버의 모델이 쓸 수 있는 외부 도구.' : 'External tools the server model can use.',
+  registeredServersHeading: ko ? '등록된 서버' : 'Registered servers',
+  claudeManagedChip: ko ? 'Claude 관리' : 'Managed by Claude',
+  mcpNameLabel: ko ? '이름' : 'Name',
+  mcpCommandOrUrlLabel: ko ? '명령 또는 URL' : 'Command or URL',
+  mcpCommandOrUrlPlaceholder: ko ? 'npx -y … 또는 https://…' : 'npx -y … or https://…',
+
+  // ── 위키(운영 설정) ──
+  wikiOpsTitle: ko ? '위키' : 'Wiki',
+  wikiOpsSub: ko
+    ? '팀의 공유 지식. 페이지 열람·승인은 앱에서, 여기는 운영 설정.'
+    : "Your team's shared knowledge. Read and approve pages in the app — this is operational settings.",
+  statPages: ko ? '페이지' : 'Pages',
+  statPendingProposals: ko ? '승인 대기' : 'Pending approval',
+  gitRemoteHeading: ko ? 'git 원격 동기화' : 'Git remote sync',
+  remoteRepoLabel: ko ? '원격 저장소' : 'Remote repository',
+  branchLabel: ko ? '브랜치' : 'Branch',
+  syncHint: ko ? '60초마다 pull/push · 충돌은 자동 병합' : 'Pulls/pushes every 60s · conflicts auto-merge',
+
+  // ── 서버 설정 ──
+  serverSettingsTitle: ko ? '서버 설정' : 'Server settings',
+  serverSettingsSub: ko ? '바꾼 설정은 저장 후 적용돼요.' : 'Changes take effect after you save.',
+  serverNameLabel: ko ? '서버 이름' : 'Server name',
+  portLabel: ko ? '포트' : 'Port',
+  portHint: ko ? '클라이언트가 붙는 포트' : 'The port clients connect to',
+  restartHint: ko ? '재시작 후 적용' : 'Applies after restart',
+  exposureLabel: ko ? '공개 범위' : 'Exposure',
+  exposureLocal: ko ? '이 컴퓨터만' : 'This computer only',
+  exposureLan: ko ? '내부망(LAN)까지' : 'Local network (LAN)',
+  exposureInternet: ko ? '인터넷 공개' : 'Public internet',
+  exposureHint: ko ? '인터넷 공개는 HTTPS 구성 안내를 참고하세요' : 'See the HTTPS setup guide before exposing to the internet',
+  ssoLabel: ko ? 'SSO (선택)' : 'SSO (optional)',
+  oidcIssuerPlaceholder: ko ? 'OIDC 발급자 URL' : 'OIDC issuer URL',
+  oidcClientIdPlaceholder: ko ? 'OIDC 클라이언트 ID' : 'OIDC client ID',
+  oidcClientSecretPlaceholder: ko ? 'OIDC 클라이언트 시크릿' : 'OIDC client secret',
+  codingLabel: ko ? '코딩 허용' : 'Allow coding',
+  codingOffDefault: ko ? '꺼짐 (기본)' : 'Off (default)',
+  codingHint: ko
+    ? '켜면 AI가 이 서버 컴퓨터에서 코드를 실행해요 — 실행 모드·경로 제한 설정이 열립니다'
+    : "Turning this on lets the AI run code on this server's computer — execution mode and path-restriction settings open up",
+  clientDeployHeading: ko ? '클라이언트 배포' : 'Client deploy',
+  deployTitle: ko ? '팀원용 클라이언트 설정 내려받기' : 'Download client settings for teammates',
+  deploySub: ko
+    ? '이 파일(preset)을 엔그램 앱 설치 폴더에 넣으면, 그 앱은 켜자마자 이 서버의 로그인 화면으로 시작해요. 팀원에게 앱 설치 파일과 함께 전달하세요.'
+    : "Drop this file (preset) into an Engram app's install folder and that app starts straight at this server's sign-in screen. Share it with teammates alongside the installer.",
+  downloadPresetBtn: ko ? 'preset.json 다운로드' : 'Download preset.json',
 } as const;

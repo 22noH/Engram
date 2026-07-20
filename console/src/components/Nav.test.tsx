@@ -3,7 +3,7 @@ import { Nav } from './Nav';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
-it('S2: 멤버·그룹·채널 활성화(disabled 클래스 없음)+클릭 시 onNavigate', () => {
+it('S3: 멤버·그룹·채널·모델·MCP·위키·서버설정·클라이언트배포 활성화(disabled 클래스 없음)+클릭 시 onNavigate', () => {
   const onNavigate = vi.fn();
   const { container } = render(
     <Nav serverName="Our Team" address="127.0.0.1:47800" active="overview" onNavigate={onNavigate} role="owner" />,
@@ -11,13 +11,18 @@ it('S2: 멤버·그룹·채널 활성화(disabled 클래스 없음)+클릭 시 o
   const items = Array.from(container.querySelectorAll('.nitem'));
   const find = (text: string) => items.find((el) => el.textContent?.includes(text)) as HTMLElement;
 
-  for (const [label, key] of [['Members', 'members'], ['Groups', 'groups'], ['Channels', 'channels']] as const) {
+  const enabledPairs = [
+    ['Members', 'members'], ['Groups', 'groups'], ['Channels', 'channels'],
+    ['Models', 'models'], ['MCP', 'mcp'], ['Wiki', 'wiki'],
+    ['Server settings', 'settings'], ['Client deploy', 'deploy'],
+  ] as const;
+  for (const [label, key] of enabledPairs) {
     const item = find(label);
     expect(item.className).not.toContain('disabled');
     fireEvent.click(item);
     expect(onNavigate).toHaveBeenCalledWith(key);
   }
 
-  // 나머지는 여전히 비활성.
-  expect(find('Models').className).toContain('disabled');
+  // 상태·로그만 여전히 비활성(S4).
+  expect(find('Status & logs').className).toContain('disabled');
 });

@@ -234,3 +234,129 @@ export async function deleteChannel(id: string): Promise<boolean> {
     return r.ok;
   } catch { return false; }
 }
+
+// ── 모델·MCP·위키·서버설정·배포(서버 콘솔 S3 Task 3 — admin-http.ts의 계약 그대로 미러) ──────
+
+export interface ModelDto { key: string; provider: string; model: string; isDefault: boolean; hasApiKey: boolean }
+export interface ModelsData { default: string; harness: 'cli' | 'engram'; models: ModelDto[] }
+
+export async function fetchModels(): Promise<ModelsData | null> {
+  try {
+    const r = await apiFetch('/admin/api/models');
+    if (!r.ok) return null;
+    return await r.json().catch(() => null) as ModelsData | null;
+  } catch { return null; }
+}
+
+export async function addOllamaModel(model: string, name: string): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/models/ollama', { model, name });
+    return r.ok;
+  } catch { return false; }
+}
+
+// apiKey는 저장 헬퍼로 그대로 넘어갈 뿐 이 함수가 반환하는 값에는 절대 담기지 않는다
+// (호출부가 성공 여부만 boolean으로 받아 입력칸을 비우는 데 쓴다 — 원문을 되돌려줄 경로 자체가 없음).
+export async function saveModelApiKey(apiKey: string): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/models/api-key', { apiKey });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function setDefaultModel(key: string): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/models/default', { key });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function deleteModel(key: string): Promise<boolean> {
+  try {
+    const r = await apiFetch(`/admin/api/models/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    return r.ok;
+  } catch { return false; }
+}
+
+export interface McpServerDto { name: string; command?: string; args?: string[]; url?: string; source?: 'claude' }
+
+export async function fetchMcp(): Promise<McpServerDto[] | null> {
+  try {
+    const r = await apiFetch('/admin/api/mcp');
+    if (!r.ok) return null;
+    const b = await r.json().catch(() => null) as { servers?: McpServerDto[] } | null;
+    return b?.servers ?? null;
+  } catch { return null; }
+}
+
+export async function addMcp(name: string, commandOrUrl: string): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/mcp', { name, commandOrUrl });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function deleteMcp(name: string): Promise<boolean> {
+  try {
+    const r = await apiFetch(`/admin/api/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    return r.ok;
+  } catch { return false; }
+}
+
+export interface WikiData { remote: { url?: string; branch?: string }; pages: number; pendingProposals: number }
+
+export async function fetchWiki(): Promise<WikiData | null> {
+  try {
+    const r = await apiFetch('/admin/api/wiki');
+    if (!r.ok) return null;
+    return await r.json().catch(() => null) as WikiData | null;
+  } catch { return null; }
+}
+
+export async function saveWikiRemote(url: string, branch: string): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/wiki/remote', { url, branch });
+    return r.ok;
+  } catch { return false; }
+}
+
+export type Exposure = 'local' | 'lan' | 'internet';
+export type CodingMode = 'auto' | 'allowlist' | 'off';
+
+export interface ServerSettingsData {
+  serverName?: string; port: number; bind: string; exposure: Exposure;
+  oidcIssuer?: string; oidcClientId?: string; hasOidcSecret: boolean; codingMode: CodingMode;
+}
+
+export async function fetchServerSettings(): Promise<ServerSettingsData | null> {
+  try {
+    const r = await apiFetch('/admin/api/server-settings');
+    if (!r.ok) return null;
+    return await r.json().catch(() => null) as ServerSettingsData | null;
+  } catch { return null; }
+}
+
+export interface ServerSettingsPatch {
+  serverName?: string; port?: string | number; exposure?: Exposure;
+  oidc?: { issuer: string; clientId: string; clientSecret?: string };
+  codingMode?: CodingMode;
+}
+
+// clientSecret은 빈 값이면 서버가 기존 값을 보존한다(admin-http.ts saveServerSettings 계약) —
+// 여기서도 원문을 응답으로 되받지 않는다(boolean만).
+export async function saveServerSettings(patch: ServerSettingsPatch): Promise<boolean> {
+  try {
+    const r = await postJson('/admin/api/server-settings', patch);
+    return r.ok;
+  } catch { return false; }
+}
+
+// preset.json은 다운로드 유도용(admin-http.ts가 content-disposition: attachment로 응답) — blob으로
+// 받아 호출부(DeployCard)가 objectURL+임시 <a>.click()으로 브라우저 저장 대화상자를 띄운다.
+export async function fetchPresetBlob(): Promise<Blob | null> {
+  try {
+    const r = await apiFetch('/admin/api/preset');
+    if (!r.ok) return null;
+    return await r.blob();
+  } catch { return null; }
+}

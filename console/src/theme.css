@@ -128,3 +128,17 @@ button.chip { font:inherit; cursor:pointer; background:transparent; -webkit-appe
 
 .head-row { display:flex; align-items:flex-start; gap:12px; }
 .head-row .t { flex:1; }
+
+/* 모델·MCP·위키·서버설정(S3 Task 3) — 목업 ⑥⑦⑧⑨의 배포 카드·저장바(원본 CSS 그대로 이식,
+   .btn-accent류와 패딩/라운드 값이 미묘하게 달라 억지로 합치지 않고 원본 선택자를 그대로 둔다). */
+.deploy { display:flex; align-items:center; gap:14px; padding:14px; }
+.deploy .d { flex:1; }
+.deploy .d .t { font-weight:650; font-size:13.5px; margin-bottom:3px; }
+.deploy .d .s { font-size:12px; color:var(--dim); line-height:1.5; }
+.deploy button { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+                 padding:9px 16px; border-radius:8px; cursor:pointer; flex:none; }
+.deploy button:disabled { opacity:.6; cursor:default; }
+.savebar { display:flex; justify-content:flex-end; margin-top:10px; }
+.savebar button { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+                   padding:8px 22px; border-radius:8px; cursor:pointer; }
+.savebar button:disabled { opacity:.6; cursor:default; }

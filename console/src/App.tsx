@@ -6,6 +6,11 @@ import { Overview } from './views/Overview';
 import { Members } from './views/Members';
 import { Groups } from './views/Groups';
 import { Channels } from './views/Channels';
+import { Models } from './views/Models';
+import { Mcp } from './views/Mcp';
+import { Wiki } from './views/Wiki';
+import { ServerSettings } from './views/ServerSettings';
+import { Deploy } from './views/Deploy';
 import type { NavKey } from './components/Nav';
 
 type View = 'loading' | 'setup' | 'login' | 'console';
@@ -49,5 +54,10 @@ export default function App() {
   if (nav === 'members') return <Members {...consoleProps} />;
   if (nav === 'groups') return <Groups {...consoleProps} />;
   if (nav === 'channels') return <Channels {...consoleProps} />;
+  if (nav === 'models') return <Models {...consoleProps} />;
+  if (nav === 'mcp') return <Mcp {...consoleProps} />;
+  if (nav === 'wiki') return <Wiki {...consoleProps} />;
+  if (nav === 'settings') return <ServerSettings {...consoleProps} />;
+  if (nav === 'deploy') return <Deploy {...consoleProps} />;
   return <Overview {...consoleProps} />;
 }

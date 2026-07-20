@@ -6,18 +6,19 @@ export type NavKey =
 
 interface NavItem { key: NavKey; label: string; icon: string; color: string; enabled: boolean }
 
-// 목업 10항목 그대로 — S2는 멤버·그룹·채널까지 구현되어 활성(나머지 6개는 여전히 비활성).
+// 목업 10항목 그대로 — S3는 모델·MCP·위키·서버설정·클라이언트배포까지 구현되어 활성
+// (상태·로그만 S4까지 비활성으로 남는다).
 function items(): NavItem[] {
   return [
     { key: 'overview', label: T.navOverview, icon: '●', color: '#56d364', enabled: true },
     { key: 'members', label: T.navMembers, icon: '👥', color: '#3aa5de', enabled: true },
     { key: 'groups', label: T.navGroups, icon: '▣', color: '#1d9e75', enabled: true },
     { key: 'channels', label: T.navChannels, icon: '#', color: '#7f77dd', enabled: true },
-    { key: 'models', label: T.navModels, icon: '▦', color: '#3aa5de', enabled: false },
-    { key: 'mcp', label: T.navMcp, icon: '⌘', color: '#7f77dd', enabled: false },
-    { key: 'wiki', label: T.navWiki, icon: '☁', color: '#1d9e75', enabled: false },
-    { key: 'settings', label: T.navSettings, icon: '⚙', color: '#888780', enabled: false },
-    { key: 'deploy', label: T.navDeploy, icon: '⬇', color: '#ba7517', enabled: false },
+    { key: 'models', label: T.navModels, icon: '▦', color: '#3aa5de', enabled: true },
+    { key: 'mcp', label: T.navMcp, icon: '⌘', color: '#7f77dd', enabled: true },
+    { key: 'wiki', label: T.navWiki, icon: '☁', color: '#1d9e75', enabled: true },
+    { key: 'settings', label: T.navSettings, icon: '⚙', color: '#888780', enabled: true },
+    { key: 'deploy', label: T.navDeploy, icon: '⬇', color: '#ba7517', enabled: true },
     { key: 'status', label: T.navStatus, icon: '≡', color: '#56d364', enabled: false },
   ];
 }
