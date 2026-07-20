@@ -9,7 +9,7 @@ import { ChatStore } from '../messenger/chat-store';
 import { AdminHttp, type AdminHttpDeps } from './admin-http';
 
 describe('AdminHttp', () => {
-  let dir: string; let distDir: string;
+  let dir: string; let distDir: string; let configDir: string;
   let accounts: AccountStore; let sessions: SessionStore; let chat: ChatStore; let groups: GroupStore;
   let wikiPages: unknown[]; let pending: unknown[];
   let server: http.Server; let base: string;
@@ -20,6 +20,7 @@ describe('AdminHttp', () => {
       wiki: { listPages: async () => wikiPages } as any,
       proposals: { listPending: async () => pending } as any,
       distDir,
+      configDir,
       ...overrides,
     };
     const admin = new AdminHttp(deps);
@@ -62,6 +63,7 @@ describe('AdminHttp', () => {
     wikiPages = [{ slug: 'a' }, { slug: 'b' }];
     pending = [{ id: 'p1', title: 'Proposal One' }];
 
+    configDir = path.join(dir, 'config'); // brains.json/mcp.json 위치(모델·MCP api, 서버 콘솔 S3 Task 1) — 헬퍼가 필요시 자동 생성
     distDir = path.join(dir, 'consoledist'); // dir의 하위 — traversal 테스트에서 dir을 "루트 밖"으로 쓴다
     fs.mkdirSync(distDir);
     fs.writeFileSync(path.join(distDir, 'index.html'), '<html>console</html>');
@@ -715,6 +717,207 @@ describe('AdminHttp', () => {
     it('DELETE /admin/api/channels/:id → 없는 채널 404', async () => {
       const r = await del('/admin/api/channels/nope', ownerTok);
       expect(r.status).toBe(404);
+    });
+  });
+
+  // 서버 콘솔 S3 Task 1: 모델·MCP 관리 api. brains-file/ollama/api-brain/mcp-file 재사용.
+  describe('모델·MCP API(서버 콘솔 S3 Task 1)', () => {
+    let owner: ReturnType<AccountStore['createPassword']>;
+    let member: ReturnType<AccountStore['createPassword']>;
+    let ownerTok: string; let memberTok: string;
+    beforeEach(async () => {
+      owner = accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+      member = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      ownerTok = sessions.issue(owner.id).token;
+      memberTok = sessions.issue(member.id).token;
+      await startServer();
+    });
+
+    describe('owner 게이트(각 엔드포인트 owner 200·비owner 403·무토큰 401)', () => {
+      const cases: Array<{ label: string; call: (tok: string | null) => Promise<Response> }> = [
+        { label: 'GET models', call: (tok) => authFetch('/admin/api/models', tok) },
+        { label: 'POST models/ollama', call: (tok) => post('/admin/api/models/ollama', tok, { model: 'qwen3:8b', name: 'gate-ollama' }) },
+        { label: 'POST models/api-key', call: (tok) => post('/admin/api/models/api-key', tok, { apiKey: 'gate-key' }) },
+        { label: 'POST models/default', call: (tok) => post('/admin/api/models/default', tok, { key: 'anthropic' }) },
+        { label: 'DELETE models/:key', call: (tok) => del('/admin/api/models/gate-ollama', tok) },
+        { label: 'GET mcp', call: (tok) => authFetch('/admin/api/mcp', tok) },
+        { label: 'POST mcp', call: (tok) => post('/admin/api/mcp', tok, { name: 'gate-mcp', commandOrUrl: 'npx' }) },
+        { label: 'DELETE mcp/:name', call: (tok) => del('/admin/api/mcp/gate-mcp', tok) },
+      ];
+      for (const c of cases) {
+        it(`${c.label}: 무토큰 → 401`, async () => {
+          expect((await c.call(null)).status).toBe(401);
+        });
+        it(`${c.label}: 비owner(member) 세션 → 403`, async () => {
+          expect((await c.call(memberTok)).status).toBe(403);
+        });
+      }
+      it('owner 세션 → 전체 엔드포인트 순차 200(뒤 항목이 앞 항목의 산출물을 재사용)', async () => {
+        for (const c of cases) {
+          const r = await c.call(ownerTok);
+          expect(r.status).toBe(200);
+        }
+      });
+    });
+
+    describe('GET /admin/api/models', () => {
+      it('등록된 두뇌 없음 → 빈 목록·default 빈 문자열·harness cli', async () => {
+        const r = await authFetch('/admin/api/models', ownerTok);
+        expect(r.status).toBe(200);
+        expect(await r.json()).toEqual({ default: '', harness: 'cli', models: [] });
+      });
+    });
+
+    describe('POST /admin/api/models/ollama', () => {
+      it('로컬 모델 추가 → GET models에 openai-api provider로 보임', async () => {
+        const r = await post('/admin/api/models/ollama', ownerTok, { model: 'qwen3:8b', name: 'qwen3-8b' });
+        expect(r.status).toBe(200);
+        const listRes = await authFetch('/admin/api/models', ownerTok);
+        const body = await listRes.json() as { models: any[] };
+        expect(body.models).toContainEqual({ key: 'qwen3-8b', provider: 'openai-api', model: 'qwen3:8b', isDefault: false, hasApiKey: false });
+      });
+
+      it('setDefault:true → 기본 전환 + harness engram', async () => {
+        await post('/admin/api/models/ollama', ownerTok, { model: 'qwen3:8b', name: 'qwen3-8b', setDefault: true });
+        const listRes = await authFetch('/admin/api/models', ownerTok);
+        const body = await listRes.json() as { default: string; harness: string; models: any[] };
+        expect(body.default).toBe('qwen3-8b');
+        expect(body.harness).toBe('engram');
+        expect(body.models.find((m) => m.key === 'qwen3-8b')?.isDefault).toBe(true);
+      });
+
+      it('필수 필드 누락(model 없음) → 400', async () => {
+        const r = await post('/admin/api/models/ollama', ownerTok, { name: 'x' });
+        expect(r.status).toBe(400);
+      });
+    });
+
+    describe('POST /admin/api/models/api-key — ★보안 핵심: 키 원문 미유출', () => {
+      it('저장 후 GET models 응답에 키 원문이 어디에도 없음, hasApiKey만 true', async () => {
+        const secret = 'sk-ant-super-secret-12345';
+        const saveRes = await post('/admin/api/models/api-key', ownerTok, { apiKey: secret, setDefault: true });
+        expect(saveRes.status).toBe(200);
+        const saveText = await saveRes.text();
+        expect(saveText).not.toContain(secret); // 저장 응답 자체에도 없어야 함
+
+        const listRes = await authFetch('/admin/api/models', ownerTok);
+        const rawText = await listRes.text();
+        expect(rawText).not.toContain(secret); // 핵심 단언: 원문이 응답 본문 전체에 없음
+        const body = JSON.parse(rawText) as { default: string; harness: string; models: any[] };
+        expect(body.default).toBe('anthropic');
+        expect(body.harness).toBe('engram');
+        const entry = body.models.find((m) => m.key === 'anthropic');
+        expect(entry).toMatchObject({ provider: 'anthropic-api', isDefault: true, hasApiKey: true });
+        expect(Object.keys(entry)).not.toContain('apiKey');
+      });
+
+      it('빈 apiKey → 400(저장할 게 없음)', async () => {
+        const r = await post('/admin/api/models/api-key', ownerTok, { apiKey: '' });
+        expect(r.status).toBe(400);
+      });
+    });
+
+    describe('POST /admin/api/models/default', () => {
+      it('기본 전환', async () => {
+        await post('/admin/api/models/ollama', ownerTok, { model: 'm1', name: 'a' });
+        await post('/admin/api/models/ollama', ownerTok, { model: 'm2', name: 'b', setDefault: true });
+        const r = await post('/admin/api/models/default', ownerTok, { key: 'a' });
+        expect(r.status).toBe(200);
+        const body = await (await authFetch('/admin/api/models', ownerTok)).json() as { default: string; models: any[] };
+        expect(body.default).toBe('a');
+        expect(body.models.find((m) => m.key === 'a')?.isDefault).toBe(true);
+        expect(body.models.find((m) => m.key === 'b')?.isDefault).toBe(false);
+      });
+
+      it('존재하지 않는 key → 404', async () => {
+        const r = await post('/admin/api/models/default', ownerTok, { key: 'nope' });
+        expect(r.status).toBe(404);
+      });
+    });
+
+    describe('DELETE /admin/api/models/:key', () => {
+      it('기본 모델 삭제 시도 → 400(먼저 다른 모델을 기본으로)', async () => {
+        await post('/admin/api/models/ollama', ownerTok, { model: 'm1', name: 'a', setDefault: true });
+        const r = await del('/admin/api/models/a', ownerTok);
+        expect(r.status).toBe(400);
+        const body = await (await authFetch('/admin/api/models', ownerTok)).json() as { models: any[] };
+        expect(body.models.find((m) => m.key === 'a')).toBeDefined(); // 안 지워짐
+      });
+
+      it('비기본 모델 삭제 → 200 + 목록에서 제거', async () => {
+        await post('/admin/api/models/ollama', ownerTok, { model: 'm1', name: 'a', setDefault: true });
+        await post('/admin/api/models/ollama', ownerTok, { model: 'm2', name: 'b' });
+        const r = await del('/admin/api/models/b', ownerTok);
+        expect(r.status).toBe(200);
+        const body = await (await authFetch('/admin/api/models', ownerTok)).json() as { models: any[] };
+        expect(body.models.find((m) => m.key === 'b')).toBeUndefined();
+      });
+
+      it('존재하지 않는 key → 404', async () => {
+        const r = await del('/admin/api/models/nope', ownerTok);
+        expect(r.status).toBe(404);
+      });
+    });
+
+    describe('GET /admin/api/mcp', () => {
+      it('등록된 서버 없음 → 빈 목록', async () => {
+        const r = await authFetch('/admin/api/mcp', ownerTok);
+        expect(r.status).toBe(200);
+        expect(await r.json()).toEqual({ servers: [] });
+      });
+    });
+
+    describe('POST /admin/api/mcp', () => {
+      it('추가 → GET에 보임', async () => {
+        const r = await post('/admin/api/mcp', ownerTok, { name: 'github', commandOrUrl: 'npx' });
+        expect(r.status).toBe(200);
+        const body = await (await authFetch('/admin/api/mcp', ownerTok)).json() as { servers: any[] };
+        expect(body.servers).toContainEqual({ name: 'github', command: 'npx' });
+      });
+
+      it('중복 이름 → 409', async () => {
+        await post('/admin/api/mcp', ownerTok, { name: 'github', commandOrUrl: 'npx' });
+        const r = await post('/admin/api/mcp', ownerTok, { name: 'github', commandOrUrl: 'npx' });
+        expect(r.status).toBe(409);
+      });
+
+      it('잘못된 이름(규칙 위반) → 400', async () => {
+        const r = await post('/admin/api/mcp', ownerTok, { name: 'Bad Name', commandOrUrl: 'npx' });
+        expect(r.status).toBe(400);
+      });
+
+      it('빈 commandOrUrl → 400', async () => {
+        const r = await post('/admin/api/mcp', ownerTok, { name: 'empty-cmd', commandOrUrl: '' });
+        expect(r.status).toBe(400);
+      });
+    });
+
+    describe('DELETE /admin/api/mcp/:name', () => {
+      it('삭제 → 200 + 목록에서 제거', async () => {
+        await post('/admin/api/mcp', ownerTok, { name: 'github', commandOrUrl: 'npx' });
+        const r = await del('/admin/api/mcp/github', ownerTok);
+        expect(r.status).toBe(200);
+        const body = await (await authFetch('/admin/api/mcp', ownerTok)).json() as { servers: any[] };
+        expect(body.servers).toEqual([]);
+      });
+
+      it('존재하지 않는 이름 → 404', async () => {
+        const r = await del('/admin/api/mcp/nope', ownerTok);
+        expect(r.status).toBe(404);
+      });
+
+      it("source='claude'(클로드 미러) 항목 삭제 → 403, 목록에 그대로 남음", async () => {
+        // mirrorClaudeMcp가 만드는 형태를 그대로 시뮬레이트(addMcpServer로는 source:'claude' 항목을
+        // 만들 수 없다 — 실제로도 그건 부트 시점 mirrorClaudeMcp 전용 경로).
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(path.join(configDir, 'mcp.json'), JSON.stringify({
+          mcpServers: { synced: { command: 'npx', args: ['-y', 'foo'], env: {}, source: 'claude' } },
+        }, null, 2));
+        const r = await del('/admin/api/mcp/synced', ownerTok);
+        expect(r.status).toBe(403);
+        const body = await (await authFetch('/admin/api/mcp', ownerTok)).json() as { servers: any[] };
+        expect(body.servers.find((s) => s.name === 'synced')).toBeDefined();
+      });
     });
   });
 });

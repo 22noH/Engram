@@ -2065,6 +2065,7 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
       wiki: { listPages: async () => [] } as any,
       proposals: { listPending: async () => [] } as any,
       distDir,
+      configDir: dir,
     });
     return { http };
   }

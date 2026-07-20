@@ -10,6 +10,10 @@ import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
 import type { ProposalStore } from '../../knowledge-core/proposal-store';
 import { resolveResourceDir } from '../../pal/resource-dir';
 import { sanitizePermissions } from '../auth/permissions';
+import { listBrainDetails, setDefaultBrain, removeBrainProfile } from '../../desktop/brains-file';
+import { addOllamaProfile } from '../../desktop/ollama';
+import { saveAnthropicApiKey } from '../../desktop/api-brain';
+import { listMcpServersFile, addMcpServer, removeMcpServer } from '../../desktop/mcp-file';
 
 // /admin http 창구(서버 콘솔 S1, 플랜 docs/superpowers/plans/2026-07-19-server-console-s1.md Task 2).
 // AuthHttp와 같은 결: 파싱/응답만, 로직은 store에 위임. self.adapter가 authDeps+adminDeps 둘 다
@@ -24,6 +28,7 @@ export interface AdminHttpDeps {
   wiki: WikiEngine;
   proposals: ProposalStore;
   distDir?: string; // 테스트 주입용. 기본값은 resolveResourceDir('console/dist').
+  configDir: string; // 모델·MCP api(서버 콘솔 S3 Task 1)용 — brains.json/mcp.json 위치.
 }
 
 // 본문 크기 상한(멤버/그룹/채널 api는 전부 소형 JSON — 폭주 방어용 저비용 캡).
@@ -153,7 +158,19 @@ export class AdminHttp {
       if (m && method === 'GET') { await this.getChannelDetail(req, res, m[1]); return; }
       if (m && method === 'DELETE') { await this.deleteChannelApi(req, res, m[1]); return; }
 
-      this.notFound(res); // S1/S2 범위 밖 api 경로 + 메서드 불일치
+      if (url === '/admin/api/models' && method === 'GET') { await this.listModels(req, res); return; }
+      if (url === '/admin/api/models/ollama' && method === 'POST') { await this.addOllamaModel(req, res); return; }
+      if (url === '/admin/api/models/api-key' && method === 'POST') { await this.saveModelApiKey(req, res); return; }
+      if (url === '/admin/api/models/default' && method === 'POST') { await this.setDefaultModel(req, res); return; }
+      m = /^\/admin\/api\/models\/([^/]+)$/.exec(url);
+      if (m && method === 'DELETE') { await this.deleteModel(req, res, m[1]); return; }
+
+      if (url === '/admin/api/mcp' && method === 'GET') { await this.listMcp(req, res); return; }
+      if (url === '/admin/api/mcp' && method === 'POST') { await this.addMcp(req, res); return; }
+      m = /^\/admin\/api\/mcp\/([^/]+)$/.exec(url);
+      if (m && method === 'DELETE') { await this.deleteMcp(req, res, m[1]); return; }
+
+      this.notFound(res); // S1/S2/S3 범위 밖 api 경로 + 메서드 불일치
     } catch {
       this.json(res, 500, { error: 'internal' });
     }
@@ -572,6 +589,120 @@ export class AdminHttp {
       const nextChannelIds = want ? [...g.channelIds, id] : g.channelIds.filter((c) => c !== id);
       groups.setChannels(g.id, nextChannelIds);
     }
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── 모델 API(서버 콘솔 S3 Task 1 — brains-file/ollama/api-brain 재사용) ──────────────────
+  // ★보안 핵심: listBrainDetails가 이미 apiKey/searchApiKey 원문을 걷어내고 hasApiKey/hasSearchApiKey
+  // boolean만 반환한다(브리프의 "데스크톱 설정 UI화 때 Critical이었던 원문 유출" 그 클래스 재발 방지 —
+  // 그 헬퍼가 바로 그 사고 이후 만들어진 안전 DTO다). 여기선 그 DTO에서 필요한 필드만 다시 골라
+  // 응답에 실으므로, apiKey 필드 자체가 이 함수의 어떤 변수에도 존재하지 않는다.
+  private async listModels(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const details = listBrainDetails(this.deps.configDir);
+    const defaultEntry = details.find((d) => d.isDefault);
+    // 브리프 규약: 기본 두뇌 provider가 anthropic-api/openai-api(엔그램 자체 하네스)면 'engram',
+    // 그 외(claude-cli 등 CLI 하네스)·미등록이면 'cli'.
+    const harness: 'cli' | 'engram' =
+      defaultEntry && (defaultEntry.provider === 'anthropic-api' || defaultEntry.provider === 'openai-api')
+        ? 'engram' : 'cli';
+    const models = details.map((d) => ({
+      key: d.key, provider: d.provider, model: d.model, isDefault: d.isDefault, hasApiKey: d.hasApiKey,
+    }));
+    this.json(res, 200, { default: defaultEntry?.key ?? '', harness, models });
+  }
+
+  private async addOllamaModel(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    const model = typeof body.model === 'string' ? body.model : '';
+    const name = typeof body.name === 'string' ? body.name : '';
+    if (!model.trim() || !name.trim()) { this.json(res, 400, { error: 'invalid_body' }); return; }
+    const setDefault = body.setDefault === true;
+    addOllamaProfile(this.deps.configDir, model, name, setDefault);
+    this.json(res, 200, { ok: true });
+  }
+
+  // apiKey 값은 요청 본문에서만 읽고 저장 헬퍼로 곧장 넘긴다 — 응답 본문에는 절대 되싣지 않는다.
+  private async saveModelApiKey(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey : '';
+    if (!apiKey.trim()) { this.json(res, 400, { error: 'invalid_body' }); return; } // 빈 값=저장할 게 없음
+    const setDefault = body.setDefault === true;
+    saveAnthropicApiKey(this.deps.configDir, apiKey, setDefault);
+    this.json(res, 200, { ok: true });
+  }
+
+  private async setDefaultModel(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    const key = typeof body.key === 'string' ? body.key : '';
+    if (!key.trim()) { this.json(res, 400, { error: 'invalid_body' }); return; }
+    if (!listBrainDetails(this.deps.configDir).some((d) => d.key === key)) {
+      this.json(res, 404, { error: 'not_found' }); return;
+    }
+    setDefaultBrain(this.deps.configDir, key);
+    this.json(res, 200, { ok: true });
+  }
+
+  // removeBrainProfile은 key===default면 조용히 no-op(파일 계층의 최종 안전선 — brains-file.ts 주석)
+  // 이라 여기서 먼저 판별해 400으로 명시한다(브리프: "먼저 다른 모델을 기본으로").
+  private async deleteModel(req: http.IncomingMessage, res: http.ServerResponse, key: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const entry = listBrainDetails(this.deps.configDir).find((d) => d.key === key);
+    if (!entry) { this.json(res, 404, { error: 'not_found' }); return; }
+    if (entry.isDefault) { this.json(res, 400, { error: 'cannot_delete_default' }); return; }
+    removeBrainProfile(this.deps.configDir, key);
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── MCP API(서버 콘솔 S3 Task 1 — mcp-file.ts 재사용) ──────────────────────────────────
+
+  private async listMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    this.json(res, 200, { servers: listMcpServersFile(this.deps.configDir) });
+  }
+
+  private async addMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    const name = typeof body.name === 'string' ? body.name : '';
+    const commandOrUrl = typeof body.commandOrUrl === 'string' ? body.commandOrUrl : '';
+    // addMcpServer는 이름 규칙 위반·빈 명령·중복을 전부 false로 뭉뚱그린다 — 브리프가 요구하는
+    // 409(중복)를 400(그 외 무효 입력)과 구분하려면 중복만 먼저 따로 판별해야 한다.
+    if (listMcpServersFile(this.deps.configDir).some((s) => s.name === name)) {
+      this.json(res, 409, { error: 'duplicate' }); return;
+    }
+    const ok = addMcpServer(this.deps.configDir, name, commandOrUrl, '');
+    if (!ok) { this.json(res, 400, { error: 'invalid_body' }); return; }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async deleteMcp(req: http.IncomingMessage, res: http.ServerResponse, name: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const entry = listMcpServersFile(this.deps.configDir).find((s) => s.name === name);
+    if (!entry) { this.json(res, 404, { error: 'not_found' }); return; }
+    // source==='claude'(클로드 미러 소유)는 mcp-file.ts의 removeMcpServer도 내부적으로 거부하지만
+    // 그건 조용한 no-op이라 그대로 두면 200을 돌려주게 된다 — 여기서 먼저 판별해 403으로 명시한다.
+    if (entry.source === 'claude') { this.json(res, 403, { error: 'claude_managed' }); return; }
+    removeMcpServer(this.deps.configDir, name);
     this.json(res, 200, { ok: true });
   }
 }
