@@ -18,6 +18,7 @@ import type { McpDeps } from '../mcp/engram-mcp';
 import * as mcpHttp from '../mcp/mcp-http';
 import { AdminHttp } from '../admin/admin-http';
 import type { AdminDeps } from './self.adapter';
+import { GroupStore } from '../auth/group-store';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -1734,6 +1735,130 @@ describe('비공개 채널 멤버 관리(Phase 16c)', () => {
 
     await sm.stop();
   });
+});
+
+describe('그룹 유효 권한/채널(서버 콘솔 S2, Task 1)', () => {
+  let dir: string;
+  const clients: WebSocket[] = [];
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-group-gate-'));
+  });
+  afterEach(() => {
+    for (const c of clients) c.terminate();
+    clients.length = 0;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function connectAs(sm: SelfMessenger, deps: AuthDeps, acc: Account): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(c);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+    await nextFrame(c); // authOk
+    return c;
+  }
+
+  it('그룹으로만 wiki.approve 받은 멤버는 승인 가능(개인 permissions는 비어 있음)', async () => {
+    const deps = makeAuthDeps(dir);
+    const groups = new GroupStore(dir);
+    deps.groups = groups;
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const g = groups.create('승인팀');
+    groups.setPermissions(g.id, ['wiki.approve']);
+    groups.setMembers(g.id, [acc.id]);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    const wikiDeps = {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: { listPending: async () => [proposal], get: async (id: string) => (id === proposal.id ? proposal : null) },
+      applier: { apply: async (p: Proposal) => { applied.push(p.id); }, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, acc);
+    ws.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(applied).toEqual([proposal.id]);
+
+    await sm.stop();
+  });
+
+  it('그룹 채널 접근(channelIds)으로 비공개 채널을 열람할 수 있다(memberIds에는 없어도)', async () => {
+    const deps = makeAuthDeps(dir);
+    const groups = new GroupStore(dir);
+    deps.groups = groups;
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const outsider = deps.accounts.createPassword('outsider', 'pw', 'Outsider', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    const g = groups.create('접근팀');
+    groups.setChannels(g.id, [ch.id]);
+    groups.setMembers(g.id, [outsider.id]);
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, outsider);
+    ws.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(ws);
+    expect(f.list.map((c: { name: string }) => c.name)).toContain('secret');
+
+    await sm.stop();
+  });
+
+  it('그룹 미사용(groups 미주입)이면 기존 판정과 완전히 동일 — wiki.approve 없는 개인은 여전히 거부', async () => {
+    const deps = makeAuthDeps(dir); // groups 필드 없음(undefined) — 회귀 규약
+    const acc = deps.accounts.createPassword('mem', 'pw', 'Mem', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const applied: string[] = [];
+    const proposal = fakeProposal('p1');
+    const wikiDeps = {
+      wiki: { listPages: async () => [], getPage: async () => null },
+      proposals: { listPending: async () => [proposal], get: async (id: string) => (id === proposal.id ? proposal : null) },
+      applier: { apply: async (p: Proposal) => { applied.push(p.id); }, reject: async () => {} },
+    };
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, wikiDeps as any, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, acc);
+    ws.send(JSON.stringify({ t: 'proposalApprove', id: proposal.id }));
+    expect(await noFrameWithin(ws)).toBe('timeout');
+    expect(applied).toEqual([]);
+
+    await sm.stop();
+  });
+
+  it('빈 그룹 목록(groups 있지만 GroupStore가 비어 있음)도 개인 판정과 동일(회귀)', async () => {
+    const deps = makeAuthDeps(dir);
+    deps.groups = new GroupStore(dir); // 그룹 하나도 안 만듦
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const outsider = deps.accounts.createPassword('outsider', 'pw', 'Outsider', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    const sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(sm, deps, outsider);
+    ws.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(ws);
+    expect(f.list.map((c: { name: string }) => c.name)).not.toContain('secret');
+    void ch;
+
+    await sm.stop();
+  });
+
+  async function noFrameWithin(ws: WebSocket, ms = 150): Promise<'frame' | 'timeout'> {
+    return Promise.race([
+      nextFrame(ws).then(() => 'frame' as const),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms)),
+    ]);
+  }
 });
 
 describe('/mcp HTTP 노출(Phase 8c-2)', () => {

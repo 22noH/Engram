@@ -16,6 +16,8 @@ import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
 import type { AuthSettings } from '../auth/auth.config';
 import { can, type Permission } from '../auth/permissions';
+import type { GroupStore } from '../auth/group-store';
+import { effectivePermissions, groupChannelIdsFor } from '../auth/effective-access';
 import type { AdminHttp } from '../admin/admin-http';
 import type { McpDeps } from '../mcp/engram-mcp';
 import { buildMcpServer } from '../mcp/engram-mcp';
@@ -28,6 +30,9 @@ interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: Propos
 export interface AuthDeps {
   accounts: AccountStore; sessions: SessionStore; http: AuthHttp;
   settings: { load(): AuthSettings; save(s: AuthSettings): void };
+  // 서버 콘솔 S2(Task 1): 그룹 유효 권한/채널 해소. 미주입이면 개인 권한/채널만(기존 동작과 바이트
+  // 동일 — 회귀 0). 최소 결합: AuthDeps에 얹어 self.adapter 시그니처는 그대로 둔다.
+  groups?: GroupStore;
 }
 
 // 서버 콘솔 S1(플랜 docs/superpowers/plans/2026-07-19-server-console-s1.md Task 2): /admin 정적
@@ -246,18 +251,27 @@ export class SelfMessenger implements MessengerPort {
     return !!this.authDeps && me?.role === 'owner';
   }
 
+  // 서버 콘솔 S2(Task 1): 개인 permissions ∪ 소속 그룹 permissions(더하기 — 사용자 확정). groups
+  // 미주입이면 effectivePermissions(acc, [])=개인 권한 그대로라 can()의 결과가 기존과 바이트 동일
+  // (회귀 0). owner 전권은 can()의 role 단락이 계속 담당 — 여기선 permissions만 합산해 넘긴다.
+  private effectiveAccount(me: Account): { role: string; permissions: string[] } {
+    const groups = this.authDeps?.groups?.list() ?? [];
+    return { role: me.role, permissions: effectivePermissions(me, groups) };
+  }
   // Phase 16b: 세분 권한 게이트. authDeps 미주입(무인증 모드) 또는 free 소켓(Task 1)이면 전부
   // 통과(현행 유지 — 회귀 금지, bypassAuth가 두 경우를 한 갈래로 묶는다).
   private allowed(ws: WebSocket, perm: Permission): boolean {
     if (this.bypassAuth(ws)) return true;
-    return can(this.users.get(ws), perm);
+    const me = this.users.get(ws);
+    if (!me) return false;
+    return can(this.effectiveAccount(me), perm);
   }
-  // 채널 관리 게이트: channels.manage 보유 또는 그 채널을 만든 본인(소유권 예외).
+  // 채널 관리 게이트: channels.manage 보유(개인∪그룹) 또는 그 채널을 만든 본인(소유권 예외).
   private canManageChannel(ws: WebSocket, ch: ChatChannel | undefined): boolean {
     if (this.bypassAuth(ws)) return true;
     const me = this.users.get(ws);
     if (!me) return false;
-    return can(me, 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
+    return can(this.effectiveAccount(me), 'channels.manage') || (!!ch?.creatorId && ch.creatorId === me.id);
   }
   // Phase 16c: 멤버 관리(visibility·memberIds) 게이트. 비공개 채널은 주인(creatorId)만 —
   // owner·channels.manage 예외 없음(감시 방지: 관리 권한이 비공개 채널 멤버를 "정할" 권리를 주지 않는다).
@@ -279,7 +293,11 @@ export class SelfMessenger implements MessengerPort {
     if ((ch.visibility ?? 'public') !== 'private') return true;
     const me = this.users.get(ws);
     if (!me) return false;
-    return ch.creatorId === me.id || (ch.memberIds ?? []).includes(me.id);
+    if (ch.creatorId === me.id || (ch.memberIds ?? []).includes(me.id)) return true;
+    // 서버 콘솔 S2(Task 1): 채널 접근 = memberIds ∪ (그 채널을 접근 목록에 넣은 그룹의 멤버, 더하기).
+    // groups 미주입이면 groupChannelIdsFor(.., [])=[]라 기존 판정과 동일(회귀 0).
+    const groups = this.authDeps?.groups?.list() ?? [];
+    return groupChannelIdsFor(me.id, groups).includes(ch.id);
   }
   // Task 3: 등록 두뇌 이름 목록(요청 시점 재조회 — 캐시 금지, 두뇌 추가 직후 반영).
   private brainNames(): string[] {

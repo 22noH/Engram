@@ -30,6 +30,7 @@ import type { BrainProvider } from './brain/brain.port';
 import { makeBrainBodyMerger } from './knowledge-core/wiki/wiki-merge';
 import { loadPrompt } from './agent-layer/prompt-store';
 import { AccountStore } from './edge/auth/account-store';
+import { GroupStore } from './edge/auth/group-store';
 import { SessionStore } from './edge/auth/session-store';
 import { AuthHttp } from './edge/auth/auth-http';
 import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
@@ -115,12 +116,15 @@ async function bootstrap(): Promise<void> {
     if (isServer) {
       const accounts = new AccountStore(paths.getStateDir());
       const sessions = new SessionStore(paths.getStateDir());
+      // 서버 콘솔 S2(Task 1): 그룹(groups.json) — 유효 권한/채널 해소용. self.adapter가 개인∪그룹
+      // 합집합으로 판정(effective-access.ts). Task 2에서 adminDeps에도 같은 인스턴스를 재사용한다.
+      const groups = new GroupStore(paths.getStateDir());
       const settings = {
         load: () => loadAuthSettings(paths.getConfigDir()),
         save: (s: ReturnType<typeof loadAuthSettings>) => saveAuthSettings(paths.getConfigDir(), s),
       };
       const authHttp = new AuthHttp({ accounts, sessions, stateDir: paths.getStateDir(), settings });
-      authDeps = { accounts, sessions, http: authHttp, settings };
+      authDeps = { accounts, sessions, http: authHttp, settings, groups };
       if (accounts.count() === 0) {
         logger.log(`서버 미설정 — 초기 설정 코드: ${ensureSetupCode(paths.getStateDir())}`, 'Auth');
       }
