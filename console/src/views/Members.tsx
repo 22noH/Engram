@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { T } from '../i18n';
 import {
   fetchMembers, fetchGroups, createMember, setMemberStatus, setMemberPermissions,
@@ -150,7 +150,7 @@ export function Members({ serverName, role, active, onNavigate }: {
           <div className="grp-h">{T.membersHeading(main.length)}</div>
           <div className="grp">
             {main.map((m) => (
-              <div key={m.id}>
+              <Fragment key={m.id}>
                 <div className="row">
                   <div className="who">
                     <div className="n">{m.role === 'owner' ? T.meServerOwner : m.displayName}</div>
@@ -201,7 +201,7 @@ export function Members({ serverName, role, active, onNavigate }: {
                     </div>
                   </div>
                 )}
-              </div>
+              </Fragment>
             ))}
           </div>
         </div>

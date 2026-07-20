@@ -39,6 +39,21 @@ it('목록 렌더 — 가입 대기·멤버(owner/활성/정지) 섹션', async 
   expect(screen.getByText('owner')).toBeInTheDocument();
 });
 
+it('멤버 목록 행은 .grp의 직계 자식 .row다(픽셀 리뷰 재검증 — .row:last-child 구분선 버그 회귀 방지)', async () => {
+  mockFetch();
+  render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByText('Seojun')).toBeInTheDocument());
+
+  // "멤버 N명" 그룹: owner+활성+정지 3행. Fragment로 감싸 각 행이 .grp 직계 .row여야
+  // .row:last-child 구분선이 마지막 한 행에만 적용된다(래퍼 div면 모든 행이 last-child가 됨).
+  const memberRow = screen.getByText('Seojun').closest('.row') as HTMLElement;
+  const grp = memberRow.parentElement as HTMLElement;
+  expect(grp.classList.contains('grp')).toBe(true);
+  const rows = Array.from(grp.children).filter((el) => el.classList.contains('row'));
+  expect(rows.length).toBe(3);
+  for (const row of rows) expect(row.parentElement).toBe(grp);
+});
+
 it('owner 자기 행에는 파괴적 버튼(비번 리셋·정지·거절)이 없다 — 권한만', async () => {
   mockFetch();
   render(<Members serverName="Our Team" role="owner" active="members" onNavigate={() => {}} />);
