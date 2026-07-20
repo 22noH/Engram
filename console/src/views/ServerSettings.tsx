@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { T } from '../i18n';
 import {
   fetchServerSettings, saveServerSettings, fetchMembers,
-  type ServerSettingsData, type MemberDto, type Exposure,
+  type ServerSettingsData, type MemberDto, type Exposure, type CodingMode,
 } from '../api';
 import { Nav, type NavKey } from '../components/Nav';
 import { DeployCard } from '../components/DeployCard';
@@ -14,6 +14,10 @@ import { DeployCard } from '../components/DeployCard';
 //    반영되지 않는다(Global Constraints: 헤드리스는 재시작 전까지 이전 바인드로 계속 뜬다).
 // 그리고 하나는 뺐다: 목업의 "대화 보존" select는 이 API 계약 밖(백엔드에 필드·엔드포인트가 없음
 // — 플랜 self-review에 상태·로그와 함께 S4로 명시돼 있다).
+//  · 코딩 허용은 체크박스(off/auto 2단)가 아니라 백엔드 실계약대로 3단 select다(off/auto/allowlist —
+//    review 지적: 체크박스는 저장 때마다 codingMode를 무조건 실어 보내 allowlist를 auto로 몰래
+//    강등시켰다). OIDC 블록과 같은 결로 codingTouched 플래그를 둬서, 사용자가 이 select를 실제로
+//    건드리지 않은 저장(예: 서버 이름만 바꿔 저장)은 codingMode 필드 자체를 아예 안 보낸다.
 export function ServerSettings({ serverName, role, active, onNavigate }: {
   serverName: string; role: string; active: NavKey; onNavigate: (k: NavKey) => void;
 }) {
@@ -25,7 +29,8 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
   const [oidcIssuer, setOidcIssuer] = useState('');
   const [oidcClientId, setOidcClientId] = useState('');
   const [oidcClientSecret, setOidcClientSecret] = useState('');
-  const [codingOn, setCodingOn] = useState(false);
+  const [codingMode, setCodingMode] = useState<CodingMode>('off');
+  const [codingTouched, setCodingTouched] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -38,7 +43,8 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
         setOidcIssuer(d.oidcIssuer ?? '');
         setOidcClientId(d.oidcClientId ?? '');
         setOidcClientSecret('');
-        setCodingOn(d.codingMode !== 'off');
+        setCodingMode(d.codingMode);
+        setCodingTouched(false);
       }
     });
     fetchMembers().then(setMembers);
@@ -52,7 +58,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
       serverName: name,
       port,
       exposure,
-      codingMode: codingOn ? 'auto' : 'off',
+      ...(codingTouched ? { codingMode } : {}),
       ...(oidcTouched ? { oidc: { issuer: oidcIssuer, clientId: oidcClientId, clientSecret: oidcClientSecret } } : {}),
     });
     setBusy(false);
@@ -105,11 +111,12 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
             </div>
             <div className="frow">
               <label>{T.codingLabel}</label>
-              <label style={{ width: 'auto', color: 'var(--text)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: 7 }}>
-                <input type="checkbox" checked={codingOn} onChange={(e) => setCodingOn(e.target.checked)}
-                       style={{ accentColor: 'var(--accent)' }} />
-                {T.codingOffDefault}
-              </label>
+              <select value={codingMode} style={{ maxWidth: 220 }}
+                      onChange={(e) => { setCodingMode(e.target.value as CodingMode); setCodingTouched(true); }}>
+                <option value="off">{T.codingOff}</option>
+                <option value="auto">{T.codingAuto}</option>
+                <option value="allowlist">{T.codingAllowlist}</option>
+              </select>
               <span className="hint">{T.codingHint}</span>
             </div>
           </div>

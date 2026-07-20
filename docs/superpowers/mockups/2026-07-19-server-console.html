@@ -461,10 +461,8 @@
         <span class="hint">인터넷 공개는 HTTPS 구성 안내를 참고하세요</span></div>
       <div class="frow"><label>SSO (선택)</label><input placeholder="OIDC 발급자 URL" /></div>
       <div class="frow"><label>코딩 허용</label>
-        <label style="width:auto; color:var(--text); font-size:12.5px; display:flex; align-items:center; gap:7px">
-          <input type="checkbox" style="accent-color:var(--accent)" /> 꺼짐 (기본)
-        </label>
-        <span class="hint">켜면 AI가 이 서버 컴퓨터에서 코드를 실행해요 — 실행 모드·경로 제한 설정이 열립니다</span></div>
+        <select style="max-width:220px"><option>꺼짐</option><option>자동</option><option>허용목록</option></select>
+        <span class="hint">자동 = 모든 명령을 실행해요, 허용목록 = 허용된 명령만 실행해요, 꺼짐 = 코딩 기능을 사용하지 않아요</span></div>
       <div class="frow"><label>대화 보존</label>
         <select style="max-width:220px"><option>채널당 최근 1,000개</option><option>최근 90일</option><option>무제한</option></select>
         <span class="hint">넘치는 오래된 메시지는 자동 삭제 — 위키에 저장된 지식은 유지돼요</span></div>

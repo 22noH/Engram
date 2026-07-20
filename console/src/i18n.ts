@@ -142,6 +142,9 @@ export const T = {
   harnessLabel: ko ? '하네스' : 'Harness',
   harnessEngram: ko ? '엔그램 하네스' : 'Engram harness',
   harnessCli: ko ? 'CLI 하네스' : 'CLI harness',
+  harnessEmptyHint: ko
+    ? '이 하네스에 등록된 모델이 없어요 — 아래에서 추가하세요'
+    : 'No models for this harness — add one below',
   defaultModelLabel: ko ? '기본 모델' : 'Default model',
   registeredModelsHeading: ko ? '등록된 모델' : 'Registered models',
   defaultBadge: ko ? '기본' : 'Default',
@@ -193,10 +196,12 @@ export const T = {
   oidcClientIdPlaceholder: ko ? 'OIDC 클라이언트 ID' : 'OIDC client ID',
   oidcClientSecretPlaceholder: ko ? 'OIDC 클라이언트 시크릿' : 'OIDC client secret',
   codingLabel: ko ? '코딩 허용' : 'Allow coding',
-  codingOffDefault: ko ? '꺼짐 (기본)' : 'Off (default)',
+  codingOff: ko ? '꺼짐' : 'Off',
+  codingAuto: ko ? '자동' : 'Auto',
+  codingAllowlist: ko ? '허용목록' : 'Allowlist',
   codingHint: ko
-    ? '켜면 AI가 이 서버 컴퓨터에서 코드를 실행해요 — 실행 모드·경로 제한 설정이 열립니다'
-    : "Turning this on lets the AI run code on this server's computer — execution mode and path-restriction settings open up",
+    ? '자동 = 모든 명령을 실행해요, 허용목록 = 허용된 명령만 실행해요, 꺼짐 = 코딩 기능을 사용하지 않아요'
+    : 'Auto runs any command, Allowlist runs only approved commands, Off disables coding entirely',
   clientDeployHeading: ko ? '클라이언트 배포' : 'Client deploy',
   deployTitle: ko ? '팀원용 클라이언트 설정 내려받기' : 'Download client settings for teammates',
   deploySub: ko
