@@ -157,7 +157,7 @@ async function bootstrap(): Promise<void> {
       // 안 만들어 self.adapter에 안 넘긴다(생성 자체를 스킵 — 데스크톱에서 불필요한 AdminHttp 인스턴스도
       // 안 만듦). 이 env 없는 헤드리스 서버 실행(미래 engram-server 엔트리 포함)은 기존대로 /admin 서빙.
       if (process.env.ENGRAM_DESKTOP !== '1') {
-        const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, wiki, proposals });
+        const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, groups, wiki, proposals });
         adminDeps = { http: adminHttp };
       }
     }

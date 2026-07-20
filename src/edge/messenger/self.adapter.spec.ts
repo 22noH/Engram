@@ -2061,7 +2061,7 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
 
   function makeAdminDeps(): AdminDeps {
     const http = new AdminHttp({
-      accounts, sessions, chat: store,
+      accounts, sessions, chat: store, groups: new GroupStore(dir),
       wiki: { listPages: async () => [] } as any,
       proposals: { listPending: async () => [] } as any,
       distDir,
