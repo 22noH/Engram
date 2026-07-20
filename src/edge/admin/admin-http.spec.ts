@@ -1069,6 +1069,70 @@ describe('AdminHttp', () => {
         expect(r.status).toBe(400);
         expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).port).toBe(47800);
       });
+
+      it('invalid bind(화이트리스트 아님) → 400, chat.json 미변경', async () => {
+        // 먼저 유효한 bind 설정
+        await post('/admin/api/server-settings', ownerTok, { exposure: 'local' });
+        const oldBind = ((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind;
+        expect(oldBind).toBe('127.0.0.1');
+        // 잘못된 bind로 시도
+        const r = await post('/admin/api/server-settings', ownerTok, { bind: 'not-an-ip' });
+        expect(r.status).toBe(400);
+        // 기존 값이 보존되었는지 확인
+        const newBind = ((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind;
+        expect(newBind).toBe(oldBind);
+      });
+
+      it('bind 화이트리스트: 127.0.0.1과 0.0.0.0만 허용', async () => {
+        // 127.0.0.1 허용
+        const r1 = await post('/admin/api/server-settings', ownerTok, { bind: '127.0.0.1' });
+        expect(r1.status).toBe(200);
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind).toBe('127.0.0.1');
+        // 0.0.0.0 허용
+        const r2 = await post('/admin/api/server-settings', ownerTok, { bind: '0.0.0.0' });
+        expect(r2.status).toBe(200);
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind).toBe('0.0.0.0');
+      });
+
+      it('port boolean 거부 → 400', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { port: true as any });
+        expect(r.status).toBe(400);
+      });
+
+      it('port 형식 오류(문자) → 400', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { port: 'abc' });
+        expect(r.status).toBe(400);
+      });
+
+      it('OIDC 부분 업데이트: clientSecret만 보내면 issuer/clientId 보존', async () => {
+        // 먼저 전체 OIDC 설정
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp.example', clientId: 'cid', clientSecret: 'secret1' },
+        });
+        // clientSecret만 업데이트
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { clientSecret: 'secret2' },
+        });
+        const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'auth.json'), 'utf8'));
+        expect(raw.oidc.issuer).toBe('https://idp.example'); // 보존됨
+        expect(raw.oidc.clientId).toBe('cid'); // 보존됨
+        expect(raw.oidc.clientSecret).toBe('secret2'); // 업데이트됨
+      });
+
+      it('OIDC 부분 업데이트: issuer만 보내면 clientId/clientSecret 보존', async () => {
+        // 먼저 전체 OIDC 설정
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp.example', clientId: 'cid', clientSecret: 'secret' },
+        });
+        // issuer만 업데이트
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp2.example' },
+        });
+        const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'auth.json'), 'utf8'));
+        expect(raw.oidc.issuer).toBe('https://idp2.example'); // 업데이트됨
+        expect(raw.oidc.clientId).toBe('cid'); // 보존됨
+        expect(raw.oidc.clientSecret).toBe('secret'); // 보존됨
+      });
     });
 
     describe('GET /admin/api/preset', () => {

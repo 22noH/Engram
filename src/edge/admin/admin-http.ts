@@ -802,16 +802,25 @@ export class AdminHttp {
     }
 
     // exposure→bind 매핑. bind를 직접 보내면 그 값이 exposure 파생값보다 우선(더 구체적인 입력).
+    // ★bind는 화이트리스트: 127.0.0.1(local) 또는 0.0.0.0(lan/internet)만 허용.
     let bind: string | undefined;
     if (typeof body.exposure === 'string') {
       if (body.exposure === 'local') bind = '127.0.0.1';
       else if (body.exposure === 'lan' || body.exposure === 'internet') bind = '0.0.0.0';
       else { this.json(res, 400, { error: 'invalid_exposure' }); return; }
     }
-    if (typeof body.bind === 'string' && body.bind.trim()) bind = body.bind.trim();
+    if (typeof body.bind === 'string' && body.bind.trim()) {
+      const b = body.bind.trim();
+      if (b !== '127.0.0.1' && b !== '0.0.0.0') { this.json(res, 400, { error: 'invalid_bind' }); return; }
+      bind = b;
+    }
 
+    // ★port: 숫자 또는 숫자 문자열만 허용(boolean/object 거부).
     let port: number | undefined;
     if (body.port !== undefined) {
+      if (typeof body.port === 'boolean' || typeof body.port === 'object') {
+        this.json(res, 400, { error: 'invalid_port' }); return;
+      }
       const n = Number(body.port);
       if (!Number.isInteger(n) || n <= 0 || n > 65535) { this.json(res, 400, { error: 'invalid_port' }); return; }
       port = n;
@@ -834,8 +843,10 @@ export class AdminHttp {
       }
       if (body.oidc && typeof body.oidc === 'object') {
         const o = body.oidc as Record<string, unknown>;
-        const issuer = typeof o.issuer === 'string' ? o.issuer : '';
-        const clientId = typeof o.clientId === 'string' ? o.clientId : '';
+        // ★OIDC 부분 업데이트: 빈값이면 기존 값 보존(clientSecret 보안 요구와 일관성).
+        // 필드가 없거나 빈값이면 기존 값 사용, 신규값이면 그것으로 업데이트.
+        const issuer = (typeof o.issuer === 'string' && o.issuer) ? o.issuer : (existing.oidc?.issuer ?? '');
+        const clientId = (typeof o.clientId === 'string' && o.clientId) ? o.clientId : (existing.oidc?.clientId ?? '');
         const clientSecretInput = typeof o.clientSecret === 'string' ? o.clientSecret : '';
         const clientSecret = clientSecretInput || (existing.oidc?.clientSecret ?? '');
         next.oidc = { issuer, clientId, clientSecret };
