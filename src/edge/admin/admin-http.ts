@@ -14,6 +14,11 @@ import { listBrainDetails, setDefaultBrain, removeBrainProfile } from '../../des
 import { addOllamaProfile } from '../../desktop/ollama';
 import { saveAnthropicApiKey } from '../../desktop/api-brain';
 import { listMcpServersFile, addMcpServer, removeMcpServer } from '../../desktop/mcp-file';
+import { readWikiRemoteFile, saveWikiRemote } from '../../desktop/wiki-remote-file';
+import { loadAuthSettings, saveAuthSettings, type AuthSettings } from '../auth/auth.config';
+import { loadChatConfig, saveChatBootConfig } from '../messenger/chat.config';
+import { getCommandMode, setCommandMode, type CommandMode } from '../../desktop/permissions-file';
+import { buildPreset } from '../../desktop/preset-file';
 
 // /admin http 창구(서버 콘솔 S1, 플랜 docs/superpowers/plans/2026-07-19-server-console-s1.md Task 2).
 // AuthHttp와 같은 결: 파싱/응답만, 로직은 store에 위임. self.adapter가 authDeps+adminDeps 둘 다
@@ -169,6 +174,14 @@ export class AdminHttp {
       if (url === '/admin/api/mcp' && method === 'POST') { await this.addMcp(req, res); return; }
       m = /^\/admin\/api\/mcp\/([^/]+)$/.exec(url);
       if (m && method === 'DELETE') { await this.deleteMcp(req, res, m[1]); return; }
+
+      if (url === '/admin/api/wiki' && method === 'GET') { await this.getWiki(req, res); return; }
+      if (url === '/admin/api/wiki/remote' && method === 'POST') { await this.saveWikiRemoteApi(req, res); return; }
+
+      if (url === '/admin/api/server-settings' && method === 'GET') { await this.getServerSettings(req, res); return; }
+      if (url === '/admin/api/server-settings' && method === 'POST') { await this.saveServerSettings(req, res); return; }
+
+      if (url === '/admin/api/preset' && method === 'GET') { await this.getPreset(req, res); return; }
 
       this.notFound(res); // S1/S2/S3 범위 밖 api 경로 + 메서드 불일치
     } catch {
@@ -704,5 +717,164 @@ export class AdminHttp {
     if (entry.source === 'claude') { this.json(res, 403, { error: 'claude_managed' }); return; }
     removeMcpServer(this.deps.configDir, name);
     this.json(res, 200, { ok: true });
+  }
+
+  // ── 위키 API(서버 콘솔 S3 Task 2 — wiki-remote-file.ts 재사용) ─────────────────────────
+  // 통계(pages·pendingProposals)는 overview()가 이미 쓰는 소스(wiki.listPages/proposals.listPending)를
+  // 그대로 재사용한다 — 별도 캐시나 카운터를 새로 만들지 않는다(ponytail: 기존 소스 재사용).
+
+  private async getWiki(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const form = readWikiRemoteFile(this.deps.configDir);
+    // branch는 readWikiRemoteFile이 항상 기본값 'main'을 채워 돌려준다(파일 없어도) — url 없이
+    // branch만 있는 건 의미 없는 상태라, url이 있을 때만 branch를 같이 실어 "remote 미설정"을
+    // 빈 객체로 정직하게 표현한다.
+    const remote: { url?: string; branch?: string } = {};
+    if (form.remote) { remote.url = form.remote; remote.branch = form.branch; }
+    const pages = (await this.deps.wiki.listPages()).length;
+    const pendingProposals = (await this.deps.proposals.listPending()).length;
+    this.json(res, 200, { remote, pages, pendingProposals });
+  }
+
+  private async saveWikiRemoteApi(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+    const url = typeof body.url === 'string' ? body.url : '';
+    const branch = typeof body.branch === 'string' ? body.branch : '';
+    // syncIntervalSec은 이 엔드포인트의 계약 밖(브리프: {url,branch}만) — 기존 값을 그대로 보존한다.
+    const existing = readWikiRemoteFile(this.deps.configDir);
+    saveWikiRemote(this.deps.configDir, { remote: url, branch, syncIntervalSec: existing.syncIntervalSec });
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── 서버 설정 API(서버 콘솔 S3 Task 2 — auth.config·chat.config·permissions-file 재사용) ──
+  // ★보안 핵심: GET은 OIDC clientSecret 값을 절대 응답에 싣지 않는다(hasOidcSecret boolean만 —
+  // 모델 api key와 동일한 "쓰기 전용" 계약, [[engram-project-state]] Critical 재발 방지 관성).
+  // 포트/바인드 저장은 파일에만 반영되고 런타임 재바인드는 하지 않는다 — 헤드리스 서버는 재시작
+  // 전까지 이전 바인드로 계속 뜬다(플랜 Global Constraints: "재시작 시 적용").
+
+  private async getServerSettings(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const auth = loadAuthSettings(this.deps.configDir);
+    const chatCfg = loadChatConfig(this.deps.configDir);
+    const codingMode = getCommandMode(this.deps.configDir);
+    // exposure: bind는 실제로 127.0.0.1/0.0.0.0 두 값뿐(플랜 Global Constraints) — 'lan'과 'internet'은
+    // 둘 다 0.0.0.0으로 접히는 UI 의도라 저장된 bind만으로는 구분이 불가능하다. 별도 힌트 필드를
+    // 새로 만들지 않고(YAGNI) 0.0.0.0은 항상 'lan'으로 조회되게 한다 — POST는 'internet'도 받아
+    // 같은 bind로 저장하되(안내 문구는 콘솔 쪽 책임), 조회 시엔 'lan'으로 보인다(문서화된 한계).
+    const exposure: 'local' | 'lan' = chatCfg.bind === '127.0.0.1' ? 'local' : 'lan';
+    const body: Record<string, unknown> = {
+      port: chatCfg.port,
+      bind: chatCfg.bind,
+      exposure,
+      hasOidcSecret: !!(auth.oidc && auth.oidc.clientSecret),
+      codingMode,
+    };
+    if (auth.serverName) body.serverName = auth.serverName;
+    if (auth.oidc) {
+      body.oidcIssuer = auth.oidc.issuer;
+      body.oidcClientId = auth.oidc.clientId;
+    }
+    // ★단언 가능 지점: 위 어디에도 auth.oidc.clientSecret을 body에 담는 코드가 없다.
+    this.json(res, 200, body);
+  }
+
+  private async saveServerSettings(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const parsed = await this.readBody(req);
+    if (!parsed.ok) { this.json(res, 400, { error: 'bad_body' }); return; }
+    const body = parsed.body as Record<string, unknown>;
+
+    // codingMode: permissions-file.CommandMode 실제 값(auto/allowlist/off)만 허용 — 브리프 문구의
+    // 'restricted'는 실제 파일 헬퍼엔 없는 값이라 여기선 진짜 타입을 따른다(house rule: 코드가 근거).
+    let codingMode: CommandMode | undefined;
+    if (body.codingMode !== undefined) {
+      if (body.codingMode !== 'auto' && body.codingMode !== 'allowlist' && body.codingMode !== 'off') {
+        this.json(res, 400, { error: 'invalid_coding_mode' }); return;
+      }
+      codingMode = body.codingMode;
+    }
+
+    // exposure→bind 매핑. bind를 직접 보내면 그 값이 exposure 파생값보다 우선(더 구체적인 입력).
+    let bind: string | undefined;
+    if (typeof body.exposure === 'string') {
+      if (body.exposure === 'local') bind = '127.0.0.1';
+      else if (body.exposure === 'lan' || body.exposure === 'internet') bind = '0.0.0.0';
+      else { this.json(res, 400, { error: 'invalid_exposure' }); return; }
+    }
+    if (typeof body.bind === 'string' && body.bind.trim()) bind = body.bind.trim();
+
+    let port: number | undefined;
+    if (body.port !== undefined) {
+      const n = Number(body.port);
+      if (!Number.isInteger(n) || n <= 0 || n > 65535) { this.json(res, 400, { error: 'invalid_port' }); return; }
+      port = n;
+    }
+
+    if (port !== undefined || bind !== undefined) {
+      saveChatBootConfig(this.deps.configDir, { port, bind });
+    }
+    if (codingMode !== undefined) setCommandMode(this.deps.configDir, codingMode);
+
+    // serverName·oidc는 auth.json 하나에 같이 산다(saveAuthSettings가 부분patch가 아니라 전체
+    // 스냅샷 쓰기라 — auth.config.ts) 먼저 기존 값을 읽어 병합해야 한다. clientSecret 빈값은
+    // "기존 값 보존"(★보안 요구: 브라우저가 시크릿 원문을 몰라도 다른 필드만 바꿔 저장할 수 있어야 함).
+    if (typeof body.serverName === 'string' || (body.oidc && typeof body.oidc === 'object')) {
+      const existing = loadAuthSettings(this.deps.configDir);
+      const next: AuthSettings = { ...existing };
+      if (typeof body.serverName === 'string') {
+        const trimmed = body.serverName.trim();
+        if (trimmed) next.serverName = trimmed; else delete next.serverName;
+      }
+      if (body.oidc && typeof body.oidc === 'object') {
+        const o = body.oidc as Record<string, unknown>;
+        const issuer = typeof o.issuer === 'string' ? o.issuer : '';
+        const clientId = typeof o.clientId === 'string' ? o.clientId : '';
+        const clientSecretInput = typeof o.clientSecret === 'string' ? o.clientSecret : '';
+        const clientSecret = clientSecretInput || (existing.oidc?.clientSecret ?? '');
+        next.oidc = { issuer, clientId, clientSecret };
+      }
+      saveAuthSettings(this.deps.configDir, next);
+    }
+
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── 클라이언트 배포(preset) API(서버 콘솔 S3 Task 2 — preset-file.ts 재사용) ────────────────
+  // 다운로드 강제(Content-Disposition: attachment)로 브라우저가 저장 대화상자를 띄우게 한다 —
+  // 이 파일을 받은 클라이언트가 자기 configDir에 preset.json으로 두면 desktop/main.ts가 그대로
+  // 읽어 접속을 시드한다(readPresetFile — 같은 셰이프 계약).
+
+  private async getPreset(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const chatCfg = loadChatConfig(this.deps.configDir);
+    const hostHint = this.hostnameFromHostHeader(req.headers.host);
+    const preset = buildPreset(this.deps.configDir, { bind: chatCfg.bind, port: chatCfg.port, hostHint });
+    const payload = JSON.stringify(preset, null, 2);
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'content-disposition': 'attachment; filename="preset.json"',
+    });
+    res.end(payload);
+  }
+
+  // Host 헤더("host:port" 또는 "host")에서 호스트명만 뽑는다. bind=0.0.0.0일 때 서버 프로세스가
+  // 스스로의 LAN IP를 신뢰성 있게 알 방법이 없어(멀티 NIC 등) 요청이 실제로 도달한 호스트명을
+  // 최선의 힌트로 재사용한다(브리프: "간단하게, 문서화"). IPv6 리터럴("[::1]:47800")은 대괄호
+  // 그대로 둔 채 포트만 떼어낸다 — 콜론 split이 깨지는 경우라 별도 분기.
+  private hostnameFromHostHeader(hostHeader?: string): string | undefined {
+    if (!hostHeader) return undefined;
+    if (hostHeader.startsWith('[')) {
+      const end = hostHeader.indexOf(']');
+      return end >= 0 ? hostHeader.slice(0, end + 1) : hostHeader;
+    }
+    return hostHeader.split(':')[0];
   }
 }

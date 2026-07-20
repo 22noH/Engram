@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { loadChatConfig } from './chat.config';
+import { loadChatConfig, saveChatBootConfig } from './chat.config';
 
 describe('loadChatConfig', () => {
   let dir: string;
@@ -59,6 +59,36 @@ describe('loadChatConfig', () => {
   it('65535 초과 port는 무시하고 기본값', () => {
     fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 99999 }));
     expect(loadChatConfig(dir, {}).port).toBe(47800);
+  });
+});
+
+describe('saveChatBootConfig', () => {
+  let dir: string;
+  beforeEach(() => (dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-chatcfg-save-'))));
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('파일 없음 → port/bind만 담긴 새 파일 생성, loadChatConfig 왕복', () => {
+    saveChatBootConfig(dir, { port: 5000, bind: '0.0.0.0' });
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 5000, bind: '0.0.0.0', role: 'server' });
+  });
+
+  it('기존 필드(language 등) 보존한 채 port만 부분 갱신', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 1000, bind: '127.0.0.1', language: 'ko' }));
+    saveChatBootConfig(dir, { port: 2000 });
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, 'chat.json'), 'utf8'));
+    expect(raw).toEqual({ port: 2000, bind: '127.0.0.1', language: 'ko' });
+  });
+
+  it('무효 port(범위 밖)는 조용히 무시하고 기존 값 보존', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ port: 1000 }));
+    saveChatBootConfig(dir, { port: 99999 });
+    expect(loadChatConfig(dir, {}).port).toBe(1000);
+  });
+
+  it('bind만 갱신(port 미지정) → port 기존 값 유지', () => {
+    saveChatBootConfig(dir, { port: 3333 });
+    saveChatBootConfig(dir, { bind: '0.0.0.0' });
+    expect(loadChatConfig(dir, {})).toEqual({ enabled: true, port: 3333, bind: '0.0.0.0', role: 'server' });
   });
 });
 

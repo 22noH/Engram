@@ -16,6 +16,7 @@ import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList
 import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
 import { listSchedules, removeScheduleFromFile } from './schedules-file';
 import { readWikiRemoteFile, saveWikiRemote, WikiRemoteForm } from './wiki-remote-file';
+import { readPresetFile } from './preset-file';
 import { loadCodeRepos } from '../agent-layer/coderepos';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
@@ -195,11 +196,11 @@ function openChat(): void {
   );
   // 배포 프리셋(configDir/preset.json — `{name,endpoint}`): 있으면 렌더러 URL에 주입해
   // connections.ts seed()가 그 서버를 기본 연결로 시드하게 한다. 없으면 기존 local-only 그대로.
+  // 읽기+기본이름 채움 로직은 preset-file.ts로 추출됨(서버 콘솔 S3 Task 2 — admin-http의
+  // 프리셋 생성(buildPreset)과 셰이프를 공유, 동작 자체는 무변경).
   let preset = '';
-  try {
-    const p = JSON.parse(fs.readFileSync(path.join(configDir, 'preset.json'), 'utf8')) as { name?: string; endpoint?: string };
-    if (p.endpoint) preset = `&presetName=${encodeURIComponent(p.name ?? 'Server')}&presetEndpoint=${encodeURIComponent(p.endpoint)}`;
-  } catch { /* 프리셋 없음 */ }
+  const p = readPresetFile(configDir);
+  if (p) preset = `&presetName=${encodeURIComponent(p.name)}&presetEndpoint=${encodeURIComponent(p.endpoint)}`;
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     nodeHttp.get(healthUrl, (res) => {

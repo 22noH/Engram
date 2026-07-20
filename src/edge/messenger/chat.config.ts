@@ -40,3 +40,24 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
   const language = typeof raw.language === 'string' && raw.language.trim() ? raw.language.trim() : undefined;
   return { enabled: raw.enabled !== false, port, bind, language, role };
 }
+
+// 부팅 설정(port/bind) 저장(서버 콘솔 S3 Task 2 — admin-http server-settings api 전용).
+// chat.json에 기존 필드(enabled/role/language 등)를 보존한 채 port/bind만 부분 갱신한다
+// (permissions-file.ts의 read-merge-write 관례와 동일 결). env가 항상 파일보다 우선하므로
+// (loadChatConfig) 여기 저장은 "재시작 시 적용"이지 즉시 반영이 아니다 — 콘솔 쪽 "재시작 후 적용"
+// 힌트 문구와 짝을 이룬다. 무효값(범위 밖 port·빈 bind)은 조용히 무시(기존 값 보존).
+export function saveChatBootConfig(configDir: string, patch: { port?: number; bind?: string }): void {
+  let raw: Partial<ChatConfig> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(configDir, 'chat.json'), 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed as Partial<ChatConfig>;
+  } catch { /* 없거나 깨짐 → 빈 값에서 시작(house rule: 값 있으면 항상 덮어쓰기 가능해야 함) */ }
+  const next: Partial<ChatConfig> = { ...raw };
+  if (patch.port !== undefined) {
+    const p = validPort(patch.port);
+    if (p !== null) next.port = p;
+  }
+  if (typeof patch.bind === 'string' && patch.bind.trim()) next.bind = patch.bind.trim();
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'chat.json'), JSON.stringify(next, null, 2));
+}

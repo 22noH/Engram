@@ -920,4 +920,179 @@ describe('AdminHttp', () => {
       });
     });
   });
+
+  describe('위키·서버설정·preset API(서버 콘솔 S3 Task 2)', () => {
+    let owner: ReturnType<AccountStore['createPassword']>;
+    let member: ReturnType<AccountStore['createPassword']>;
+    let ownerTok: string; let memberTok: string;
+    beforeEach(async () => {
+      owner = accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+      member = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      ownerTok = sessions.issue(owner.id).token;
+      memberTok = sessions.issue(member.id).token;
+      await startServer();
+    });
+
+    describe('owner 게이트(무토큰 401·비owner 403·owner 200)', () => {
+      const cases: Array<{ label: string; call: (tok: string | null) => Promise<Response> }> = [
+        { label: 'GET wiki', call: (tok) => authFetch('/admin/api/wiki', tok) },
+        { label: 'POST wiki/remote', call: (tok) => post('/admin/api/wiki/remote', tok, { url: 'https://example.com/w.git', branch: 'main' }) },
+        { label: 'GET server-settings', call: (tok) => authFetch('/admin/api/server-settings', tok) },
+        { label: 'POST server-settings', call: (tok) => post('/admin/api/server-settings', tok, { serverName: 'Gate' }) },
+        { label: 'GET preset', call: (tok) => authFetch('/admin/api/preset', tok) },
+      ];
+      for (const c of cases) {
+        it(`${c.label}: 무토큰 → 401`, async () => {
+          expect((await c.call(null)).status).toBe(401);
+        });
+        it(`${c.label}: 비owner(member) 세션 → 403`, async () => {
+          expect((await c.call(memberTok)).status).toBe(403);
+        });
+        it(`${c.label}: owner 세션 → 200`, async () => {
+          expect((await c.call(ownerTok)).status).toBe(200);
+        });
+      }
+    });
+
+    describe('GET /admin/api/wiki', () => {
+      it('remote 미설정 + 통계는 overview와 같은 소스(페이지 2·승인대기 1)', async () => {
+        const r = await authFetch('/admin/api/wiki', ownerTok);
+        expect(r.status).toBe(200);
+        expect(await r.json()).toEqual({ remote: {}, pages: 2, pendingProposals: 1 });
+      });
+
+      it('remote 저장 후 GET에 url/branch 반영', async () => {
+        await post('/admin/api/wiki/remote', ownerTok, { url: 'https://example.com/w.git', branch: 'dev' });
+        const body = await (await authFetch('/admin/api/wiki', ownerTok)).json() as any;
+        expect(body.remote).toEqual({ url: 'https://example.com/w.git', branch: 'dev' });
+      });
+    });
+
+    describe('POST /admin/api/wiki/remote', () => {
+      it('저장 → 200 + saveWikiRemote 왕복', async () => {
+        const r = await post('/admin/api/wiki/remote', ownerTok, { url: 'https://example.com/w.git', branch: 'main' });
+        expect(r.status).toBe(200);
+      });
+
+      it('branch 생략 시 기본값 main(saveWikiRemote 관례)', async () => {
+        await post('/admin/api/wiki/remote', ownerTok, { url: 'https://example.com/w.git' });
+        const body = await (await authFetch('/admin/api/wiki', ownerTok)).json() as any;
+        expect(body.remote.branch).toBe('main');
+      });
+    });
+
+    describe('GET /admin/api/server-settings — ★보안 핵심: oidc secret 미유출', () => {
+      it('기본값(auth.json 없음): exposure local·codingMode auto·hasOidcSecret false·serverName 없음', async () => {
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect(r.status).toBe(200);
+        const body = await r.json() as any;
+        expect(body).toMatchObject({ port: 47800, bind: '127.0.0.1', exposure: 'local', hasOidcSecret: false, codingMode: 'auto' });
+        expect(body.serverName).toBeUndefined();
+      });
+
+      it('oidc 저장 후 GET 응답 원문 전체에 clientSecret 값이 없음, hasOidcSecret만 true', async () => {
+        const secret = 'super-secret-oidc-value';
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp.example', clientId: 'cid', clientSecret: secret },
+        });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        const rawText = await r.text();
+        expect(rawText).not.toContain(secret); // 핵심 단언: 원문이 응답 본문 전체에 없음
+        const body = JSON.parse(rawText);
+        expect(body.hasOidcSecret).toBe(true);
+        expect(body.oidcIssuer).toBe('https://idp.example');
+        expect(body.oidcClientId).toBe('cid');
+        expect(Object.keys(body)).not.toContain('clientSecret');
+      });
+    });
+
+    describe('POST /admin/api/server-settings', () => {
+      it('serverName 저장 → GET 왕복', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { serverName: 'My Team' });
+        expect(r.status).toBe(200);
+        const body = await (await authFetch('/admin/api/server-settings', ownerTok)).json() as any;
+        expect(body.serverName).toBe('My Team');
+      });
+
+      it('clientSecret 빈값 → 기존 시크릿 보존(파일 직접 확인), 다른 필드는 갱신', async () => {
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp.example', clientId: 'cid', clientSecret: 'original-secret' },
+        });
+        await post('/admin/api/server-settings', ownerTok, {
+          oidc: { issuer: 'https://idp2.example', clientId: 'cid2', clientSecret: '' },
+        });
+        const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'auth.json'), 'utf8'));
+        expect(raw.oidc.clientSecret).toBe('original-secret'); // 보존됨
+        expect(raw.oidc.issuer).toBe('https://idp2.example'); // 다른 필드는 갱신됨
+        const getBody = await (await authFetch('/admin/api/server-settings', ownerTok)).json() as any;
+        expect(getBody.hasOidcSecret).toBe(true);
+      });
+
+      it('codingMode 왕복(off→auto)', async () => {
+        await post('/admin/api/server-settings', ownerTok, { codingMode: 'off' });
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).codingMode).toBe('off');
+        await post('/admin/api/server-settings', ownerTok, { codingMode: 'auto' });
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).codingMode).toBe('auto');
+      });
+
+      it('잘못된 codingMode → 400', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { codingMode: 'restricted' });
+        expect(r.status).toBe(400);
+      });
+
+      it("exposure 'local'→bind 127.0.0.1, 'lan'→bind 0.0.0.0", async () => {
+        await post('/admin/api/server-settings', ownerTok, { exposure: 'lan' });
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind).toBe('0.0.0.0');
+        await post('/admin/api/server-settings', ownerTok, { exposure: 'local' });
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).bind).toBe('127.0.0.1');
+      });
+
+      it("exposure 'internet'→bind 0.0.0.0(조회 시 exposure는 'lan'으로 표시 — bind는 2값뿐이라 문서화된 한계)", async () => {
+        await post('/admin/api/server-settings', ownerTok, { exposure: 'internet' });
+        const body = await (await authFetch('/admin/api/server-settings', ownerTok)).json() as any;
+        expect(body.bind).toBe('0.0.0.0');
+        expect(body.exposure).toBe('lan');
+      });
+
+      it('잘못된 exposure → 400', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { exposure: 'space' });
+        expect(r.status).toBe(400);
+      });
+
+      it('port 저장 → GET 왕복', async () => {
+        await post('/admin/api/server-settings', ownerTok, { port: 5555 });
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).port).toBe(5555);
+      });
+
+      it('범위 밖 port → 400, 기존 값 보존', async () => {
+        const r = await post('/admin/api/server-settings', ownerTok, { port: 99999 });
+        expect(r.status).toBe(400);
+        expect(((await (await authFetch('/admin/api/server-settings', ownerTok)).json()) as any).port).toBe(47800);
+      });
+    });
+
+    describe('GET /admin/api/preset', () => {
+      it('다운로드 헤더(Content-Disposition attachment) + {name,endpoint} 본문', async () => {
+        const r = await authFetch('/admin/api/preset', ownerTok);
+        expect(r.status).toBe(200);
+        expect(r.headers.get('content-disposition')).toBe('attachment; filename="preset.json"');
+        expect(r.headers.get('content-type')).toContain('application/json');
+        const body = await r.json() as any;
+        expect(body).toEqual({ name: 'Engram Server', endpoint: 'ws://127.0.0.1:47800' });
+      });
+
+      it('serverName 저장 후 preset.name에 반영', async () => {
+        await post('/admin/api/server-settings', ownerTok, { serverName: 'My Team' });
+        const body = await (await authFetch('/admin/api/preset', ownerTok)).json() as any;
+        expect(body.name).toBe('My Team');
+      });
+
+      it('bind=0.0.0.0이면 요청 Host 헤더의 호스트명을 endpoint host로 사용', async () => {
+        await post('/admin/api/server-settings', ownerTok, { exposure: 'lan' });
+        const r = await authFetch('/admin/api/preset', ownerTok); // fetch가 Host: 127.0.0.1:<port>를 보낸다
+        const body = await r.json() as any;
+        expect(body.endpoint).toBe('ws://127.0.0.1:47800');
+      });
+    });
+  });
 });
