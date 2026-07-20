@@ -349,6 +349,15 @@ describe('AdminHttp', () => {
       expect(r.status).toBe(400);
     });
 
+    it('POST /admin/api/members → 과대 본문(MAX_BODY_BYTES 초과) → 400 응답(connection reset 아님)', async () => {
+      // 64KB 상한을 초과하는 본문을 생성(과대 data 필드). 소켓 파괴 없이 정상적으로 400 응답을 받아야 함.
+      const oversizeBody = { loginId: 'x', displayName: 'y', password: 'pw', data: 'x'.repeat(64 * 1024 + 1) };
+      const r = await post('/admin/api/members', ownerTok, oversizeBody);
+      expect(r.status).toBe(400); // ECONNRESET 같은 connection error 아니라 actual 400
+      const body = await r.json() as Record<string, unknown>;
+      expect(body.error).toBe('bad_body');
+    });
+
     it('POST /admin/api/members → 필수 필드 누락 → 400', async () => {
       const r = await post('/admin/api/members', ownerTok, { loginId: '', displayName: '', password: '' });
       expect(r.status).toBe(400);

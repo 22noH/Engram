@@ -159,22 +159,28 @@ export class AdminHttp {
 
   // POST/PATCH 본문 읽기: 크기 상한 초과·JSON 파싱 실패는 전부 ok:false(호출부는 400으로 응답).
   // 본문 없음(빈 스트림)은 빈 객체로 취급(필드 전부 옵션인 엔드포인트 없음 — 이후 필드별 검증이 걸러낸다).
+  // 과대 본문 시 소켓 파괴 금지(req.destroy() 하면 응답 왕복 불가 → 클라가 ECONNRESET 받음).
+  // 대신 accumulate 중단 후 정착 유보하고 호출부가 400 응답 쓸 수 있도록 유지(auth-http.ts 관례).
   private readBody(req: http.IncomingMessage): Promise<{ ok: true; body: unknown } | { ok: false }> {
     return new Promise((resolve) => {
+      let settled = false;
+      const settle = (v: { ok: true; body: unknown } | { ok: false }) => { if (!settled) { settled = true; resolve(v); } };
       let data = '';
       let tooBig = false;
       req.on('data', (chunk: Buffer) => {
-        if (tooBig) return;
+        if (tooBig) return; // 이미 정착 — 소켓은 파괴하지 않고 흘려보내기만(응답 왕복 유지)
         data += chunk.toString('utf8');
-        if (data.length > MAX_BODY_BYTES) { tooBig = true; req.destroy(); resolve({ ok: false }); }
+        if (data.length > MAX_BODY_BYTES) { tooBig = true; settle({ ok: false }); } // 과대 본문: destroy() 없이 즉시 정착
       });
       req.on('end', () => {
-        if (tooBig) return; // 이미 위에서 resolve됨
-        if (!data.trim()) { resolve({ ok: true, body: {} }); return; }
-        try { resolve({ ok: true, body: JSON.parse(data) }); }
-        catch { resolve({ ok: false }); }
+        if (tooBig) return; // 이미 위에서 정착
+        if (!data.trim()) { settle({ ok: true, body: {} }); return; }
+        try { settle({ ok: true, body: JSON.parse(data) }); }
+        catch { settle({ ok: false }); }
       });
-      req.on('error', () => resolve({ ok: false }));
+      req.on('error', () => settle({ ok: false }));
+      req.on('close', () => settle({ ok: false })); // destroy()/중단 시 'end'가 안 옴 — 정착 보장
+      req.on('aborted', () => settle({ ok: false }));
     });
   }
 
