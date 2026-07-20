@@ -83,7 +83,7 @@ const WIKI_PROPOSE_TOOL: Tool = {
     properties: {
       title: { type: 'string' },
       content: { type: 'string' },
-      slug: { type: 'string', description: 'optional — target an existing page' },
+      slug: { type: 'string', description: 'optional — slug of an existing page to append to. Prefer this over creating a near-duplicate: search first (wiki_search), and if a page already covers this topic, pass its slug so the content is appended there instead of making a new page.' },
       reason: { type: 'string', description: 'optional — why this is being proposed' },
     },
     required: ['title', 'content'],
@@ -242,7 +242,7 @@ const PROMPTS: EngramPrompt[] = [
   {
     name: 'wiki-save', description: 'Save knowledge from this conversation to the Engram wiki (as a proposal — a human approves)',
     args: [{ name: 'topic', description: 'optional — what to save; defaults to the key insight of the conversation', required: false }],
-    text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body), then submit it with the wiki_propose tool. Tell the user the proposal id and that a human must approve it before it appears in the wiki.`,
+    text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body). Before submitting, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass its slug to wiki_propose so your note is appended there instead of creating a duplicate; otherwise submit without a slug to create a new page. Then tell the user the proposal id and that a human must approve it before it appears in the wiki.`,
   },
   {
     name: 'proposals', description: 'Show pending Engram wiki proposals awaiting human review',
@@ -260,7 +260,7 @@ const PROMPTS: EngramPrompt[] = [
 // (context7·supabase 등과 같은 관례). 설치만 하면 "먼저 저장 제안→채팅 동의=승인" 흐름이 기본이 된다.
 export const ENGRAM_MCP_INSTRUCTIONS = [
   "Engram is the user's personal knowledge wiki. When a question may be covered by it, search first (wiki_search, then wiki_read) and answer from what the wiki actually says.",
-  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), proactively offer to save it: "Save this to the Engram wiki?". If the user agrees in chat, that agreement IS the human approval: call wiki_propose, then immediately approve_proposal with the returned proposal id in the same turn. Never save anything without the user\'s explicit consent.',
+  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), proactively offer to save it: "Save this to the Engram wiki?". If the user agrees in chat, that agreement IS the human approval. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page. Then immediately approve_proposal with the returned proposal id in the same turn. Never save anything without the user\'s explicit consent.',
   'If approve_proposal is not available, still submit with wiki_propose and tell the user to approve the proposal in the Engram app.',
 ].join('\n\n');
 
