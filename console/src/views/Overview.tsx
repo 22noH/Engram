@@ -6,9 +6,12 @@ import { Nav, type NavKey } from '../components/Nav';
 // ② 개요 — 목업 픽셀 그대로. 타일 4개(멤버·채널·위키 페이지·오늘 대화) + 처리할 일.
 // T2 개요 계약(overview.ts)이 pendingMemberNames/pendingProposalTitles(이름·제안 제목, 최초 5개
 // 미리보기)까지 포함하도록 확장돼 "처리할 일" 행에 이름/제목을 상세줄로 함께 그린다.
-export function Overview({ serverName, role }: { serverName: string; role: string }) {
+// S2(Task 3)부터 active/onNavigate는 App이 들어올린 상태 — 이 컴포넌트는 더 이상 자체 active를
+// 갖지 않는다(다른 화면으로 실제 전환되도록).
+export function Overview({ serverName, role, active, onNavigate }: {
+  serverName: string; role: string; active: NavKey; onNavigate: (k: NavKey) => void;
+}) {
   const [data, setData] = useState<OverviewData | null>(null);
-  const [active, setActive] = useState<NavKey>('overview');
 
   useEffect(() => {
     let cancelled = false;
@@ -23,7 +26,7 @@ export function Overview({ serverName, role }: { serverName: string; role: strin
           serverName={serverName}
           address={window.location.host}
           active={active}
-          onNavigate={setActive}
+          onNavigate={onNavigate}
           pendingMembers={data?.pendingMembers}
           role={role}
         />
@@ -49,7 +52,7 @@ export function Overview({ serverName, role }: { serverName: string; role: strin
                           {data.pendingMemberNames.length > 0 && <div className="d">{data.pendingMemberNames.join(', ')}</div>}
                         </div>
                         <div className="btns">
-                          <button className="pri" disabled title={T.comingSoon}>{T.goToMembers}</button>
+                          <button className="pri" onClick={() => onNavigate('members')}>{T.goToMembers}</button>
                         </div>
                       </div>
                     )}

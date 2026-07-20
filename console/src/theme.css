@@ -97,3 +97,34 @@ body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-sys
 .stat { padding:12px 14px; }
 .stat .l { font-size:11.5px; color:var(--dim); font-weight:600; }
 .stat .v { font-size:20px; font-weight:700; margin-top:2px; }
+
+/* 멤버·그룹·채널(S2 Task 3) — 목업 ③④⑤의 .form/.frow/.chip 변형+버튼을 클래스로 이식
+   (목업 원본은 이 값들을 인라인 style로 반복하지만, 여러 화면에서 그대로 재사용하므로
+   클래스로 정리했다 — 픽셀 값은 원본과 동일, 산출 결과는 동일). */
+.grp.form { display:flex; flex-direction:column; }
+.frow { display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.frow:last-child { border-bottom:0; }
+.frow label { width:130px; font-size:13px; color:var(--dim); flex:none; }
+.frow input, .frow select { background:var(--panel); border:1px solid var(--line); border-radius:7px;
+                            padding:7px 10px; font:inherit; font-size:13px; color:var(--text); max-width:200px; }
+.frow .hint { font-size:11.5px; color:var(--dim); }
+.frow.end { justify-content:flex-end; }
+.frow .chips { display:flex; gap:6px; flex-wrap:wrap; flex:1; align-items:center; }
+.frow .perms { display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--text); }
+.frow .perms label { width:auto; color:var(--text); display:flex; align-items:center; gap:6px; }
+.frow .perms input[type="checkbox"] { accent-color:var(--accent); }
+
+.chip.plain { color:var(--text); }
+.chip.dashed { border-style:dashed; }
+/* 멤버/채널 칩을 <button>으로 그린 것(제거 클릭·피커 열기)의 UA 버튼 크롬 리셋 —
+   상태 표시용 <span class="chip">(활성·정지·owner 등)에는 영향 없음. */
+button.chip { font:inherit; cursor:pointer; background:transparent; -webkit-appearance:none; appearance:none; }
+.row.hl { background:var(--accent-soft); }
+
+.btn-accent { background:var(--accent); border:0; color:#fff; font:inherit; font-weight:600;
+              padding:8px 14px; border-radius:8px; cursor:pointer; flex:none; }
+.btn-accent.compact { padding:7px 18px; border-radius:7px; }
+.btn-accent:disabled { opacity:.6; cursor:default; }
+
+.head-row { display:flex; align-items:flex-start; gap:12px; }
+.head-row .t { flex:1; }

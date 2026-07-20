@@ -6,13 +6,13 @@ export type NavKey =
 
 interface NavItem { key: NavKey; label: string; icon: string; color: string; enabled: boolean }
 
-// 목업 10항목 그대로 — S1은 개요만 구현되어 나머지 8개는 비활성(dim+커서 기본+"곧 제공" 툴팁).
+// 목업 10항목 그대로 — S2는 멤버·그룹·채널까지 구현되어 활성(나머지 6개는 여전히 비활성).
 function items(): NavItem[] {
   return [
     { key: 'overview', label: T.navOverview, icon: '●', color: '#56d364', enabled: true },
-    { key: 'members', label: T.navMembers, icon: '👥', color: '#3aa5de', enabled: false },
-    { key: 'groups', label: T.navGroups, icon: '▣', color: '#1d9e75', enabled: false },
-    { key: 'channels', label: T.navChannels, icon: '#', color: '#7f77dd', enabled: false },
+    { key: 'members', label: T.navMembers, icon: '👥', color: '#3aa5de', enabled: true },
+    { key: 'groups', label: T.navGroups, icon: '▣', color: '#1d9e75', enabled: true },
+    { key: 'channels', label: T.navChannels, icon: '#', color: '#7f77dd', enabled: true },
     { key: 'models', label: T.navModels, icon: '▦', color: '#3aa5de', enabled: false },
     { key: 'mcp', label: T.navMcp, icon: '⌘', color: '#7f77dd', enabled: false },
     { key: 'wiki', label: T.navWiki, icon: '☁', color: '#1d9e75', enabled: false },
