@@ -109,7 +109,9 @@ async function bootstrap(): Promise<void> {
   const chatCfg = loadChatConfig(paths.getConfigDir());
   if (chatCfg.enabled) {
     const isServer = chatCfg.role !== 'brain'; // brain=계정·team·위키승인 미탑재, 127.0.0.1 고정(Phase 16a)
-    chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'));
+    // 서버 콘솔 S4 Task 1/2: 대화 자동 보존 정책은 chat.json에 저장(chat.config.ts)되고 부팅 시
+    // 여기서 ChatStore에 주입된다 — 미설정이면 생성자가 손대지 않아 기본(unlimited)을 유지(회귀 0).
+    chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'), chatCfg.retention);
     let authDeps: AuthDeps | undefined;
     let mcpDeps: McpDeps | undefined;
     let adminDeps: AdminDeps | undefined;
@@ -157,7 +159,7 @@ async function bootstrap(): Promise<void> {
       // 안 만들어 self.adapter에 안 넘긴다(생성 자체를 스킵 — 데스크톱에서 불필요한 AdminHttp 인스턴스도
       // 안 만듦). 이 env 없는 헤드리스 서버 실행(미래 engram-server 엔트리 포함)은 기존대로 /admin 서빙.
       if (process.env.ENGRAM_DESKTOP !== '1') {
-        const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, groups, wiki, proposals, configDir: paths.getConfigDir() });
+        const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, groups, wiki, proposals, configDir: paths.getConfigDir(), paths });
         adminDeps = { http: adminHttp };
       }
     }

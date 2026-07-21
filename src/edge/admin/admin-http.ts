@@ -5,7 +5,7 @@ import type * as http from 'http';
 import type { Account, AccountStore } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
 import type { GroupStore } from '../auth/group-store';
-import type { ChatStore } from '../messenger/chat-store';
+import type { ChatStore, RetentionPolicy } from '../messenger/chat-store';
 import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
 import type { ProposalStore } from '../../knowledge-core/proposal-store';
 import { resolveResourceDir } from '../../pal/resource-dir';
@@ -19,6 +19,8 @@ import { loadAuthSettings, saveAuthSettings, type AuthSettings } from '../auth/a
 import { loadChatConfig, saveChatBootConfig } from '../messenger/chat.config';
 import { getCommandMode, setCommandMode, type CommandMode } from '../../desktop/permissions-file';
 import { buildPreset } from '../../desktop/preset-file';
+import { listSchedules, removeScheduleFromFile } from '../../desktop/schedules-file';
+import type { PathResolver } from '../../pal/path-resolver';
 
 // /admin http 창구(서버 콘솔 S1, 플랜 docs/superpowers/plans/2026-07-19-server-console-s1.md Task 2).
 // AuthHttp와 같은 결: 파싱/응답만, 로직은 store에 위임. self.adapter가 authDeps+adminDeps 둘 다
@@ -34,7 +36,12 @@ export interface AdminHttpDeps {
   proposals: ProposalStore;
   distDir?: string; // 테스트 주입용. 기본값은 resolveResourceDir('console/dist').
   configDir: string; // 모델·MCP api(서버 콘솔 S3 Task 1)용 — brains.json/mcp.json 위치.
+  paths: PathResolver; // 서버 콘솔 S4 Task 2: 상태·로그 api용(wiki/rag/logs 디렉터리·heartbeat 경로).
 }
+
+// 로그 조회 상한(서버 콘솔 S4 Task 2). 기본 50줄·최대 500줄 — 전체 파일 노출 금지(플랜 Global Constraints).
+const DEFAULT_LOG_LINES = 50;
+const MAX_LOG_LINES = 500;
 
 // 본문 크기 상한(멤버/그룹/채널 api는 전부 소형 JSON — 폭주 방어용 저비용 캡).
 const MAX_BODY_BYTES = 64 * 1024;
@@ -183,7 +190,15 @@ export class AdminHttp {
 
       if (url === '/admin/api/preset' && method === 'GET') { await this.getPreset(req, res); return; }
 
-      this.notFound(res); // S1/S2/S3 범위 밖 api 경로 + 메서드 불일치
+      if (url === '/admin/api/status' && method === 'GET') { await this.getStatus(req, res); return; }
+
+      if (url === '/admin/api/schedules' && method === 'GET') { await this.getSchedules(req, res); return; }
+      m = /^\/admin\/api\/schedules\/([^/]+)$/.exec(url);
+      if (m && method === 'DELETE') { await this.deleteSchedule(req, res, m[1]); return; }
+
+      if (url === '/admin/api/logs' && method === 'GET') { await this.getLogs(req, res); return; }
+
+      this.notFound(res); // S1/S2/S3/S4 범위 밖 api 경로 + 메서드 불일치
     } catch {
       this.json(res, 500, { error: 'internal' });
     }
@@ -774,6 +789,8 @@ export class AdminHttp {
       exposure,
       hasOidcSecret: !!(auth.oidc && auth.oidc.clientSecret),
       codingMode,
+      // 서버 콘솔 S4 Task 2: 대화 자동 보존 정책. 미저장=무제한(플랜 Global Constraints: 기본 무제한).
+      retention: chatCfg.retention ?? { mode: 'unlimited' },
     };
     if (auth.serverName) body.serverName = auth.serverName;
     if (auth.oidc) {
@@ -826,9 +843,36 @@ export class AdminHttp {
       port = n;
     }
 
-    if (port !== undefined || bind !== undefined) {
-      saveChatBootConfig(this.deps.configDir, { port, bind });
+    // 대화 자동 보존 정책(서버 콘솔 S4 Task 2): mode=count는 양의 정수 value, days는 양수 value,
+    // unlimited는 value 불필요. 어느 쪽도 아니면 400(플랜 TDD 계약 — "invalid retention 400").
+    let retention: RetentionPolicy | undefined;
+    if (body.retention !== undefined) {
+      if (!body.retention || typeof body.retention !== 'object') {
+        this.json(res, 400, { error: 'invalid_retention' }); return;
+      }
+      const r = body.retention as Record<string, unknown>;
+      if (r.mode === 'unlimited') {
+        retention = { mode: 'unlimited' };
+      } else if (r.mode === 'count') {
+        const v = Number(r.value);
+        if (!Number.isInteger(v) || v <= 0) { this.json(res, 400, { error: 'invalid_retention' }); return; }
+        retention = { mode: 'count', value: v };
+      } else if (r.mode === 'days') {
+        const v = Number(r.value);
+        if (!Number.isFinite(v) || v <= 0) { this.json(res, 400, { error: 'invalid_retention' }); return; }
+        retention = { mode: 'days', value: v };
+      } else {
+        this.json(res, 400, { error: 'invalid_retention' }); return;
+      }
     }
+
+    if (port !== undefined || bind !== undefined || retention !== undefined) {
+      saveChatBootConfig(this.deps.configDir, { port, bind, retention });
+    }
+    // 런타임 즉시 반영: main.ts가 이 deps.chat과 self.adapter의 ChatStore를 같은 인스턴스로 주입하므로
+    // (파일 저장은 "재시작 시 적용"이 기본이던 다른 서버 설정과 달리) 여기서 세터를 바로 호출하면
+    // 재시작 없이 이번 요청부터 새 정책이 적용된다 — 브리프 요구("가능하면 즉시").
+    if (retention !== undefined) this.deps.chat.setRetention(retention);
     if (codingMode !== undefined) setCommandMode(this.deps.configDir, codingMode);
 
     // serverName·oidc는 auth.json 하나에 같이 산다(saveAuthSettings가 부분patch가 아니라 전체
@@ -887,5 +931,101 @@ export class AdminHttp {
       return end >= 0 ? hostHeader.slice(0, end + 1) : hostHeader;
     }
     return hostHeader.split(':')[0];
+  }
+
+  // ── 상태 API(서버 콘솔 S4 Task 2) ────────────────────────────────────────────
+
+  private async getStatus(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const { accounts, chat, paths } = this.deps;
+
+    // heartbeat 파일=Date.now() ms 문자열(pal/heartbeat.ts beat()). 없거나 손상=null(상주 미확인).
+    let lastHeartbeatMs: number | null = null;
+    try {
+      const raw = fs.readFileSync(paths.getHeartbeatPath(), 'utf8').trim();
+      const n = Number(raw);
+      if (Number.isFinite(n)) lastHeartbeatMs = n;
+    } catch { /* 파일 없음(상주 미가동/최초 부팅 전) — null 유지 */ }
+
+    const knowledgeBytes = this.dirSizeBytes(paths.getWikiDir()) + this.dirSizeBytes(paths.getRagDir());
+
+    this.json(res, 200, {
+      uptimeSec: process.uptime(),
+      lastHeartbeatMs,
+      chatBytes: chat.historyBytes(),
+      knowledgeBytes,
+      memberCount: accounts.list().length,
+      channelCount: chat.listChannels().length,
+    });
+  }
+
+  // 디렉터리 전체(하위 포함) 바이트 합산(용량 타일용). 없는 디렉터리=0·개별 항목 접근 실패는 skip
+  // (chat-store historyBytes()의 관용 관례와 동일 결). 개인/소규모 서버 스케일 — 저비용 상한 없이 그대로.
+  private dirSizeBytes(dir: string): number {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return 0; // 디렉터리 없음 = 0
+    }
+    let total = 0;
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      try {
+        if (e.isDirectory()) total += this.dirSizeBytes(p);
+        else if (e.isFile()) total += fs.statSync(p).size;
+      } catch { /* 개별 항목 통계 실패는 skip */ }
+    }
+    return total;
+  }
+
+  // ── 예약 API(서버 콘솔 S4 Task 2 — schedules-file.ts 재사용) ───────────────────
+  // ★알려진 경합(플랜 Global Constraints): 서버가 메모리 사본을 들고 있어 삭제는 파일에서만 —
+  // 실제 크론 반영은 재시작 후. 발사 시점 재조회가 자가치유(schedules-file.ts 주석과 동일 결).
+
+  private async getSchedules(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const schedules = listSchedules(this.deps.configDir).map((e) => ({
+      id: e.id, channelId: e.channelId, cron: e.cron, task: e.task,
+    }));
+    this.json(res, 200, { schedules });
+  }
+
+  private async deleteSchedule(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    if (!removeScheduleFromFile(this.deps.configDir, id)) { this.json(res, 404, { error: 'not_found' }); return; }
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── 로그 API(서버 콘솔 S4 Task 2) ────────────────────────────────────────────
+  // 읽기 전용·최근 N줄만(플랜 Global Constraints: 전체 파일/경로 노출 금지). 파일명은 'engram.log'
+  // 리터럴 고정이라 ?lines 쿼리값이 경로 구성에 전혀 관여하지 않는다 — traversal 벡터 자체가 없다.
+
+  private async getLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const acc = this.requireOwner(req, res);
+    if (!acc) return;
+    const qIdx = (req.url ?? '').indexOf('?');
+    const qs = qIdx >= 0 ? (req.url ?? '').slice(qIdx + 1) : '';
+    const rawLines = new URLSearchParams(qs).get('lines');
+    let n = DEFAULT_LOG_LINES;
+    if (rawLines !== null) {
+      const parsed = Number(rawLines);
+      if (Number.isInteger(parsed) && parsed > 0) n = parsed; // 비숫자/0/음수/소수 → 기본값 폴백(무해)
+    }
+    n = Math.min(n, MAX_LOG_LINES); // 상한 클램프
+
+    const logPath = path.join(this.deps.paths.getLogsDir(), 'engram.log');
+    let lines: string[] = [];
+    try {
+      const content = fs.readFileSync(logPath, 'utf8');
+      const all = content.split('\n').filter((l) => l.length > 0);
+      lines = all.slice(Math.max(0, all.length - n));
+    } catch {
+      lines = []; // 파일 없음(로그 아직 미생성 등) = 빈 배열
+    }
+    this.json(res, 200, { lines });
   }
 }

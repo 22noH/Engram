@@ -6,10 +6,11 @@ import { AccountStore } from '../auth/account-store';
 import { SessionStore } from '../auth/session-store';
 import { GroupStore } from '../auth/group-store';
 import { ChatStore } from '../messenger/chat-store';
+import { PathResolver } from '../../pal/path-resolver';
 import { AdminHttp, type AdminHttpDeps } from './admin-http';
 
 describe('AdminHttp', () => {
-  let dir: string; let distDir: string; let configDir: string;
+  let dir: string; let distDir: string; let configDir: string; let paths: PathResolver;
   let accounts: AccountStore; let sessions: SessionStore; let chat: ChatStore; let groups: GroupStore;
   let wikiPages: unknown[]; let pending: unknown[];
   let server: http.Server; let base: string;
@@ -21,6 +22,7 @@ describe('AdminHttp', () => {
       proposals: { listPending: async () => pending } as any,
       distDir,
       configDir,
+      paths,
       ...overrides,
     };
     const admin = new AdminHttp(deps);
@@ -64,6 +66,7 @@ describe('AdminHttp', () => {
     pending = [{ id: 'p1', title: 'Proposal One' }];
 
     configDir = path.join(dir, 'config'); // brains.json/mcp.json 위치(모델·MCP api, 서버 콘솔 S3 Task 1) — 헬퍼가 필요시 자동 생성
+    paths = new PathResolver(dir); // 서버 콘솔 S4 Task 2: wiki/rag/logs 디렉터리·heartbeat 경로(dir 하위 — configDir과 형제)
     distDir = path.join(dir, 'consoledist'); // dir의 하위 — traversal 테스트에서 dir을 "루트 밖"으로 쓴다
     fs.mkdirSync(distDir);
     fs.writeFileSync(path.join(distDir, 'index.html'), '<html>console</html>');
@@ -1156,6 +1159,247 @@ describe('AdminHttp', () => {
         const r = await authFetch('/admin/api/preset', ownerTok); // fetch가 Host: 127.0.0.1:<port>를 보낸다
         const body = await r.json() as any;
         expect(body.endpoint).toBe('ws://127.0.0.1:47800');
+      });
+    });
+  });
+
+  describe('상태·예약·로그·대화보존 API(서버 콘솔 S4 Task 2)', () => {
+    let owner: ReturnType<AccountStore['createPassword']>;
+    let member: ReturnType<AccountStore['createPassword']>;
+    let ownerTok: string; let memberTok: string;
+    beforeEach(async () => {
+      owner = accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+      member = accounts.createPassword('mem', 'pw', 'Mem', { role: 'member', status: 'active' });
+      ownerTok = sessions.issue(owner.id).token;
+      memberTok = sessions.issue(member.id).token;
+      await startServer();
+    });
+
+    describe('owner 게이트(무토큰 401·비owner 403·owner 200)', () => {
+      const cases: Array<{ label: string; call: (tok: string | null) => Promise<Response> }> = [
+        { label: 'GET status', call: (tok) => authFetch('/admin/api/status', tok) },
+        { label: 'GET schedules', call: (tok) => authFetch('/admin/api/schedules', tok) },
+        { label: 'DELETE schedules/:id', call: (tok) => del('/admin/api/schedules/ghost', tok) },
+        { label: 'GET logs', call: (tok) => authFetch('/admin/api/logs', tok) },
+      ];
+      for (const c of cases) {
+        it(`${c.label}: 무토큰 → 401`, async () => {
+          expect((await c.call(null)).status).toBe(401);
+        });
+        it(`${c.label}: 비owner(member) 세션 → 403`, async () => {
+          expect((await c.call(memberTok)).status).toBe(403);
+        });
+      }
+      // DELETE schedules/:id는 대상이 없어 owner 세션이어도 404(게이트 통과 후 정상 라우팅 확인용 —
+      // 별도 describe에서 실제 삭제 200을 검증한다).
+      it('GET status: owner 세션 → 200', async () => {
+        expect((await authFetch('/admin/api/status', ownerTok)).status).toBe(200);
+      });
+      it('GET schedules: owner 세션 → 200', async () => {
+        expect((await authFetch('/admin/api/schedules', ownerTok)).status).toBe(200);
+      });
+      it('DELETE schedules/:id: owner 세션 + 없는 id → 게이트 통과, 404(존재 안 함)', async () => {
+        expect((await del('/admin/api/schedules/ghost', ownerTok)).status).toBe(404);
+      });
+      it('GET logs: owner 세션 → 200', async () => {
+        expect((await authFetch('/admin/api/logs', ownerTok)).status).toBe(200);
+      });
+    });
+
+    describe('GET /admin/api/status', () => {
+      it('uptimeSec>0·bytes/count는 숫자, heartbeat 파일 없으면 lastHeartbeatMs null', async () => {
+        const r = await authFetch('/admin/api/status', ownerTok);
+        expect(r.status).toBe(200);
+        const body = await r.json() as any;
+        expect(body.uptimeSec).toBeGreaterThan(0);
+        expect(body.lastHeartbeatMs).toBeNull();
+        expect(typeof body.chatBytes).toBe('number');
+        expect(typeof body.knowledgeBytes).toBe('number');
+        expect(typeof body.memberCount).toBe('number');
+        expect(typeof body.channelCount).toBe('number');
+      });
+
+      it('heartbeat 파일 있으면 그 값을 ms로 반환', async () => {
+        const stateDir = path.join(dir, 'state');
+        fs.mkdirSync(stateDir, { recursive: true });
+        fs.writeFileSync(path.join(stateDir, 'heartbeat'), '1700000000000');
+        const r = await authFetch('/admin/api/status', ownerTok);
+        expect((await r.json() as any).lastHeartbeatMs).toBe(1700000000000);
+      });
+
+      it('chatBytes=chat-store historyBytes와 일치(메시지 추가 후 0보다 큼)', async () => {
+        chat.appendMessage('general', { authorId: owner.id, text: 'hello status' });
+        const r = await authFetch('/admin/api/status', ownerTok);
+        const body = await r.json() as any;
+        expect(body.chatBytes).toBe(chat.historyBytes());
+        expect(body.chatBytes).toBeGreaterThan(0);
+      });
+
+      it('knowledgeBytes=wiki+rag 디렉터리 총 바이트(하위 폴더 포함)', async () => {
+        fs.mkdirSync(path.join(dir, 'wiki', 'pages'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'wiki', 'pages', 'a.md'), '12345'); // 5바이트
+        fs.mkdirSync(path.join(dir, 'rag'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'rag', 'index.bin'), '1234567'); // 7바이트
+        const r = await authFetch('/admin/api/status', ownerTok);
+        expect((await r.json() as any).knowledgeBytes).toBe(12);
+      });
+
+      it('memberCount=accounts.list().length·channelCount=chat.listChannels().length', async () => {
+        chat.createChannel('dev');
+        const r = await authFetch('/admin/api/status', ownerTok);
+        const body = await r.json() as any;
+        expect(body.memberCount).toBe(accounts.list().length);
+        expect(body.channelCount).toBe(2); // general + dev
+      });
+    });
+
+    describe('GET/DELETE /admin/api/schedules', () => {
+      const seedSchedules = () => fs.writeFileSync(path.join(configDir, 'schedules.json'), JSON.stringify([
+        { id: 's1', channelId: 'general', cron: '0 9 * * 1-5', task: '브리핑', createdAt: 't' },
+        { id: 's2', channelId: 'dev', cron: '0 18 * * 5', task: '회고', once: true, createdAt: 't' },
+      ]));
+
+      it('목록 없으면 빈 배열', async () => {
+        const r = await authFetch('/admin/api/schedules', ownerTok);
+        expect(await r.json()).toEqual({ schedules: [] });
+      });
+
+      it('목록 반환(전 채널) — id/channelId/cron/task만', async () => {
+        fs.mkdirSync(configDir, { recursive: true });
+        seedSchedules();
+        const r = await authFetch('/admin/api/schedules', ownerTok);
+        expect(await r.json()).toEqual({
+          schedules: [
+            { id: 's1', channelId: 'general', cron: '0 9 * * 1-5', task: '브리핑' },
+            { id: 's2', channelId: 'dev', cron: '0 18 * * 5', task: '회고' },
+          ],
+        });
+      });
+
+      it('삭제: 존재하는 id → 200 + 파일에서 제거', async () => {
+        fs.mkdirSync(configDir, { recursive: true });
+        seedSchedules();
+        const r = await del('/admin/api/schedules/s1', ownerTok);
+        expect(r.status).toBe(200);
+        const list = await (await authFetch('/admin/api/schedules', ownerTok)).json() as any;
+        expect(list.schedules.map((s: any) => s.id)).toEqual(['s2']);
+      });
+
+      it('삭제: 없는 id → 404', async () => {
+        fs.mkdirSync(configDir, { recursive: true });
+        seedSchedules();
+        const r = await del('/admin/api/schedules/ghost', ownerTok);
+        expect(r.status).toBe(404);
+      });
+    });
+
+    describe('GET /admin/api/logs', () => {
+      function seedLog(count: number, dirName = 'logs') {
+        const logsDir = path.join(dir, dirName);
+        fs.mkdirSync(logsDir, { recursive: true });
+        const lines = Array.from({ length: count }, (_, i) => JSON.stringify({ msg: `line-${i}` }));
+        fs.writeFileSync(path.join(logsDir, 'engram.log'), lines.join('\n') + '\n');
+        return lines;
+      }
+
+      it('파일 없음 → 빈 배열', async () => {
+        const r = await authFetch('/admin/api/logs', ownerTok);
+        expect(await r.json()).toEqual({ lines: [] });
+      });
+
+      it('기본(쿼리 없음) → 최근 50줄(파일이 더 짧으면 전부)', async () => {
+        const lines = seedLog(10);
+        const r = await authFetch('/admin/api/logs', ownerTok);
+        expect((await r.json() as any).lines).toEqual(lines);
+      });
+
+      it('?lines=N → 최근 N줄만', async () => {
+        const lines = seedLog(10);
+        const r = await authFetch('/admin/api/logs?lines=3', ownerTok);
+        expect((await r.json() as any).lines).toEqual(lines.slice(-3));
+      });
+
+      it('상한 클램프: 500 초과 요청해도 최대 500줄', async () => {
+        const lines = seedLog(600);
+        const r = await authFetch('/admin/api/logs?lines=100000', ownerTok);
+        const body = await r.json() as any;
+        expect(body.lines.length).toBe(500);
+        expect(body.lines).toEqual(lines.slice(-500));
+      });
+
+      it('비정상 lines 값(문자/음수/0)은 기본값(50)으로 폴백', async () => {
+        const lines = seedLog(10);
+        const r = await authFetch('/admin/api/logs?lines=not-a-number', ownerTok);
+        expect((await r.json() as any).lines).toEqual(lines);
+      });
+
+      it('traversal 시도(?lines에 경로 문자열)도 engram.log만 읽는다(다른 파일 유출 없음)', async () => {
+        // logs 디렉터리의 형제 위치에 시크릿 파일을 둬서, ?lines 값이 파일 경로 구성에 관여한다면
+        // 이 내용이 새어나올 수 있다 — 실제 구현은 파일명이 'engram.log' 리터럴 고정이라 무관해야 한다.
+        fs.writeFileSync(path.join(dir, 'secret.log'), 'OUTER SECRET LINE');
+        const lines = seedLog(5);
+        const r = await authFetch('/admin/api/logs?lines=..%2f..%2fsecret', ownerTok);
+        expect(r.status).toBe(200);
+        const body = await r.json() as any;
+        expect(body.lines).toEqual(lines); // engram.log 내용 그대로 — secret.log 유출 없음
+        expect(JSON.stringify(body)).not.toContain('OUTER SECRET');
+      });
+    });
+
+    describe('server-settings 대화 보존(retention) 왕복', () => {
+      it('GET 기본값: unlimited', async () => {
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).retention).toEqual({ mode: 'unlimited' });
+      });
+
+      it('POST count → GET 왕복', async () => {
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'count', value: 5 } });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).retention).toEqual({ mode: 'count', value: 5 });
+      });
+
+      it('POST days → GET 왕복', async () => {
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'days', value: 3 } });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).retention).toEqual({ mode: 'days', value: 3 });
+      });
+
+      it('POST unlimited → GET 왕복(재설정)', async () => {
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'count', value: 2 } });
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'unlimited' } });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).retention).toEqual({ mode: 'unlimited' });
+      });
+
+      it('retention 생략 시 다른 필드(serverName)만 갱신되고 기존 retention 보존', async () => {
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'count', value: 4 } });
+        await post('/admin/api/server-settings', ownerTok, { serverName: 'Team X' });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        const body = await r.json() as any;
+        expect(body.retention).toEqual({ mode: 'count', value: 4 });
+        expect(body.serverName).toBe('Team X');
+      });
+
+      it.each([
+        ['mode 미지원 값', { mode: 'bogus' }],
+        ['count인데 value 없음', { mode: 'count' }],
+        ['count인데 value 음수', { mode: 'count', value: -1 }],
+        ['count인데 value 소수', { mode: 'count', value: 1.5 }],
+        ['days인데 value 0', { mode: 'days', value: 0 }],
+        ['객체 아님', 'unlimited'],
+      ])('무효 retention(%s) → 400', async (_label, retention) => {
+        const r = await post('/admin/api/server-settings', ownerTok, { retention });
+        expect(r.status).toBe(400);
+      });
+
+      it('런타임 즉시 적용: POST count=2 후 재시작 없이 이 요청의 chat 인스턴스에 프루닝 반영', async () => {
+        await post('/admin/api/server-settings', ownerTok, { retention: { mode: 'count', value: 2 } });
+        chat.appendMessage('general', { authorId: owner.id, text: 'm1' });
+        chat.appendMessage('general', { authorId: owner.id, text: 'm2' });
+        chat.appendMessage('general', { authorId: owner.id, text: 'm3' });
+        const history = chat.history('general', { limit: 100 });
+        expect(history).toHaveLength(2); // count=2 정책이 이 startServer()에 주입된 같은 chat 인스턴스에 즉시 적용됨
+        expect(history.map((m) => m.text)).toEqual(['m2', 'm3']);
       });
     });
   });

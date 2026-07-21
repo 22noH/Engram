@@ -19,6 +19,7 @@ import * as mcpHttp from '../mcp/mcp-http';
 import { AdminHttp } from '../admin/admin-http';
 import type { AdminDeps } from './self.adapter';
 import { GroupStore } from '../auth/group-store';
+import { PathResolver } from '../../pal/path-resolver';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -2066,6 +2067,7 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
       proposals: { listPending: async () => [] } as any,
       distDir,
       configDir: dir,
+      paths: new PathResolver(dir),
     });
     return { http };
   }
