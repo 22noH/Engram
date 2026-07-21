@@ -166,3 +166,29 @@ it('대화 보존 select에서 "채널당 최근 1,000개" 선택 → 저장 →
   expect((captured as unknown as { body: { retention: { mode: string; value: number } } }).body.retention)
     .toEqual({ mode: 'count', value: 1000 });
 });
+
+it('보존 select를 안 건드린 저장은 retention 필드 자체를 안 보낸다(비프리셋 값 눌러 프루닝 방지)', async () => {
+  // ★핵심 데이터-안전 회귀 방지(최종 리뷰): select는 mode만 추적하고 저장 시 프리셋 값으로 눌러버리므로,
+  // 안 건드린 저장이 retention을 실어 보내면 raw API/수동편집으로 넣어둔 비프리셋 값(예: count=5000)을
+  // 프리셋(count=1000)으로 조여 초과 대화를 영구 프루닝한다 → codingMode처럼 건드렸을 때만 보낸다.
+  let captured: { url: string; body: Record<string, unknown> } | null = null;
+  mockFetch((url, init) => {
+    if (url === '/admin/api/server-settings' && init?.method === 'POST') {
+      captured = { url, body: JSON.parse(String(init.body)) };
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    if (url === '/admin/api/server-settings') {
+      return new Response(JSON.stringify({ ...settingsPayload, retention: { mode: 'count', value: 5000 } }), { status: 200 });
+    }
+    return null;
+  });
+  render(<ServerSettings serverName="Our Team" role="owner" active="settings" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByDisplayValue('우리팀 서버')).toBeInTheDocument());
+
+  // 포트만 바꿔 저장 — 보존 select는 건드리지 않았다.
+  fireEvent.change(screen.getByDisplayValue('47800'), { target: { value: '48000' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(captured).not.toBeNull());
+  expect('retention' in (captured as unknown as { body: Record<string, unknown> }).body).toBe(false);
+});

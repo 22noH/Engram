@@ -11,6 +11,10 @@ import { DeployCard } from '../components/DeployCard';
 // 입력 UI가 아니라 이 3가지 중 하나만 고를 수 있다. 저장된 값이 프리셋과 정확히 일치하지 않아도
 // (예: days=45) mode만 보고 그 프리셋을 선택한다 — 이 select 자체가 "3개 중 하나"라는 계약이라
 // 로드 시점에 값을 프리셋으로 정규화하는 것은 손실이 아니라 이 위젯의 정의 그 자체다(report 참조).
+// ★단, 저장 시엔 codingMode처럼 retentionTouched 플래그로 게이트한다(최종 리뷰 지적): select는 mode만
+// 추적하고 값은 프리셋으로 눌러버리므로, 사용자가 이 select를 안 건드린 저장(예: 포트만 변경)이 무조건
+// retention을 실어 보내면 raw API/수동편집으로 넣어둔 비프리셋 값(예: count=5000)을 프리셋(count=1000)으로
+// 조여 초과 대화를 영구 프루닝한다. 실제로 건드렸을 때만 보낸다.
 const RETENTION_PRESETS: Record<RetentionPolicy['mode'], RetentionPolicy> = {
   count: { mode: 'count', value: 1000 },
   days: { mode: 'days', value: 90 },
@@ -42,6 +46,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
   const [codingMode, setCodingMode] = useState<CodingMode>('off');
   const [codingTouched, setCodingTouched] = useState(false);
   const [retentionMode, setRetentionMode] = useState<RetentionPolicy['mode']>('unlimited');
+  const [retentionTouched, setRetentionTouched] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -57,6 +62,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
         setCodingMode(d.codingMode);
         setCodingTouched(false);
         setRetentionMode(d.retention?.mode ?? 'unlimited');
+        setRetentionTouched(false);
       }
     });
     fetchMembers().then(setMembers);
@@ -72,7 +78,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
       exposure,
       ...(codingTouched ? { codingMode } : {}),
       ...(oidcTouched ? { oidc: { issuer: oidcIssuer, clientId: oidcClientId, clientSecret: oidcClientSecret } } : {}),
-      retention: RETENTION_PRESETS[retentionMode],
+      ...(retentionTouched ? { retention: RETENTION_PRESETS[retentionMode] } : {}),
     });
     setBusy(false);
     setOidcClientSecret(''); // 원문은 성공·실패 무관 입력칸에 남기지 않는다(보안 요구).
@@ -135,7 +141,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
             <div className="frow">
               <label>{T.retentionLabel}</label>
               <select value={retentionMode} style={{ maxWidth: 220 }}
-                      onChange={(e) => setRetentionMode(e.target.value as RetentionPolicy['mode'])}>
+                      onChange={(e) => { setRetentionMode(e.target.value as RetentionPolicy['mode']); setRetentionTouched(true); }}>
                 <option value="count">{T.retentionCountOption}</option>
                 <option value="days">{T.retentionDaysOption}</option>
                 <option value="unlimited">{T.retentionUnlimitedOption}</option>

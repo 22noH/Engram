@@ -42,6 +42,10 @@ export interface AdminHttpDeps {
 // 로그 조회 상한(서버 콘솔 S4 Task 2). 기본 50줄·최대 500줄 — 전체 파일 노출 금지(플랜 Global Constraints).
 const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 500;
+// engram.log는 로테이션이 없어 상주 데몬에서 무한정 커질 수 있다(최종 리뷰 지적) — 최근 N줄만 필요하므로
+// 파일 끝에서 이만큼만 읽는다(전체 동기 read로 이벤트 루프 블록 방지). 1MB면 500줄 커버 충분.
+// ponytail: 고정 1MB tail. 로그 줄이 이보다 길어 500줄을 못 채우면 그때 로테이션/상향.
+const LOG_TAIL_BYTES = 1024 * 1024;
 
 // 본문 크기 상한(멤버/그룹/채널 api는 전부 소형 JSON — 폭주 방어용 저비용 캡).
 const MAX_BODY_BYTES = 64 * 1024;
@@ -1020,9 +1024,20 @@ export class AdminHttp {
     const logPath = path.join(this.deps.paths.getLogsDir(), 'engram.log');
     let lines: string[] = [];
     try {
-      const content = fs.readFileSync(logPath, 'utf8');
-      const all = content.split('\n').filter((l) => l.length > 0);
-      lines = all.slice(Math.max(0, all.length - n));
+      // 파일 끝에서 상한 바이트만 읽는다(로테이션 없는 로그가 GB로 커져도 전체를 메모리에 안 올림).
+      const fd = fs.openSync(logPath, 'r');
+      try {
+        const size = fs.fstatSync(fd).size;
+        const start = Math.max(0, size - LOG_TAIL_BYTES);
+        const len = size - start;
+        const buf = Buffer.alloc(len);
+        if (len > 0) fs.readSync(fd, buf, 0, len, start);
+        let all = buf.toString('utf8').split('\n').filter((l) => l.length > 0);
+        if (start > 0 && all.length) all = all.slice(1); // 앞이 잘린 첫 줄(부분 라인)은 버림
+        lines = all.slice(Math.max(0, all.length - n));
+      } finally {
+        fs.closeSync(fd);
+      }
     } catch {
       lines = []; // 파일 없음(로그 아직 미생성 등) = 빈 배열
     }
