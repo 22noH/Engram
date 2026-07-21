@@ -35,8 +35,36 @@ function safeId(id: string): boolean {
   return typeof id === 'string' && id.length > 0 && !/[\\/]|\.\./.test(id);
 }
 
+// Task 1(S4): 대화 자동 보존 정책. 기본=unlimited(회귀 0 — 기존 동작 유지).
+// count=채널당 최근 N개만 남김·days=최근 N일 이내 ts만 남김. 위키·RAG 절대 무관(대화 jsonl만).
+export type RetentionPolicy = { mode: 'count' | 'days' | 'unlimited'; value?: number };
+
+const UNLIMITED_RETENTION: RetentionPolicy = { mode: 'unlimited' };
+
+function isPositiveInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v > 0;
+}
+
+function isPositiveNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0;
+}
+
 export class ChatStore {
-  constructor(private readonly chatDir: string) {}
+  private retention: RetentionPolicy = UNLIMITED_RETENTION;
+
+  constructor(private readonly chatDir: string, retention?: RetentionPolicy) {
+    if (retention) this.setRetention(retention);
+  }
+
+  // 정책 소스(설정 파일 값)는 Task 2에서 배선 — 여기선 세터만 제공.
+  // 알 수 없는/잘못된 mode는 안전하게 unlimited로 강등(오염 방지 관례).
+  setRetention(policy: RetentionPolicy): void {
+    if (policy && (policy.mode === 'count' || policy.mode === 'days' || policy.mode === 'unlimited')) {
+      this.retention = policy;
+    } else {
+      this.retention = UNLIMITED_RETENTION;
+    }
+  }
 
   private channelsPath(): string {
     return path.join(this.chatDir, 'channels.json');
@@ -182,7 +210,72 @@ export class ChatStore {
     };
     fs.mkdirSync(this.chatDir, { recursive: true });
     fs.appendFileSync(this.messagesPath(channelId), JSON.stringify(msg) + '\n');
+    this.pruneChannel(channelId); // 정책이 count/days면 여기서 오래된 줄 정리(unlimited=no-op).
     return msg;
+  }
+
+  // 현재 보존 정책을 한 채널에 적용(append 후 자동 호출 + 테스트/수동 트리거용 public).
+  // 절대 throw하지 않음(append는 이미 성공했으므로 프루닝 실패는 로그만 남기고 계속).
+  pruneChannel(id: string): void {
+    try {
+      const policy = this.retention;
+      if (!policy || policy.mode === 'unlimited') return;
+      if (!safeId(id)) return;
+      const p = this.messagesPath(id);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(p, 'utf8');
+      } catch {
+        return; // 파일 없음 = 프루닝할 것 없음
+      }
+      const lines = raw.split('\n').filter(Boolean);
+      let kept: string[];
+      if (policy.mode === 'count') {
+        if (!isPositiveInt(policy.value)) return; // 값 없거나 양의 정수 아니면 no-op
+        kept = lines.slice(Math.max(0, lines.length - policy.value));
+      } else if (policy.mode === 'days') {
+        if (!isPositiveNumber(policy.value)) return; // 값 없거나 양수 아니면 no-op
+        const cutoffMs = Date.now() - policy.value * 24 * 60 * 60 * 1000;
+        kept = lines.filter((l) => {
+          try {
+            const m = JSON.parse(l) as ChatMessage;
+            if (!m || typeof m.ts !== 'string') return true; // ts 없음/파싱 불가 = 안전하게 보존
+            const t = Date.parse(m.ts);
+            if (Number.isNaN(t)) return true; // ts 파싱 실패 = 안전하게 보존(드롭 금지)
+            return t >= cutoffMs;
+          } catch {
+            return true; // 손상 줄 = 안전하게 보존(드롭 금지)
+          }
+        });
+      } else {
+        return;
+      }
+      if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
+      fs.mkdirSync(this.chatDir, { recursive: true });
+      const tmp = `${p}.tmp-${randomUUID()}`;
+      fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
+      fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+    } catch (e) {
+      console.warn(`[chat-store] 채널 '${id}' 프루닝 실패(무시하고 계속): ${String(e)}`);
+    }
+  }
+
+  // 용량 타일용: chatDir 아래 전체 채팅 jsonl 총 바이트. 위키/RAG 폴더는 별개 경로라 무관.
+  historyBytes(): number {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(this.chatDir, { withFileTypes: true });
+    } catch {
+      return 0; // 디렉터리 없음 = 0
+    }
+    let total = 0;
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+      try {
+        total += fs.statSync(path.join(this.chatDir, e.name)).size;
+      } catch { /* 통계 실패한 개별 파일은 건너뜀 */ }
+    }
+    return total;
   }
 
   // ponytail: 전체 읽기 O(n) — 개인 규모. 파일이 커지면 tail 인덱스로.

@@ -282,3 +282,127 @@ describe('ChatStore listChannels 정규화 왕복(Minor 1 가드)', () => {
     expect(reloaded).toEqual(full);
   });
 });
+
+describe('ChatStore 대화 보존 정책(Task 1: S4)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-retention-'));
+    store = new ChatStore(dir);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('기본 정책은 unlimited — 프루닝 없음(회귀)', () => {
+    store.listChannels();
+    for (let i = 0; i < 5; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    expect(store.history('general', { limit: 100 })).toHaveLength(5);
+    const raw = fs.readFileSync(path.join(dir, 'general.jsonl'), 'utf8').split('\n').filter(Boolean);
+    expect(raw).toHaveLength(5);
+  });
+
+  it('count=3 정책 — 5개 append 후 마지막 3개만 남고 재로드에도 유지', () => {
+    store.setRetention({ mode: 'count', value: 3 });
+    store.listChannels();
+    for (let i = 0; i < 5; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    expect(store.history('general').map((m) => m.text)).toEqual(['m2', 'm3', 'm4']);
+    // 재로드(새 인스턴스, 기본 unlimited)해도 파일 자체가 이미 잘렸으므로 그대로 유지.
+    const again = new ChatStore(dir);
+    expect(again.history('general').map((m) => m.text)).toEqual(['m2', 'm3', 'm4']);
+  });
+
+  it('count 값이 0/음수/정수아님이면 no-op', () => {
+    store.listChannels();
+    for (const bad of [0, -1, 1.5]) {
+      store.setRetention({ mode: 'count', value: bad });
+      store.appendMessage('general', { authorId: 'owner', text: 'x' });
+    }
+    expect(store.history('general')).toHaveLength(3); // 3번 append, 프루닝 전혀 안 됨
+  });
+
+  it('count 정책인데 value 미지정이면 no-op', () => {
+    store.listChannels();
+    store.setRetention({ mode: 'count' });
+    store.appendMessage('general', { authorId: 'owner', text: 'a' });
+    store.appendMessage('general', { authorId: 'owner', text: 'b' });
+    expect(store.history('general')).toHaveLength(2);
+  });
+
+  it('days=1 정책 — 오래된 ts 줄 제거, 최근 유지', () => {
+    store.listChannels();
+    const oldTs = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const recentTs = new Date().toISOString();
+    const oldMsg = { id: 'old-1', authorId: 'owner', text: 'old', ts: oldTs };
+    const recentMsg = { id: 'recent-1', authorId: 'owner', text: 'recent', ts: recentTs };
+    fs.appendFileSync(
+      path.join(dir, 'general.jsonl'),
+      JSON.stringify(oldMsg) + '\n' + JSON.stringify(recentMsg) + '\n',
+    );
+    store.setRetention({ mode: 'days', value: 1 });
+    store.pruneChannel('general');
+    expect(store.history('general').map((m) => m.id)).toEqual(['recent-1']);
+  });
+
+  it('days 정책 — ts 파싱 불가/손상 줄은 안전하게 보존(드롭 금지)', () => {
+    store.listChannels();
+    const oldTs = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const badTsMsg = { id: 'bad-ts', authorId: 'owner', text: 'bad', ts: 'not-a-date' };
+    const oldMsg = { id: 'old-1', authorId: 'owner', text: 'old', ts: oldTs };
+    fs.appendFileSync(
+      path.join(dir, 'general.jsonl'),
+      JSON.stringify(oldMsg) + '\n' + JSON.stringify(badTsMsg) + '\n' + '{broken json\n',
+    );
+    store.setRetention({ mode: 'days', value: 1 });
+    expect(() => store.pruneChannel('general')).not.toThrow();
+    const raw = fs.readFileSync(path.join(dir, 'general.jsonl'), 'utf8').split('\n').filter(Boolean);
+    // old-1(만료)은 제거, ts 파싱 불가(bad-ts)와 완전 손상 줄은 안전하게 보존.
+    expect(raw).toHaveLength(2);
+    expect(raw.some((l) => l.includes('bad-ts'))).toBe(true);
+    expect(raw.some((l) => l.includes('broken json'))).toBe(true);
+  });
+
+  it('손상 줄이 있어도 count 프루닝은 안전(never-throw)', () => {
+    store.listChannels();
+    store.appendMessage('general', { authorId: 'owner', text: 'ok1' });
+    fs.appendFileSync(path.join(dir, 'general.jsonl'), '{broken\n');
+    store.setRetention({ mode: 'count', value: 1 });
+    expect(() => store.appendMessage('general', { authorId: 'owner', text: 'ok2' })).not.toThrow();
+    expect(store.history('general').map((m) => m.text)).toEqual(['ok2']);
+  });
+
+  it('pruneChannel을 없는 채널/파일 없는 채널에 호출해도 무해', () => {
+    expect(() => store.pruneChannel('no-such-channel')).not.toThrow();
+    store.listChannels();
+    store.setRetention({ mode: 'count', value: 3 });
+    expect(() => store.pruneChannel('general')).not.toThrow(); // 아직 append 없어 파일 없음
+  });
+
+  it('setRetention에 잘못된 mode를 주면 unlimited로 강등', () => {
+    store.setRetention({ mode: 'bogus' as any, value: 1 });
+    store.listChannels();
+    for (let i = 0; i < 5; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    expect(store.history('general')).toHaveLength(5);
+  });
+
+  it('생성자에 정책을 주입할 수 있다(하위호환: 인자 없어도 기본 unlimited)', () => {
+    const withPolicy = new ChatStore(dir, { mode: 'count', value: 2 });
+    withPolicy.listChannels();
+    for (let i = 0; i < 4; i++) withPolicy.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    expect(withPolicy.history('general').map((m) => m.text)).toEqual(['m2', 'm3']);
+  });
+
+  it('historyBytes — 빈 디렉터리 0, append 후 실제 파일 크기 합산과 일치', () => {
+    expect(store.historyBytes()).toBe(0);
+    store.listChannels();
+    store.appendMessage('general', { authorId: 'owner', text: 'hello' });
+    const ch2 = store.createChannel('dev')!;
+    store.appendMessage(ch2.id, { authorId: 'owner', text: 'world' });
+    const expected =
+      fs.statSync(path.join(dir, 'general.jsonl')).size + fs.statSync(path.join(dir, `${ch2.id}.jsonl`)).size;
+    expect(store.historyBytes()).toBe(expected);
+  });
+
+  it('historyBytes — chatDir 자체가 없으면 0(무해)', () => {
+    const missing = new ChatStore(path.join(dir, 'does-not-exist'));
+    expect(missing.historyBytes()).toBe(0);
+  });
+});
