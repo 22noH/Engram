@@ -6,8 +6,7 @@ export type NavKey =
 
 interface NavItem { key: NavKey; label: string; icon: string; color: string; enabled: boolean }
 
-// 목업 10항목 그대로 — S3는 모델·MCP·위키·서버설정·클라이언트배포까지 구현되어 활성
-// (상태·로그만 S4까지 비활성으로 남는다).
+// 목업 10항목 그대로 — S4부터 상태·로그까지 구현되어 전 네비 항목 활성.
 function items(): NavItem[] {
   return [
     { key: 'overview', label: T.navOverview, icon: '●', color: '#56d364', enabled: true },
@@ -19,7 +18,7 @@ function items(): NavItem[] {
     { key: 'wiki', label: T.navWiki, icon: '☁', color: '#1d9e75', enabled: true },
     { key: 'settings', label: T.navSettings, icon: '⚙', color: '#888780', enabled: true },
     { key: 'deploy', label: T.navDeploy, icon: '⬇', color: '#ba7517', enabled: true },
-    { key: 'status', label: T.navStatus, icon: '≡', color: '#56d364', enabled: false },
+    { key: 'status', label: T.navStatus, icon: '≡', color: '#56d364', enabled: true },
   ];
 }
 

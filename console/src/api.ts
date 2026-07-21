@@ -323,9 +323,13 @@ export async function saveWikiRemote(url: string, branch: string): Promise<boole
 export type Exposure = 'local' | 'lan' | 'internet';
 export type CodingMode = 'auto' | 'allowlist' | 'off';
 
+// 대화 자동 보존 정책(서버 콘솔 S4 Task 2 — chat-store.ts RetentionPolicy 그대로 미러).
+export interface RetentionPolicy { mode: 'count' | 'days' | 'unlimited'; value?: number }
+
 export interface ServerSettingsData {
   serverName?: string; port: number; bind: string; exposure: Exposure;
   oidcIssuer?: string; oidcClientId?: string; hasOidcSecret: boolean; codingMode: CodingMode;
+  retention: RetentionPolicy;
 }
 
 export async function fetchServerSettings(): Promise<ServerSettingsData | null> {
@@ -340,6 +344,7 @@ export interface ServerSettingsPatch {
   serverName?: string; port?: string | number; exposure?: Exposure;
   oidc?: { issuer: string; clientId: string; clientSecret?: string };
   codingMode?: CodingMode;
+  retention?: RetentionPolicy;
 }
 
 // clientSecret은 빈 값이면 서버가 기존 값을 보존한다(admin-http.ts saveServerSettings 계약) —
@@ -358,5 +363,50 @@ export async function fetchPresetBlob(): Promise<Blob | null> {
     const r = await apiFetch('/admin/api/preset');
     if (!r.ok) return null;
     return await r.blob();
+  } catch { return null; }
+}
+
+// ── 상태·로그(서버 콘솔 S4 Task 3 — admin-http.ts의 계약 그대로 미러) ──────────────
+
+export interface StatusData {
+  uptimeSec: number; lastHeartbeatMs: number | null; chatBytes: number; knowledgeBytes: number;
+  memberCount: number; channelCount: number;
+}
+
+export async function fetchServerStatus(): Promise<StatusData | null> {
+  try {
+    const r = await apiFetch('/admin/api/status');
+    if (!r.ok) return null;
+    return await r.json().catch(() => null) as StatusData | null;
+  } catch { return null; }
+}
+
+// ScheduleEntry에는 등록자 필드가 없다(schedules-file.ts listSchedules 계약) — id/channelId/cron/task뿐.
+export interface ScheduleDto { id: string; channelId: string; cron: string; task: string }
+
+export async function fetchSchedules(): Promise<ScheduleDto[] | null> {
+  try {
+    const r = await apiFetch('/admin/api/schedules');
+    if (!r.ok) return null;
+    const b = await r.json().catch(() => null) as { schedules?: ScheduleDto[] } | null;
+    return b?.schedules ?? null;
+  } catch { return null; }
+}
+
+export async function deleteSchedule(id: string): Promise<boolean> {
+  try {
+    const r = await apiFetch(`/admin/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return r.ok;
+  } catch { return false; }
+}
+
+// lines 생략 시 서버 기본값(DEFAULT_LOG_LINES) 적용 — admin-http.ts getLogs 계약.
+export async function fetchLogs(lines?: number): Promise<string[] | null> {
+  try {
+    const qs = typeof lines === 'number' ? `?lines=${encodeURIComponent(String(lines))}` : '';
+    const r = await apiFetch(`/admin/api/logs${qs}`);
+    if (!r.ok) return null;
+    const b = await r.json().catch(() => null) as { lines?: string[] } | null;
+    return b?.lines ?? null;
   } catch { return null; }
 }

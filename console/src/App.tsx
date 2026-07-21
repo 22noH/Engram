@@ -11,6 +11,7 @@ import { Mcp } from './views/Mcp';
 import { Wiki } from './views/Wiki';
 import { ServerSettings } from './views/ServerSettings';
 import { Deploy } from './views/Deploy';
+import { StatusLog } from './views/StatusLog';
 import type { NavKey } from './components/Nav';
 
 type View = 'loading' | 'setup' | 'login' | 'console';
@@ -59,5 +60,6 @@ export default function App() {
   if (nav === 'wiki') return <Wiki {...consoleProps} />;
   if (nav === 'settings') return <ServerSettings {...consoleProps} />;
   if (nav === 'deploy') return <Deploy {...consoleProps} />;
+  if (nav === 'status') return <StatusLog {...consoleProps} />;
   return <Overview {...consoleProps} />;
 }

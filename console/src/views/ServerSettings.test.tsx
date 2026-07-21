@@ -10,6 +10,7 @@ const settingsPayload = {
   oidcClientId: 'client-1',
   hasOidcSecret: true,
   codingMode: 'off',
+  retention: { mode: 'unlimited' },
 };
 const membersPayload = { members: [] };
 
@@ -127,4 +128,41 @@ it('클라이언트 배포 카드가 서버 설정 화면 하단에 그려진다
   render(<ServerSettings serverName="Our Team" role="owner" active="settings" onNavigate={() => {}} />);
   await waitFor(() => expect(screen.getByDisplayValue('우리팀 서버')).toBeInTheDocument());
   expect(screen.getByRole('button', { name: 'Download preset.json' })).toBeInTheDocument();
+});
+
+it('대화 보존 select: 3개 프리셋을 보여주고 저장된 mode를 선택한다(값이 프리셋과 달라도 mode로 매칭)', async () => {
+  mockFetch((url) => {
+    if (url === '/admin/api/server-settings') {
+      return new Response(JSON.stringify({ ...settingsPayload, retention: { mode: 'days', value: 45 } }), { status: 200 });
+    }
+    return null;
+  });
+  render(<ServerSettings serverName="Our Team" role="owner" active="settings" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByDisplayValue('우리팀 서버')).toBeInTheDocument());
+
+  const retentionSelect = screen.getByDisplayValue('Last 90 days') as HTMLSelectElement;
+  const optionTexts = Array.from(retentionSelect.options).map((o) => o.textContent);
+  expect(optionTexts).toEqual(['Last 1,000 per channel', 'Last 90 days', 'Unlimited']);
+  expect(retentionSelect.value).toBe('days'); // 저장값 value=45는 프리셋(90)과 다르지만 mode로 선택됨
+});
+
+it('대화 보존 select에서 "채널당 최근 1,000개" 선택 → 저장 → retention={mode:count,value:1000}', async () => {
+  let captured: { url: string; body: unknown } | null = null;
+  mockFetch((url, init) => {
+    if (url === '/admin/api/server-settings' && init?.method === 'POST') {
+      captured = { url, body: JSON.parse(String(init.body)) };
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return null;
+  });
+  render(<ServerSettings serverName="Our Team" role="owner" active="settings" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByDisplayValue('우리팀 서버')).toBeInTheDocument());
+
+  const retentionSelect = screen.getByDisplayValue('Unlimited') as HTMLSelectElement; // settingsPayload 기본값
+  fireEvent.change(retentionSelect, { target: { value: 'count' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(captured).not.toBeNull());
+  expect((captured as unknown as { body: { retention: { mode: string; value: number } } }).body.retention)
+    .toEqual({ mode: 'count', value: 1000 });
 });

@@ -202,10 +202,30 @@ export const T = {
   codingHint: ko
     ? '자동 = 모든 명령을 실행해요, 허용목록 = 허용된 명령만 실행해요, 꺼짐 = 코딩 기능을 사용하지 않아요'
     : 'Auto runs any command, Allowlist runs only approved commands, Off disables coding entirely',
+  retentionLabel: ko ? '대화 보존' : 'Conversation retention',
+  retentionCountOption: ko ? '채널당 최근 1,000개' : 'Last 1,000 per channel',
+  retentionDaysOption: ko ? '최근 90일' : 'Last 90 days',
+  retentionUnlimitedOption: ko ? '무제한' : 'Unlimited',
+  retentionHint: ko
+    ? '넘치는 오래된 메시지는 자동 삭제 — 위키에 저장된 지식은 유지돼요'
+    : 'Old messages beyond the limit are deleted automatically — knowledge saved to the wiki is kept',
   clientDeployHeading: ko ? '클라이언트 배포' : 'Client deploy',
   deployTitle: ko ? '팀원용 클라이언트 설정 내려받기' : 'Download client settings for teammates',
   deploySub: ko
     ? '이 파일(preset)을 엔그램 앱 설치 폴더에 넣으면, 그 앱은 켜자마자 이 서버의 로그인 화면으로 시작해요. 팀원에게 앱 설치 파일과 함께 전달하세요.'
     : "Drop this file (preset) into an Engram app's install folder and that app starts straight at this server's sign-in screen. Share it with teammates alongside the installer.",
   downloadPresetBtn: ko ? 'preset.json 다운로드' : 'Download preset.json',
+
+  // ── 상태·로그 ──
+  statusLogTitle: ko ? '상태·로그' : 'Status & logs',
+  statusLogSub: ko ? '서버 건강 상태와 걸려 있는 예약 작업.' : 'Server health and pending scheduled jobs.',
+  statUptime: ko ? '가동 시간' : 'Uptime',
+  statLastHeartbeat: ko ? '마지막 생존 신호' : 'Last heartbeat',
+  statChatBytes: ko ? '대화 기록 용량' : 'Chat history size',
+  statKnowledgeBytes: ko ? '위키+지식 용량' : 'Wiki + knowledge size',
+  heartbeatJustNow: ko ? '방금 ✓' : 'Just now ✓',
+  heartbeatMinutesAgo: (n: number) => (ko ? `${n}분 전` : `${n}m ago`),
+  heartbeatNever: '—',
+  schedulesHeading: (n: number) => (ko ? `예약 작업 ${n}` : `${n} scheduled jobs`),
+  recentLogsHeading: ko ? '최근 로그' : 'Recent logs',
 } as const;
