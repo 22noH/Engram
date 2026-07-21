@@ -253,8 +253,14 @@ export class ChatStore {
       if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
       fs.mkdirSync(this.chatDir, { recursive: true });
       const tmp = `${p}.tmp-${randomUUID()}`;
-      fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
-      fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+      try {
+        fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
+        fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+      } finally {
+        // rename 실패(윈도우 AV/잠금 등) 시 tmp가 남아 매 프루닝마다 누적되는 것 방지(리뷰 지적).
+        // 성공 시엔 rename으로 이미 사라졌으므로 unlink는 no-op(존재하면만 제거).
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 정리 실패는 무시 */ }
+      }
     } catch (e) {
       console.warn(`[chat-store] 채널 '${id}' 프루닝 실패(무시하고 계속): ${String(e)}`);
     }
