@@ -31,4 +31,21 @@ describe('WindowsSupervisor', () => {
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('uninstall() hang: alreadyuninstalled 미청취')), 200));
     await expect(Promise.race([sup.uninstall(), timeout])).resolves.toBeUndefined();
   });
+
+  it('install은 손상된 기존 설치(invalidinstallation)에서 명확히 reject한다(hang 금지)', async () => {
+    const fakeServiceFactory = (_o: any) => {
+      const handlers: Record<string, () => void> = {};
+      return {
+        on: (e: string, cb: () => void) => { handlers[e] = cb; },
+        install: () => { handlers['invalidinstallation']?.(); },
+        uninstall: () => {},
+        start: () => {},
+        stop: () => {},
+      };
+    };
+    const sup = new WindowsSupervisor({ name: 'Engram', scriptPath: 'C:/app/main.js', dataDir: 'C:/data' }, fakeServiceFactory as any);
+
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('install() hang: invalidinstallation 미청취')), 200));
+    await expect(Promise.race([sup.install(), timeout])).rejects.toThrow('invalid existing installation');
+  });
 });
