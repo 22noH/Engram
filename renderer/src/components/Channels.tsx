@@ -25,6 +25,10 @@ export function Channels(props: {
   // Task 4(리뷰 지적) — 현재 기본 두뇌 이름. 있으면 드롭다운 기본 항목이 "Default (claude)" 형태로
   // 표시(스펙 §3.4). 미전달·빈 문자열이면 안전 폴백으로 기존처럼 "Default"만.
   defaultBrain?: string;
+  // Task 4(clear-compact) — ⋯메뉴 정리 항목 2개(목업 ②). 슬래시 팔레트(/clear·/compact)와 동일 콜백.
+  // onSetChannelBrain과 같은 결로 optional — 항목은 항상 렌더되고, 미전달 시 클릭이 no-op(기존 테스트 안 깨짐).
+  onClearHistory?: (id: string) => void;
+  onCompact?: (id: string) => void;
 }) {
   const { channels, current, mode } = props;
   const [creating, setCreating] = useState(false);
@@ -115,6 +119,14 @@ export function Channels(props: {
                 {name}
               </div>
             ))}
+            <div className="sep" />
+            <div onClick={() => { setMenu(null); props.onCompact?.(c.id); }}>
+              {T.compactMenu} <span className="hint">(/compact)</span>
+            </div>
+            <div className="danger" onClick={() => { setMenu(null); props.onClearHistory?.(c.id); }}>
+              {T.clearMenu} <span className="hint">(/clear)</span>
+            </div>
+            <div className="sep" />
             <div className="danger" onClick={() => { setMenu(null); if (window.confirm(T.delConfirm(c.name))) props.onDelete(c.id); }}>
               {T.delChannel}
             </div>

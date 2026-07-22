@@ -115,4 +115,9 @@ export const T = {
   // Task 4(리뷰 지적) — 현재 기본 두뇌 이름을 알 때는 "Default (claude)"/"기본 (claude)" 형태,
   // 모를 때(defaultBrain='')는 이름 없이 "Default"/"기본"만.
   brainDefault: (name?: string) => (name ? `${defaultLabel} (${name})` : defaultLabel),
+  // Task 4(clear-compact) — ⋯메뉴 정리 항목(목업 ②) + /clear 실행취소 토스트(목업 ③)
+  compactMenu: ko ? '🧹 요약해서 정리' : '🧹 Summarize & clean up',
+  clearMenu: ko ? '🗑 대화 기록 삭제' : '🗑 Delete history',
+  clearedToast: ko ? '🗑 대화 기록을 비웠어요' : '🗑 Cleared this conversation',
+  undo: ko ? '실행취소' : 'Undo',
 };

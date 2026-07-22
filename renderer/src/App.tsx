@@ -8,7 +8,7 @@ import { fetchStatus, apiLogin, apiRegister, apiOidcBegin, apiOidcPoll, type Aut
 import { Channels } from './components/Channels';
 import { ChannelMembers } from './components/ChannelMembers';
 import { Thread } from './components/Thread';
-import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT } from './components/Palette';
+import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
 import { EngramSelector } from './components/EngramSelector';
 import { ManageEngrams } from './components/ManageEngrams';
@@ -68,6 +68,11 @@ export default function App() {
   const [gateNotice, setGateNotice] = useState<string | undefined>();
   const awaitTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const msgsRef = useRef<HTMLDivElement>(null);
+  // Task 4(clear-compact) — /clear 실행취소 토스트(목업 ③: ~6초, 만료/다음 clear면 백업 확정 삭제).
+  // 채널당 1건(연결+채널id)만 들고 있는다 — clearHistory는 항상 기본 연결로만 보내므로 그걸로 충분.
+  const [clearToast, setClearToast] = useState<{ connId: string; channelId: string } | null>(null);
+  const clearToastRef = useRef<{ connId: string; channelId: string } | null>(null); clearToastRef.current = clearToast;
+  const clearToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 최신 값을 ref로도 들고 있는다(chat.html/Phase11의 currentRef 패턴) — WS 이벤트 콜백이
   // React 커밋 사이 타이밍에서도 항상 "마지막 렌더 기준 최신값"을 읽게 하기 위함.
@@ -121,6 +126,20 @@ export default function App() {
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
         }
       }
+    } else if (f.t === 'historyCleared') {
+      // Task 4(clear-compact) — 그 채널 transcript를 즉시 비우고(모달·시스템 메시지 없음) 실행취소 토스트를 띄운다.
+      setMsgsByConnCh((prev) => new Map(prev).set(`${connId}::${f.channelId}`, []));
+      if (clearToastTimer.current) clearTimeout(clearToastTimer.current);
+      setClearToast({ connId, channelId: f.channelId });
+      clearToastTimer.current = setTimeout(() => dismissClearToast(true), 6000); // ~6초 뒤 백업 확정 삭제
+    } else if (f.t === 'historyRestored') {
+      // undoClear 성공 — 서버가 백업을 되돌렸다. 캐시를 그 채널의 실제 기록으로 재동기화하고 토스트를 끈다
+      // (drop=false: 이미 되돌려졌으니 dropClearBackup을 보내면 안 됨).
+      send(connId, { t: 'history', channelId: f.channelId });
+      dismissClearToast(false);
+    } else if (f.t === 'compacted') {
+      // 서버가 이미 요약→위키 게시→정리를 끝내고 요약 메시지를 append했다 — 재로드하면 그대로 보인다.
+      send(connId, { t: 'history', channelId: f.channelId });
     } else if (f.t === 'authOk') {
       setMeByConn((prev) => ({ ...prev, [connId]: f.user }));
     } else if (f.t === 'authErr') {
@@ -352,11 +371,47 @@ export default function App() {
     expectReply(currentName, text, targetConnId);
   };
 
+  // Task 4(clear-compact) — 논리 채널 이름 → 기본 연결(그 서버) 기준 실제 채널 id. clear/compact는
+  // 항상 기본 연결로만 보낸다(fanoutToName처럼 여러 연결에 팬아웃하지 않는다 — 스펙: send(defaultConnId,...)).
+  const resolveDefaultChanId = (name: string): string | undefined =>
+    channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode)?.id;
+
+  // 토스트를 끈다. drop=true면 서버에 dropClearBackup을 보내 백업을 확정 삭제(만료·다음 clear).
+  // drop=false는 undoClear/historyRestored처럼 이미 되돌려졌거나 되돌리는 중이라 백업을 지우면 안 될 때.
+  const dismissClearToast = (drop: boolean) => {
+    if (clearToastTimer.current) { clearTimeout(clearToastTimer.current); clearToastTimer.current = null; }
+    const t = clearToastRef.current;
+    if (t && drop) send(t.connId, { t: 'dropClearBackup', id: t.channelId });
+    setClearToast(null);
+  };
+
+  // /clear — 확인창 없이 즉시(스펙 §목업③). 이미 뜬 토스트가 있으면(다른 clear가 진행 중) 그 백업부터
+  // 확정 삭제하고 새로 시작한다.
+  const runClear = (name: string) => {
+    const id = resolveDefaultChanId(name);
+    if (!id) return;
+    if (clearToastRef.current) dismissClearToast(true);
+    send(connState.defaultConnId, { t: 'clearHistory', id });
+  };
+  // /compact — 서버가 요약→위키 게시→정리까지 다 하고 compacted로 알려준다(클라 모달 없음).
+  const runCompact = (name: string) => {
+    const id = resolveDefaultChanId(name);
+    if (!id) return;
+    send(connState.defaultConnId, { t: 'compact', id });
+  };
+
   // '/'명령 팔레트에서 클릭·Enter로 명령을 입력창에 채운다(chat.html pickCmd 이전).
-  // 단, 'engram' 항목은 텍스트가 아니라 동작 — Manage Engrams 모달을 연다.
+  // 'engram' 항목은 텍스트가 아니라 동작(Manage Engrams 모달). clear/compact도 텍스트가 아니라 동작 —
+  // 입력창을 채우지 않고(비워서) 곧바로 ws 프레임을 보낸다(스펙: "입력창에 채우지 말고").
   const pickCmd = (insert: string) => {
     setPalFilter(null);
     if (insert === MANAGE_ENGRAMS_INSERT) { setShowManage(true); return; }
+    if (insert === CLEAR_INSERT || insert === COMPACT_INSERT) {
+      const i = document.getElementById('input') as HTMLInputElement;
+      i.value = ''; i.focus(); setInputText('');
+      if (currentName) { if (insert === CLEAR_INSERT) runClear(currentName); else runCompact(currentName); }
+      return;
+    }
     const i = document.getElementById('input') as HTMLInputElement;
     i.value = insert; i.focus(); setInputText(insert);
   };
@@ -454,6 +509,8 @@ export default function App() {
           brainNames={brainNames}
           defaultBrain={defaultBrain}
           onSetChannelBrain={(name, brain) => fanoutToName(name, (id) => ({ t: 'setChannelBrain', id, brain }))}
+          onClearHistory={(name) => runClear(name)}
+          onCompact={(name) => runCompact(name)}
           onManageMembers={(name) => {
             const ch = channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode);
             if (ch) { setMembersFor(ch.id); send(connState.defaultConnId, { t: 'channelRoster' }); }
@@ -541,6 +598,14 @@ export default function App() {
                   <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
                 )}
               </div>
+              {clearToast && clearToast.connId === connState.defaultConnId && clearToast.channelId === defaultChan?.id && (
+                <div id="clearToast">
+                  {T.clearedToast}
+                  <span className="undo" onClick={() => { send(clearToast.connId, { t: 'undoClear', id: clearToast.channelId }); dismissClearToast(false); }}>
+                    {T.undo}
+                  </span>
+                </div>
+              )}
               {palFilter !== null ? (
                 <Palette filter={palFilter} selected={palIdx} onPick={pickCmd} />
               ) : (
