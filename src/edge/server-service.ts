@@ -153,16 +153,28 @@ export async function serviceControl(verb: 'start' | 'stop' | 'status', deps: Se
 
 export type SpawnFn = (execPath: string, args: string[], options: { stdio: 'inherit'; env: NodeJS.ProcessEnv }) => ChildProcess;
 
+// SIGTERM/SIGINT을 자식에게 전달할 대상(기본 process). 도커 CMD로 쓰일 때 `docker stop`은
+// PID 1(이 CLI 프로세스)에만 신호를 보낸다 — 전달하지 않으면 main.js 자식이 고아로 남아
+// 정상 종료(graceful shutdown) 없이 강제 리핑된다(T3 리뷰 minor). 테스트는 fake EventEmitter를
+// 주입해 실제 process 신호를 건드리지 않고 전달 여부만 검증한다.
+export type SignalSource = Pick<NodeJS.EventEmitter, 'on' | 'off'>;
+
 export interface ForegroundDeps {
   paths: PathResolver;
   repoRoot: string;
   spawnFn: SpawnFn;
   env: NodeJS.ProcessEnv;
+  signalSource: SignalSource;
 }
 
 export function buildForegroundDeps(paths: PathResolver): ForegroundDeps {
-  return { paths, repoRoot: findRepoRoot(__dirname), spawnFn: spawn as unknown as SpawnFn, env: process.env };
+  return {
+    paths, repoRoot: findRepoRoot(__dirname), spawnFn: spawn as unknown as SpawnFn, env: process.env,
+    signalSource: process,
+  };
 }
+
+const FORWARDED_SIGNALS = ['SIGTERM', 'SIGINT'] as const;
 
 export function runForeground(deps: ForegroundDeps): Promise<number> {
   const mainScript = path.join(deps.repoRoot, 'dist', 'src', 'main.js');
@@ -171,7 +183,18 @@ export function runForeground(deps: ForegroundDeps): Promise<number> {
       stdio: 'inherit',
       env: { ...deps.env, ENGRAM_DATA_DIR: deps.paths.getDataDir() },
     });
-    child.on('exit', (code) => resolve(code ?? 0));
-    child.on('error', () => resolve(1)); // spawn 자체 실패(예: node 실행 파일 없음) — 크래시 대신 실패 종료코드
+
+    // 신호별 핸들러를 개별 등록(never-throw: kill 실패는 흡수 — 예: 자식이 이미 죽은 레이스).
+    const handlers = FORWARDED_SIGNALS.map((sig) => {
+      const handler = (): void => { try { child.kill(sig); } catch { /* 이미 종료됐거나 신호 미지원 — 무시 */ } };
+      deps.signalSource.on(sig, handler);
+      return { sig, handler };
+    });
+    // 자식이 끝나면 리스너를 반드시 해제한다 — 안 하면 부모가 이후 신호를 받을 때마다 이미 죽은
+    // child.kill을 계속 호출(무해하지만 낭비)하고, 테스트 프로세스에서는 리스너 누수로 남는다.
+    const unforward = (): void => { for (const { sig, handler } of handlers) deps.signalSource.off(sig, handler); };
+
+    child.on('exit', (code) => { unforward(); resolve(code ?? 0); });
+    child.on('error', () => { unforward(); resolve(1); }); // spawn 자체 실패(예: node 실행 파일 없음) — 크래시 대신 실패 종료코드
   });
 }

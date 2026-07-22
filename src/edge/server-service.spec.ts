@@ -191,15 +191,25 @@ describe('serviceControl', () => {
 });
 
 describe('runForeground', () => {
-  class FakeChild extends EventEmitter {}
+  class FakeChild extends EventEmitter {
+    kill = jest.fn();
+  }
+
+  function makeForegroundDeps(child: FakeChild, signalSource: EventEmitter): ForegroundDeps {
+    return {
+      paths: new PathResolver('C:/fake-data'),
+      repoRoot: 'C:/fake-repo',
+      env: { PATH: 'x' } as NodeJS.ProcessEnv,
+      spawnFn: (() => child as unknown as ReturnType<ForegroundDeps['spawnFn']>) as ForegroundDeps['spawnFn'],
+      signalSource,
+    };
+  }
 
   it('node dist/src/main.js를 spawn(stdio 상속·ENGRAM_DATA_DIR 주입)하고 종료코드를 그대로 반환', async () => {
     const child = new FakeChild();
     let capturedArgs: { execPath: string; args: string[]; opts: unknown } | undefined;
     const deps: ForegroundDeps = {
-      paths: new PathResolver('C:/fake-data'),
-      repoRoot: 'C:/fake-repo',
-      env: { PATH: 'x' } as NodeJS.ProcessEnv,
+      ...makeForegroundDeps(child, new EventEmitter()),
       spawnFn: ((execPath: string, args: string[], opts: unknown) => {
         capturedArgs = { execPath, args, opts };
         return child as unknown as ReturnType<ForegroundDeps['spawnFn']>;
@@ -215,14 +225,43 @@ describe('runForeground', () => {
 
   it('비정상 종료코드도 그대로 전파', async () => {
     const child = new FakeChild();
-    const deps: ForegroundDeps = {
-      paths: new PathResolver('C:/fake-data'),
-      repoRoot: 'C:/fake-repo',
-      env: {} as NodeJS.ProcessEnv,
-      spawnFn: (() => child as unknown as ReturnType<ForegroundDeps['spawnFn']>) as ForegroundDeps['spawnFn'],
-    };
-    const resultP = runForeground(deps);
+    const resultP = runForeground(makeForegroundDeps(child, new EventEmitter()));
     child.emit('exit', 1);
     expect(await resultP).toBe(1);
+  });
+
+  // T3 리뷰 minor: 도커 CMD로 쓰일 때 `docker stop`은 PID 1(이 CLI)에만 신호를 보낸다 —
+  // 자식(main.js)에 전달하지 않으면 graceful shutdown 없이 고아로 남아 강제 리핑된다.
+  it('부모가 SIGTERM을 받으면 자식에게 SIGTERM을 전달', async () => {
+    const child = new FakeChild();
+    const signalSource = new EventEmitter();
+    const resultP = runForeground(makeForegroundDeps(child, signalSource));
+    signalSource.emit('SIGTERM');
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    child.emit('exit', 0);
+    await resultP;
+  });
+
+  it('부모가 SIGINT를 받으면 자식에게 SIGINT를 전달', async () => {
+    const child = new FakeChild();
+    const signalSource = new EventEmitter();
+    const resultP = runForeground(makeForegroundDeps(child, signalSource));
+    signalSource.emit('SIGINT');
+    expect(child.kill).toHaveBeenCalledWith('SIGINT');
+    child.emit('exit', 0);
+    await resultP;
+  });
+
+  it('자식 종료 후에는 신호를 더 이상 전달하지 않는다(리스너 해제)', async () => {
+    const child = new FakeChild();
+    const signalSource = new EventEmitter();
+    const resultP = runForeground(makeForegroundDeps(child, signalSource));
+    child.emit('exit', 0);
+    await resultP;
+    child.kill.mockClear();
+    signalSource.emit('SIGTERM');
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(signalSource.listenerCount('SIGTERM')).toBe(0);
+    expect(signalSource.listenerCount('SIGINT')).toBe(0);
   });
 });
