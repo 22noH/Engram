@@ -209,6 +209,14 @@ export const T = {
   retentionHint: ko
     ? '넘치는 오래된 메시지는 자동 삭제 — 위키에 저장된 지식은 유지돼요'
     : 'Old messages beyond the limit are deleted automatically — knowledge saved to the wiki is kept',
+  // clear-compact Task 6: 대화 보존 select 바로 아래 토글(목업 ⑤). 힌트 문구는 Task 5 리뷰 교훈을
+  // 그대로 반영 — "끄면 그냥 삭제"를 명시해야 사용자가 꺼도 되는지 판단할 수 있다(안 그러면 꺼짐이
+  // 뭘 잃는지 몰라 아무도 못 끔).
+  autoCompactLabel: ko ? '자동 정리' : 'Auto cleanup',
+  autoCompactCheckboxLabel: ko ? '지우기 전에 위키로 요약' : 'Summarize to wiki before deleting',
+  autoCompactHint: ko
+    ? '켜면 지우기 전에 위키로 요약해요 · 끄면 오래된 대화를 요약 없이 그냥 삭제해요'
+    : 'On summarizes old messages to the wiki before deleting them · Off just deletes them, no summary',
   clientDeployHeading: ko ? '클라이언트 배포' : 'Client deploy',
   deployTitle: ko ? '팀원용 클라이언트 설정 내려받기' : 'Download client settings for teammates',
   deploySub: ko

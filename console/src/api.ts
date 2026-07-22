@@ -330,6 +330,9 @@ export interface ServerSettingsData {
   serverName?: string; port: number; bind: string; exposure: Exposure;
   oidcIssuer?: string; oidcClientId?: string; hasOidcSecret: boolean; codingMode: CodingMode;
   retention: RetentionPolicy;
+  // clear-compact Task 6: 서버는 항상 값을 실어 보내지만(미저장=true) ?는 방어적 계약(GET 스키마
+  // 확장에 열려 있는 다른 필드들과 결 맞춤 — 예: serverName?).
+  autoCompact?: boolean;
 }
 
 export async function fetchServerSettings(): Promise<ServerSettingsData | null> {
@@ -345,6 +348,7 @@ export interface ServerSettingsPatch {
   oidc?: { issuer: string; clientId: string; clientSecret?: string };
   codingMode?: CodingMode;
   retention?: RetentionPolicy;
+  autoCompact?: boolean;
 }
 
 // clientSecret은 빈 값이면 서버가 기존 값을 보존한다(admin-http.ts saveServerSettings 계약) —

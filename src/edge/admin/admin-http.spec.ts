@@ -1402,5 +1402,47 @@ describe('AdminHttp', () => {
         expect(history.map((m) => m.text)).toEqual(['m2', 'm3']);
       });
     });
+
+    describe('server-settings 자동 정리(autoCompact) 왕복 — clear-compact Task 6', () => {
+      it('GET 기본값: 미저장이면 true(chat.config.ts와 동일한 결)', async () => {
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).autoCompact).toBe(true);
+      });
+
+      it('POST false → GET 왕복', async () => {
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: false });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).autoCompact).toBe(false);
+      });
+
+      it('POST true(명시) → GET 왕복', async () => {
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: false });
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: true });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        expect((await r.json() as any).autoCompact).toBe(true);
+      });
+
+      it('autoCompact 생략 시 다른 필드(serverName)만 갱신되고 기존 autoCompact 보존', async () => {
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: false });
+        await post('/admin/api/server-settings', ownerTok, { serverName: 'Team Y' });
+        const r = await authFetch('/admin/api/server-settings', ownerTok);
+        const body = await r.json() as any;
+        expect(body.autoCompact).toBe(false);
+        expect(body.serverName).toBe('Team Y');
+      });
+
+      it.each([
+        ['문자열', 'false'],
+        ['숫자', 0],
+        ['null', null],
+        ['객체', { on: true }],
+      ])('비boolean autoCompact(%s)는 조용히 무시(기존 값 보존, 400 아님)', async (_label, bad) => {
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: false }); // 먼저 false로 세팅
+        const r = await post('/admin/api/server-settings', ownerTok, { autoCompact: bad });
+        expect(r.status).toBe(200); // 검증 실패로 400을 던지지 않는다 — retention과 달리 계약상 "무시"
+        const body = await (await authFetch('/admin/api/server-settings', ownerTok)).json() as any;
+        expect(body.autoCompact).toBe(false); // 이전에 저장한 false가 그대로 보존됨(비boolean에 안 덮임)
+      });
+    });
   });
 });

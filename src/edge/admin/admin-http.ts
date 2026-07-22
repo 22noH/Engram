@@ -795,6 +795,9 @@ export class AdminHttp {
       codingMode,
       // 서버 콘솔 S4 Task 2: 대화 자동 보존 정책. 미저장=무제한(플랜 Global Constraints: 기본 무제한).
       retention: chatCfg.retention ?? { mode: 'unlimited' },
+      // clear-compact Task 6: 보존 프루닝 직전 자동 요약→위키 게시 토글. 미저장=기본 켜짐(chat.config.ts와
+      // 동일한 결 — undefined도 true로 취급, 명시적 false만 꺼짐). 재시작 후 적용(훅은 main.ts 부팅 시점 배선).
+      autoCompact: chatCfg.autoCompact ?? true,
     };
     if (auth.serverName) body.serverName = auth.serverName;
     if (auth.oidc) {
@@ -870,13 +873,22 @@ export class AdminHttp {
       }
     }
 
-    if (port !== undefined || bind !== undefined || retention !== undefined) {
-      saveChatBootConfig(this.deps.configDir, { port, bind, retention });
+    // clear-compact Task 6: autoCompact는 boolean만 받는다(비boolean은 조용히 무시 — touched 게이트는
+    // 콘솔 쪽 책임, 여기선 "필드가 body에 실제로 있었는가"만 판정한다. undefined는 "안 보냄"과 동치라
+    // saveChatBootConfig에 아예 넘기지 않아 기존 값을 보존한다 — retention과 동일한 부분갱신 결).
+    let autoCompact: boolean | undefined;
+    if (typeof body.autoCompact === 'boolean') autoCompact = body.autoCompact;
+
+    if (port !== undefined || bind !== undefined || retention !== undefined || autoCompact !== undefined) {
+      saveChatBootConfig(this.deps.configDir, { port, bind, retention, autoCompact });
     }
     // 런타임 즉시 반영: main.ts가 이 deps.chat과 self.adapter의 ChatStore를 같은 인스턴스로 주입하므로
     // (파일 저장은 "재시작 시 적용"이 기본이던 다른 서버 설정과 달리) 여기서 세터를 바로 호출하면
     // 재시작 없이 이번 요청부터 새 정책이 적용된다 — 브리프 요구("가능하면 즉시").
     if (retention !== undefined) this.deps.chat.setRetention(retention);
+    // autoCompact는 retention과 달리 런타임 세터가 없다 — 프루닝 훅은 main.ts가 부팅 시점에 1회
+    // 주입하는 콜백(Task 5 `setAutoCompactHook`)이라 재바인드할 실행 중 객체가 없다. 포트/바인드처럼
+    // "재시작 후 적용"(파일에만 반영, 다음 부팅부터 새 훅 배선이 이 값을 읽는다).
     if (codingMode !== undefined) setCommandMode(this.deps.configDir, codingMode);
 
     // serverName·oidc는 auth.json 하나에 같이 산다(saveAuthSettings가 부분patch가 아니라 전체

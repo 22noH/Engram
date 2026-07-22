@@ -47,6 +47,10 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
   const [codingTouched, setCodingTouched] = useState(false);
   const [retentionMode, setRetentionMode] = useState<RetentionPolicy['mode']>('unlimited');
   const [retentionTouched, setRetentionTouched] = useState(false);
+  // clear-compact Task 6: retentionTouched와 완전히 같은 결의 게이트 — 안 건드린 저장은 autoCompact
+  // 필드 자체를 안 보낸다(Task 5 리뷰가 retention에서 적발한 패턴을 여기선 처음부터 방지).
+  const [autoCompact, setAutoCompact] = useState(true);
+  const [autoCompactTouched, setAutoCompactTouched] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -63,6 +67,8 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
         setCodingTouched(false);
         setRetentionMode(d.retention?.mode ?? 'unlimited');
         setRetentionTouched(false);
+        setAutoCompact(d.autoCompact ?? true);
+        setAutoCompactTouched(false);
       }
     });
     fetchMembers().then(setMembers);
@@ -79,6 +85,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
       ...(codingTouched ? { codingMode } : {}),
       ...(oidcTouched ? { oidc: { issuer: oidcIssuer, clientId: oidcClientId, clientSecret: oidcClientSecret } } : {}),
       ...(retentionTouched ? { retention: RETENTION_PRESETS[retentionMode] } : {}),
+      ...(autoCompactTouched ? { autoCompact } : {}),
     });
     setBusy(false);
     setOidcClientSecret(''); // 원문은 성공·실패 무관 입력칸에 남기지 않는다(보안 요구).
@@ -147,6 +154,15 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
                 <option value="unlimited">{T.retentionUnlimitedOption}</option>
               </select>
               <span className="hint">{T.retentionHint}</span>
+            </div>
+            <div className="frow">
+              <label>{T.autoCompactLabel}</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={autoCompact}
+                       onChange={(e) => { setAutoCompact(e.target.checked); setAutoCompactTouched(true); }} />
+                {T.autoCompactCheckboxLabel}
+              </label>
+              <span className="hint">{T.autoCompactHint} · {T.restartHint}</span>
             </div>
           </div>
           <div className="savebar"><button disabled={busy} onClick={submit}>{T.save}</button></div>
