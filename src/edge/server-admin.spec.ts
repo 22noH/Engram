@@ -54,6 +54,16 @@ describe('server-admin', () => {
       expect(s.lastHeartbeatMs).toBe(1700000000000);
     });
 
+    it('읽기 전용: 실행 중 서버의 /clear 되돌리기 백업(.cleared)을 지우지 않는다(리뷰 지적 데이터 손실 가드)', async () => {
+      // status는 데이터 폴더를 공유하는 실행 중 서버의 undo 백업을 절대 건드리면 안 된다.
+      const chatDir = path.join(paths.getStateDir(), 'chat');
+      fs.mkdirSync(chatDir, { recursive: true });
+      const backup = path.join(chatDir, 'somechannel.jsonl.cleared');
+      fs.writeFileSync(backup, '{"id":"m1","text":"undoable","ts":"2026-01-01T00:00:00Z"}\n');
+      await runStatus(paths);
+      expect(fs.existsSync(backup)).toBe(true); // status 호출 후에도 백업 보존(ChatStore readOnly)
+    });
+
     it('손상된 heartbeat 파일은 null(숫자 아님)', async () => {
       const stateDir = paths.getStateDir();
       fs.mkdirSync(stateDir, { recursive: true });

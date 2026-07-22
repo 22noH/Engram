@@ -537,6 +537,15 @@ describe('ChatStore clearChannel/undoClear/dropClearBackup(Task 1: clear/compact
     expect(fs.existsSync(clearedPath())).toBe(false);
     expect(reopened.undoClear('general')).toBe(false);
   });
+
+  it('readOnly:true면 .cleared 정리를 건너뛴다 — 실행 중 서버 백업 보존(server-cli status용·리뷰 지적)', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'x' });
+    store.clearChannel('general');
+    expect(fs.existsSync(clearedPath())).toBe(true);
+    const readOnly = new ChatStore(dir, undefined, { readOnly: true }); // CLI가 읽기 전용으로 잠깐 열 때
+    expect(fs.existsSync(clearedPath())).toBe(true); // 백업 그대로 — 지우지 않음
+    expect(readOnly.undoClear('general')).toBe(true); // 되돌리기 여전히 가능(원본 복원)
+  });
 });
 
 describe('ChatStore removeMessagesByIds(Task 5: clear-compact 자동 compact)', () => {

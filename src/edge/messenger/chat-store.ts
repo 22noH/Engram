@@ -70,9 +70,13 @@ export class ChatStore {
     this.autoCompactEnabled = enabled;
   }
 
-  constructor(private readonly chatDir: string, retention?: RetentionPolicy) {
+  // opts.readOnly: 부팅 시 잔여 .cleared 정리(cleanupStaleClearBackups)를 건너뛴다 — 별도 프로세스가
+  // "읽기 전용"으로 잠깐 열 때(예: engram-server status CLI)를 위한 것. 그 정리는 파일을 지우는 유일한
+  // 부작용이라, 실행 중 서버와 데이터 폴더를 공유하는 CLI가 이걸 돌리면 서버의 /clear 되돌리기 백업을
+  // 지워버린다(리뷰 지적: 읽기 전용 명령의 데이터 손실). 서버 본체는 부팅 1회 생성이라 기본 동작(정리) 유지.
+  constructor(private readonly chatDir: string, retention?: RetentionPolicy, opts?: { readOnly?: boolean }) {
     if (retention) this.setRetention(retention);
-    this.cleanupStaleClearBackups();
+    if (!opts?.readOnly) this.cleanupStaleClearBackups();
   }
 
   // main.ts에서 wiki 배선이 있을 때만 호출(구조적 타입, DI 순환 회피 — setChannelBrainSource와 동일 결).

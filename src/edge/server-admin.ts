@@ -48,10 +48,10 @@ export function dirSizeBytes(dir: string): number {
   return total;
 }
 
-// 그 포트에 127.0.0.1로 TCP 접속을 시도해 "지금 뭔가 리슨 중인가"만 확인한다(누가·무엇인지는
-// 판별하지 않음 — 로컬 CLI에서 흔한 관용, admin-http 헬스체크와 동일 결). 짧은 타임아웃으로
-// 접속 거부/무응답을 빠르게 false로 접는다(CLI가 멈춰 보이면 안 됨).
-function probeListening(port: number, timeoutMs = 300): Promise<boolean> {
+// 그 host:port에 TCP 접속을 시도해 "지금 뭔가 리슨 중인가"만 확인한다(누가·무엇인지는 판별하지
+// 않음 — 로컬 CLI에서 흔한 관용, admin-http 헬스체크와 동일 결). 짧은 타임아웃으로 접속 거부/무응답을
+// 빠르게 false로 접는다(CLI가 멈춰 보이면 안 됨). host는 실제 bind를 향한다(0.0.0.0=루프백 포함).
+function probeListening(port: number, host = '127.0.0.1', timeoutMs = 300): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let settled = false;
@@ -65,7 +65,7 @@ function probeListening(port: number, timeoutMs = 300): Promise<boolean> {
     socket.once('connect', () => done(true));
     socket.once('timeout', () => done(false));
     socket.once('error', () => done(false));
-    socket.connect(port, '127.0.0.1');
+    socket.connect(port, host);
   });
 }
 
@@ -75,7 +75,9 @@ function probeListening(port: number, timeoutMs = 300): Promise<boolean> {
 export async function runStatus(paths: PathResolver): Promise<ServerStatus> {
   const accounts = new AccountStore(paths.getStateDir());
   const chatCfg = loadChatConfig(paths.getConfigDir());
-  const chat = new ChatStore(path.join(paths.getStateDir(), 'chat'), chatCfg.retention);
+  // ★readOnly: true(리뷰 지적) — 이 CLI는 실행 중 서버와 데이터 폴더를 공유하므로, ChatStore 생성자의 잔여
+  // .cleared 정리가 서버의 /clear 되돌리기 백업을 지우면 안 된다. status는 읽기 전용이어야 한다.
+  const chat = new ChatStore(path.join(paths.getStateDir(), 'chat'), chatCfg.retention, { readOnly: true });
 
   let lastHeartbeatMs: number | null = null;
   try {
@@ -85,7 +87,10 @@ export async function runStatus(paths: PathResolver): Promise<ServerStatus> {
   } catch { /* 파일 없음(상주 미가동/최초 부팅 전) — null 유지 */ }
 
   const knowledgeBytes = dirSizeBytes(paths.getWikiDir()) + dirSizeBytes(paths.getRagDir());
-  const listening = await probeListening(chatCfg.port);
+  // 리슨 프로브는 실제 bind를 향한다(리뷰 지적: 127.0.0.1 하드코딩은 특정 IP 바인드 시 오탐).
+  // 0.0.0.0(전 인터페이스)은 루프백도 포함하므로 127.0.0.1로 접속(가장 확실). 그 외는 설정된 bind로.
+  const probeHost = (!chatCfg.bind || chatCfg.bind === '0.0.0.0') ? '127.0.0.1' : chatCfg.bind;
+  const listening = await probeListening(chatCfg.port, probeHost);
 
   return {
     lastHeartbeatMs,
