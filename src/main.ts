@@ -44,6 +44,7 @@ import { listBrainNames, defaultBrainName } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
 import { readClaudeMcpServers } from './brain/claude-mcp-import';
 import { mirrorClaudeMcp } from './desktop/mcp-file';
+import { CompactService } from './agent-layer/compact';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
 // prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
@@ -115,6 +116,10 @@ async function bootstrap(): Promise<void> {
     let authDeps: AuthDeps | undefined;
     let mcpDeps: McpDeps | undefined;
     let adminDeps: AdminDeps | undefined;
+    // clear-compact Task 3b: /compact ws 훅. wiki 배선(메인 서버=isServer)이 있을 때만 채워진다 —
+    // brain 모드/미배선이면 undefined인 채로 SelfMessenger에 넘어가 self.adapter의 compact 케이스가
+    // 조용한 no-op으로 흡수한다(Task 3이 이미 만들어둔 안전망).
+    let compactHandler: ((channelId: string, brainName?: string) => Promise<{ slug: string } | null>) | undefined;
     if (isServer) {
       const accounts = new AccountStore(paths.getStateDir());
       const sessions = new SessionStore(paths.getStateDir());
@@ -162,11 +167,19 @@ async function bootstrap(): Promise<void> {
         const adminHttp = new AdminHttp({ accounts, sessions, chat: chatStore, groups, wiki, proposals, configDir: paths.getConfigDir(), paths });
         adminDeps = { http: adminHttp };
       }
+
+      // clear-compact Task 3b: CompactService는 main.ts에서만 조립되는 chatStore가 필요해 DI 밖(setter)으로
+      // 주입한다(setChannelBrainSource와 동일 결) — chatStore는 위 chatCfg.enabled 블록에서 이미 non-null.
+      const applier = app.get(ProposalApplier);
+      const compactService = new CompactService(chatStore, wiki, proposals, applier);
+      orchestrator.setCompactService(compactService);
+      compactHandler = (id, brainName) => orchestrator.compactChannel(id, brainName);
     }
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,
       brainNames: () => listBrainNames(paths.getConfigDir()),
       defaultBrain: () => defaultBrainName(paths.getConfigDir()),
+      compactHandler,
     },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
       authDeps, mcpDeps, adminDeps);

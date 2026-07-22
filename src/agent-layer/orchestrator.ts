@@ -85,6 +85,11 @@ export class Orchestrator {
   // 리뷰 지적 Finding 1: resumeInterrupted의 재개 발사가 채널 브레인을 안 실어보내던 것 — 부팅 시점에
   // "현재" 채널 브레인을 조회해 넣는다(재시작 사이 채널 브레인이 바뀌었어도 최신 값 반영).
   private chatStoreForBrain?: { listChannels(): Array<{ id: string; brain?: string }> };
+  // /compact 실행기(CompactService) — main.ts에서 setter 주입(구조적 타입, 순환 회피 —
+  // main.ts에서만 조립 가능한 chatStore를 CompactService가 필요로 해 DI로는 못 넣는다. clear-compact Task 3b).
+  private compactSvc?: {
+    compact(channelId: string, opts: { brain: BrainProvider; auto?: boolean }): Promise<{ summary: string; slug: string } | null>;
+  };
 
   constructor(
     private readonly reader: ReaderAgent,
@@ -135,6 +140,14 @@ export class Orchestrator {
     this.chatStoreForBrain = source;
   }
 
+  // CompactService 주입(clear-compact Task 3b). main.ts에서 wiki 배선이 있을 때만(메인 서버) 호출 —
+  // 미주입이면 compactChannel이 null(자기위임 없음, self.adapter의 compact 케이스는 무크래시 no-op).
+  setCompactService(svc: {
+    compact(channelId: string, opts: { brain: BrainProvider; auto?: boolean }): Promise<{ summary: string; slug: string } | null>;
+  }): void {
+    this.compactSvc = svc;
+  }
+
   // channelId의 "현재" 브레인 조회(never-throw — 조회 실패는 brain 미지정으로 폴백).
   private channelBrainOf(channelId: string): string | undefined {
     if (!this.chatStoreForBrain) return undefined;
@@ -142,6 +155,22 @@ export class Orchestrator {
       return this.chatStoreForBrain.listChannels().find((c) => c.id === channelId)?.brain;
     } catch {
       return undefined;
+    }
+  }
+
+  // self.adapter의 compact ws 케이스가 부르는 훅(clear-compact Task 3b — 3의 opts.compactHandler 계약을
+  // 채운다). 요청 한정 채널 두뇌로 요약→위키 게시→정리(CompactService.compact)를 수행. never-throw —
+  // compactSvc 미주입/브레인 미해소/compact 자체 실패는 전부 null(ws 루프는 조용한 no-op으로 흡수).
+  async compactChannel(channelId: string, brainName?: string): Promise<{ slug: string } | null> {
+    if (!this.compactSvc) return null;
+    const brain = this.resolveMsgBrain({ text: '', userId: channelId, ...(brainName ? { brain: brainName } : {}) });
+    if (!brain) return null;
+    try {
+      const r = await this.compactSvc.compact(channelId, { brain });
+      return r ? { slug: r.slug } : null;
+    } catch (err) {
+      this.logger.warn(`compact 실패(무시): ${String(err)}`, 'Orchestrator');
+      return null;
     }
   }
 
