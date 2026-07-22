@@ -24,6 +24,7 @@ import { getChatRetention, setChatRetention } from './chat-retention-file';
 import { resolveLanguage } from '../agent-layer/language';
 import { loadLocalBrains, addLocalBrain } from './local-brains';
 import { readSetupCode } from '../edge/auth/setup-code';
+import { focusOrRestore } from './window-focus';
 import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
@@ -324,7 +325,13 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit(); // 중복 실행: 기존 인스턴스에 양보(스펙 §7)
 } else {
-  app.on('second-instance', () => openSettings());
+  // 아이콘 재클릭(중복 실행) = 기존 창 포커스(스펙 §7). 창이 있으면 그걸 복원·포커스,
+  // 트레이 상주라 창이 하나도 없을 수도 있으면 채팅창을 새로 열어 트레이 더블클릭과 동일하게 반응한다.
+  app.on('second-instance', () => {
+    const win = chatWin ?? settingsWin;
+    if (win) focusOrRestore(win);
+    else openChat();
+  });
   app.on('before-quit', () => {
     quitting = true;
     child?.kill();

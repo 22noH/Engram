@@ -161,6 +161,11 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #manageModal { background:var(--panel); border:1px solid var(--line); border-radius:10px;
                padding:18px; width:420px; max-width:92vw; }
 #manageModal h2 { font-size:15px; margin-bottom:10px; }
+/* 섹션 라벨(Connected / Connect a remote Engram / Advanced) — engramListHead와 같은 이디엄,
+   다만 각 섹션 상단에 여백을 둬 3영역을 시각적으로 분리한다. */
+.sectionLabel { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px;
+                margin:14px 0 6px; }
+.sectionLabel:first-of-type { margin-top:0; }
 .engramListHead { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px;
                   margin-bottom:6px; }
 .engramRow { display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid var(--line); }
@@ -170,8 +175,18 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 .engramRow .default { color:var(--accent); font-size:12px; font-weight:600; }
 .engramRow button { font-size:12px; padding:0 10px; height:28px; }
 .engramRow button.danger { background:transparent; border:1px solid var(--line); color:#f26d6d; }
-#addEngram { display:flex; gap:8px; margin-top:12px; }
+#addEngram { display:flex; gap:8px; margin-top:2px; }
 #addEngram input { flex:1; min-width:0; }
+/* Advanced — create a separate local Engram: 기본 접힘(details/summary), 실수 방지를 위해
+   원격 연결 섹션과 톤을 낮춘다(danger 색으로 "위험 작업"임을 은근히 표시). */
+#advancedLocal { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+#advancedLocal summary { cursor:pointer; font-size:11px; color:var(--dim); text-transform:uppercase;
+                          letter-spacing:.4px; }
+#advancedLocal summary:hover { color:var(--text); }
+#advancedLocal .hint { font-size:12px; color:var(--dim); margin:8px 0; line-height:1.5; }
+#advancedLocal .localCreateRow { display:flex; gap:8px; }
+#advancedLocal .localCreateRow input { flex:1; min-width:0; }
+#advancedLocal .localCreateRow button { background:transparent; border:1px solid #f26d6d; color:#f26d6d; white-space:nowrap; }
 #manageClose { margin-top:14px; background:transparent; border:1px solid var(--line); color:var(--text); }
 
 /* '@' 자동완성 팝오버(팔레트와 같은 이디엄) */

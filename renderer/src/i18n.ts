@@ -26,7 +26,7 @@ export const T = {
   newCodeChannelPrompt: ko ? '코드 채널 이름:' : 'Code channel name:',
   // Phase 12 — 다중 연결 UI(Engram 선택기·Manage 모달·@ 자동완성)
   engrams: ko ? 'Engram 목록' : 'Engrams',
-  addEngram: ko ? 'Engram 추가' : 'Add Engram',
+  addEngram: ko ? '연결' : 'Connect',
   manageEngrams: ko ? 'Engram 관리…' : 'Manage Engrams…',
   default: defaultLabel,
   setDefault: ko ? '기본으로 지정' : 'Set default',
@@ -35,7 +35,16 @@ export const T = {
   authFailed: ko ? '인증 실패 — 다시 로그인하세요' : 'Authentication failed — please sign in again',
   mentionHint: ko ? '@ 뒤에 이름을 넣으면 그 Engram에게만 보내요' : 'Type a name after @ to send to just that Engram',
   removeEngram: ko ? '삭제' : 'Remove',
-  addLocalBrain: ko ? '로컬 모델 추가' : 'Add local model',
+  // Manage Engrams 재설계 — 연결(Connected) vs 로컬 인스턴스 생성(Advanced)을 분리.
+  connectedLabel: ko ? '연결됨' : 'Connected',
+  connectRemoteLabel: ko ? '원격 Engram 연결' : 'Connect a remote Engram',
+  advancedLocalLabel: ko ? '고급 — 별도 로컬 Engram 만들기' : 'Advanced — create a separate local Engram',
+  localEngramHint: ko
+    ? '이 컴퓨터에 자기만의 빈 위키·채팅 데이터를 가진 두 번째 Engram을 실행합니다. AI 모델을 고르는 곳이 아니에요 — 그건 설정 → 모델에 있어요.'
+    : 'Runs a second Engram on this computer with its own empty wiki and chat data. This is not where you choose an AI model — that lives in Settings → Models.',
+  workspaceNamePh: ko ? '작업공간 이름' : 'Workspace name',
+  addLocalBrain: ko ? '로컬 Engram 만들기' : 'Create local Engram',
+  confirmCreateLocal: ko ? '만들까요? 새 인스턴스가 실행됩니다' : 'Create? This runs a new instance',
   close: ko ? '닫기' : 'Close',
   notConnected: (name: string) => (ko ? `'${name}' 연결이 없어요` : `'${name}' isn't connected`),
   // Phase 15a — 위키(페이지 읽기 + 승인함)
