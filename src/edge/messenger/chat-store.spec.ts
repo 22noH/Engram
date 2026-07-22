@@ -496,6 +496,26 @@ describe('ChatStore clearChannel/undoClear/dropClearBackup(Task 1: clear/compact
     expect(fs.existsSync(clearedPath())).toBe(true);
     expect(() => store.undoClear('general')).not.toThrow();
     expect(fs.existsSync(jsonlPath())).toBe(true);
+    // ★내용 보존 실증(리뷰 지적): rename은 바이트를 그대로 옮기므로 파싱 불가한 원문도 살아 있어야 한다
+    // — 존재만이 아니라 내용까지 왕복 보존됨을 단언(undo가 재직렬화로 손상 줄을 흘리는 회귀 차단).
+    expect(fs.readFileSync(jsonlPath(), 'utf8')).toContain('{broken json');
+  });
+
+  it('never-throw — rename/unlink가 실제로 실패해도 삼키고 대화를 잃지 않는다', () => {
+    // 리뷰 지적: outer try/catch의 '로그 후 계속' swallow 분기가 테스트로 한 번도 안 밟혔다(임시 dir이 늘
+    // 성공). fs 모킹은 이 환경에서 non-configurable이라 불가 → .cleared 경로에 "비어있지 않은 디렉터리"를
+    // 두어 rename/unlink가 실제 EPERM/ENOTEMPTY로 던지게 만들어 크로스플랫폼으로 swallow를 실증한다.
+
+    // ① clearChannel: 백업 경로가 비어있지 않은 디렉터리 → unlink·rename 모두 실제 실패 → 삼키고 대화 보존
+    store.appendMessage('general', { authorId: 'owner', text: 'x' });
+    fs.mkdirSync(clearedPath());
+    fs.writeFileSync(path.join(clearedPath(), 'blocker'), 'x'); // 비어있지 않아 rename 대상이 될 수 없음
+    expect(() => store.clearChannel('general')).not.toThrow();
+    expect(fs.existsSync(jsonlPath())).toBe(true); // rename 실패 = 대화 유실 없이 그대로
+    expect(store.history('general').map((m) => m.text)).toEqual(['x']);
+
+    // ② dropClearBackup: 같은 상태(백업이 비어있지 않은 디렉터리) → unlink 실제 실패 → 삼킴
+    expect(() => store.dropClearBackup('general')).not.toThrow();
   });
 
   it('safeId가 아닌 id(경로 구멍)는 무해하게 no-op', () => {
