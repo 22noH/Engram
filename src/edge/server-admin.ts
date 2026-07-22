@@ -168,12 +168,30 @@ export function runUserApprove(paths: PathResolver, id: string): ActionResult {
   return { ok: true, message: `승인됨: ${a.loginId}(${a.displayName})` };
 }
 
+// 정지된(또는 pending) 계정을 다시 활성화한다 — suspend의 역방향. 이게 없으면 정지가 일방통행이라
+// 마지막 owner를 정지하면 웹 콘솔이 잠기고 CLI로는 복구 불가였다(리뷰 지적). 웹 콘솔 파리티 회복.
+export function runUserActivate(paths: PathResolver, id: string): ActionResult {
+  const accounts = new AccountStore(paths.getStateDir());
+  const a = accounts.get(id);
+  if (!a) return { ok: false, message: `계정을 찾을 수 없습니다: ${id}` };
+  if (a.status === 'active') return { ok: false, message: `이미 활성 상태입니다: ${a.loginId}(${a.displayName})` };
+  accounts.setStatus(id, 'active');
+  return { ok: true, message: `활성화됨: ${a.loginId}(${a.displayName})` };
+}
+
 export function runUserSuspend(paths: PathResolver, id: string): ActionResult {
   const accounts = new AccountStore(paths.getStateDir());
   const a = accounts.get(id);
   if (!a) return { ok: false, message: `계정을 찾을 수 없습니다: ${id}` };
+  // 마지막 남은 활성 owner를 정지하면 웹 콘솔 로그인이 잠긴다(auth는 active만 통과). 막지는 않되
+  // — CLI 운영자는 로컬 관리자라 필요하면 정지할 수 있어야 함 — user activate로 되돌릴 수 있다고 경고한다.
+  const lastActiveOwner = a.role === 'owner' && a.status === 'active'
+    && accounts.list().filter((x) => x.role === 'owner' && x.status === 'active').length === 1;
   accounts.setStatus(id, 'suspended');
-  return { ok: true, message: `정지됨: ${a.loginId}(${a.displayName})` };
+  const warn = lastActiveOwner
+    ? ` ⚠️ 마지막 활성 owner를 정지했습니다 — 웹 콘솔 로그인이 잠깁니다. 'engram-server user activate ${id}'로 되돌릴 수 있습니다.`
+    : '';
+  return { ok: true, message: `정지됨: ${a.loginId}(${a.displayName})${warn}` };
 }
 
 // admin-http.ts:81 generateTempPassword와 동일(복제 — CLI가 admin-http.ts 전체를 의존하기엔

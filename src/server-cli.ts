@@ -2,7 +2,7 @@
 import { PathResolver } from './pal/path-resolver';
 import {
   CONFIG_KEYS, runConfigGet, runConfigSet, runGroupCreate, runGroupDelete, runGroupList,
-  runGroupSetChannels, runGroupSetPerms, runPresetExport, runSetup, runStatus, runUserApprove,
+  runGroupSetChannels, runGroupSetPerms, runPresetExport, runSetup, runStatus, runUserActivate, runUserApprove,
   runUserList, runUserResetPassword, runUserSuspend,
   type ActionResult, type ConfigKey, type ConfigSetResult, type ConfigView, type Group,
   type PresetExportResult, type ServerStatus, type SetupResult, type UserListItem, type UserResetResult,
@@ -19,9 +19,10 @@ export type KnownCommand = (typeof KNOWN_COMMANDS)[number];
 // "아직 구현되지 않음" 안내만 하고 종료한다. user/group/config/preset은 Task 2에서 구현됨.
 const IMPLEMENTED: ReadonlySet<string> = new Set(['setup', 'status', 'user', 'group', 'config', 'preset']);
 
-const USER_USAGE = `사용법: engram-server user <list|approve|suspend|reset-password> [id]
+const USER_USAGE = `사용법: engram-server user <list|approve|activate|suspend|reset-password> [id]
   user list                       계정 표(id·loginId·displayName·role·status)
   user approve <id>               pending 계정을 active로 승인
+  user activate <id>              정지(suspended)/대기(pending) 계정을 active로 되돌림
   user suspend <id>                계정을 suspended로 전환
   user reset-password <id>        임시 비밀번호 발급(화면에 출력)
 `;
@@ -170,13 +171,15 @@ export interface DispatchResult { output: string; exitCode: number; }
 export function handleUser(args: string[], paths: PathResolver): DispatchResult {
   const [sub, id] = args;
   if (sub === 'list') return { output: formatUserList(runUserList(paths)), exitCode: 0 };
-  if (sub === 'approve' || sub === 'suspend' || sub === 'reset-password') {
+  if (sub === 'approve' || sub === 'activate' || sub === 'suspend' || sub === 'reset-password') {
     if (!id) return { output: `id를 지정하세요.\n\n${USER_USAGE}`, exitCode: 1 };
     if (sub === 'reset-password') {
       const r = runUserResetPassword(paths, id);
       return { output: formatUserReset(r), exitCode: r.ok ? 0 : 1 };
     }
-    const r = sub === 'approve' ? runUserApprove(paths, id) : runUserSuspend(paths, id);
+    const r = sub === 'approve' ? runUserApprove(paths, id)
+      : sub === 'activate' ? runUserActivate(paths, id)
+        : runUserSuspend(paths, id);
     return { output: formatActionResult(r), exitCode: r.ok ? 0 : 1 };
   }
   return { output: `알 수 없는 하위 명령: ${sub ?? '(없음)'}\n\n${USER_USAGE}`, exitCode: 1 };

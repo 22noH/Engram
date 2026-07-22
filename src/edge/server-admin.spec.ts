@@ -10,7 +10,7 @@ import { GroupStore } from './auth/group-store';
 import { ChatStore } from './messenger/chat-store';
 import {
   dirSizeBytes, runConfigGet, runConfigSet, runGroupCreate, runGroupDelete, runGroupList,
-  runGroupSetChannels, runGroupSetPerms, runPresetExport, runSetup, runStatus, runUserApprove,
+  runGroupSetChannels, runGroupSetPerms, runPresetExport, runSetup, runStatus, runUserActivate, runUserApprove,
   runUserList, runUserResetPassword, runUserSuspend,
 } from './server-admin';
 
@@ -192,6 +192,32 @@ describe('server-admin', () => {
       const r = runUserSuspend(paths, created.id);
       expect(r.ok).toBe(true);
       expect(accounts.get(created.id)?.status).toBe('suspended');
+    });
+
+    it('activate: suspended → active(정지 되돌리기 — 리뷰 지적 일방통행 해소)', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('seo', 'pw12345', 'Seo', { role: 'member', status: 'suspended' });
+      const r = runUserActivate(paths, created.id);
+      expect(r.ok).toBe(true);
+      expect(accounts.get(created.id)?.status).toBe('active');
+    });
+
+    it('activate: 이미 active면 ok=false(명확한 안내)', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('yoon', 'pw12345', 'Yoon', { role: 'member', status: 'active' });
+      expect(runUserActivate(paths, created.id).ok).toBe(false);
+    });
+
+    it('suspend가 마지막 활성 owner면 경고 문구+activate 복구 안내(잠금 표면화)', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const owner = accounts.createPassword('boss', 'pw12345', 'Boss', { role: 'owner', status: 'active' });
+      const r = runUserSuspend(paths, owner.id);
+      expect(r.ok).toBe(true); // 막지는 않음(로컬 관리자 신뢰)
+      expect(r.message).toContain('마지막 활성 owner');
+      expect(r.message).toContain('activate');
+      // activate로 실제 복구 가능
+      expect(runUserActivate(paths, owner.id).ok).toBe(true);
+      expect(accounts.get(owner.id)?.status).toBe('active');
     });
 
     it('reset-password: 비어있지 않은 임시 비번을 반환하고 실제로 로그인 비번이 바뀐다', () => {
