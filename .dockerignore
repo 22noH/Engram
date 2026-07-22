@@ -1,0 +1,40 @@
+# 빌드 컨텍스트 축소 — Dockerfile이 필요로 하는 파일(package.json류·src·console·prompts·personas)만
+# 컨텍스트로 전송되게 나머지를 제외한다. Dockerfile 안에서 npm ci로 새로 설치하므로 호스트
+# node_modules(윈도우 전용 바이너리·electron devDependency 포함)는 절대 포함하지 않는다.
+
+# 의존성(컨테이너 안에서 재설치)
+node_modules
+console/node_modules
+renderer/node_modules
+
+# 빌드 산출물(컨테이너 안에서 재생성)
+dist
+console/dist
+renderer/dist
+*.tsbuildinfo
+
+# 데스크톱/일렉트론 전용 — 서버 이미지에 불필요
+release
+renderer
+
+# VCS·에디터·툴 스크래치
+.git
+.github
+.claude
+.claude-plugin
+.superpowers
+.idea
+.vscode
+
+# 문서·런타임 데이터·로그·테스트 산출물
+docs
+runtime
+*.log
+logs
+coverage
+test-output.txt
+
+# 환경/시크릿
+.env
+.env.*
+!.env.example

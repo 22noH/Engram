@@ -1,0 +1,14 @@
+# Engram 서버 에디션 실행. `docker compose up -d` 한 번으로 headless 데몬 + /admin 웹 콘솔.
+# 첫 실행 설정 코드(서버 미설정 시 로그에 찍히는 초기 설정 코드)는 컨테이너 로그에서 확인:
+#   docker compose logs -f engram
+# 임베딩 모델 캐시가 데이터 볼륨(/data/models) 아래에 남도록 하는 안내는 README(Task 5) 참조.
+services:
+  engram:
+    build: .
+    ports:
+      - "47800:47800"
+    volumes:
+      - ./engram-data:/data
+    environment:
+      - ENGRAM_CHAT_BIND=0.0.0.0
+    restart: unless-stopped
