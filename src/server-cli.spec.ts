@@ -4,7 +4,7 @@ import * as path from 'path';
 import {
   classifyCommand, formatConfigView, formatGroupList, formatPresetExport, formatSetup,
   formatStatus, formatUserList, formatUserReset, handleConfig, handleGroup, handlePreset,
-  handleUser, KNOWN_COMMANDS, USAGE,
+  handleService, handleUser, KNOWN_COMMANDS, USAGE,
 } from './server-cli';
 import type {
   ConfigView, Group, PresetExportResult, ServerStatus, SetupResult, UserListItem, UserResetResult,
@@ -26,15 +26,9 @@ describe('server-cli: classifyCommand(argv 디스패치 분류)', () => {
     expect(classifyCommand('-h')).toBe('help');
   });
 
-  it('구현된 명령(setup·status·user·group·config·preset) → known-implemented', () => {
-    for (const cmd of ['setup', 'status', 'user', 'group', 'config', 'preset']) {
+  it('구현된 명령(setup·status·user·group·config·preset·start·service) → known-implemented', () => {
+    for (const cmd of ['setup', 'status', 'user', 'group', 'config', 'preset', 'start', 'service']) {
       expect(classifyCommand(cmd)).toBe('known-implemented');
-    }
-  });
-
-  it('알려졌지만 아직 미구현(start·service — S5 Task 3) → known-pending', () => {
-    for (const cmd of ['start', 'service']) {
-      expect(classifyCommand(cmd)).toBe('known-pending');
     }
   });
 
@@ -267,6 +261,22 @@ describe('server-cli: handleUser/handleGroup/handleConfig/handlePreset(argv 서�
 
     it('알 수 없는 하위 명령 → exitCode 1', () => {
       expect(handlePreset(['bogus'], paths).exitCode).toBe(1);
+    });
+  });
+
+  // install/uninstall/start/stop/status는 실 OS 서비스·netsh를 건드리므로(관리자 권한 필요)
+  // 여기서 실행하지 않는다 — edge/cli.gateway.spec.ts의 기존 service 테스트와 같은 결로 "알 수
+  // 없는 하위 명령"만 확인한다(사용법 출력, 슈퍼바이저/netsh 미접촉). 실제 로직은
+  // edge/server-service.spec.ts가 fake supervisor/netsh 주입으로 전부 커버한다.
+  describe('handleService', () => {
+    it('알 수 없는/빈 하위 명령 → 사용법·exitCode 1', async () => {
+      const r1 = await handleService(['봉봉'], paths);
+      expect(r1.exitCode).toBe(1);
+      expect(r1.output).toContain('engram-server service');
+
+      const r2 = await handleService([], paths);
+      expect(r2.exitCode).toBe(1);
+      expect(r2.output).toContain('engram-server service');
     });
   });
 });

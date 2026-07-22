@@ -7,17 +7,20 @@ import {
   type ActionResult, type ConfigKey, type ConfigSetResult, type ConfigView, type Group,
   type PresetExportResult, type ServerStatus, type SetupResult, type UserListItem, type UserResetResult,
 } from './edge/server-admin';
+import {
+  buildForegroundDeps, buildServiceDeps, installService, runForeground, serviceControl, uninstallService,
+  type ServiceResult,
+} from './edge/server-service';
 
-// engram-server CLI 엔트리(S5 Task 1~2 — 스펙 §2.1). Nest 부트 없음(경량·빠른 시작) — 이 파일은
-// argv 파싱과 사람이 읽는 출력 포맷만 맡는다. 실제 계산은 전부 edge/server-admin.ts의 순수
-// 함수(스토어를 데이터 디렉터리에서 직접 구성)에 위임한다(house rule: 로직 중복 0).
+// engram-server CLI 엔트리(S5 Task 1~3 — 스펙 §2.1). Nest 부트 없음(경량·빠른 시작) — 이 파일은
+// argv 파싱과 사람이 읽는 출력 포맷만 맡는다. 실제 계산은 전부 edge/server-admin.ts·edge/server-service.ts의
+// 순수 함수(스토어/의존성을 직접 구성)에 위임한다(house rule: 로직 중복 0).
 
 export const KNOWN_COMMANDS = ['setup', 'status', 'user', 'group', 'config', 'preset', 'start', 'service'] as const;
 export type KnownCommand = (typeof KNOWN_COMMANDS)[number];
 
-// start/service는 이 태스크의 범위 밖(S5 Task 3에서 구현) — help에는 나열하되 지금은
-// "아직 구현되지 않음" 안내만 하고 종료한다. user/group/config/preset은 Task 2에서 구현됨.
-const IMPLEMENTED: ReadonlySet<string> = new Set(['setup', 'status', 'user', 'group', 'config', 'preset']);
+// user/group/config/preset은 Task 2, start/service는 Task 3에서 구현됨 — 전부 구현 완료.
+const IMPLEMENTED: ReadonlySet<string> = new Set(['setup', 'status', 'user', 'group', 'config', 'preset', 'start', 'service']);
 
 const USER_USAGE = `사용법: engram-server user <list|approve|activate|suspend|reset-password> [id]
   user list                       계정 표(id·loginId·displayName·role·status)
@@ -49,6 +52,15 @@ const PRESET_USAGE = `사용법: engram-server preset export [path]
   preset export [path]             클라이언트 배포용 preset.json 내보내기(path 생략 시 configDir/preset.json)
 `;
 
+const SERVICE_USAGE = `사용법: engram-server service <install|uninstall|start|stop|status>
+  service install                  윈도우 서비스로 등록 + 방화벽 규칙 추가(관리자 권한 필요)
+  service uninstall                서비스 등록 해제 + 방화벽 규칙 제거
+  service start                    등록된 서비스 시작
+  service stop                     등록된 서비스 중지
+  service status                   서비스 상태 조회
+  윈도우 전용입니다 — 다른 OS는 도커(compose)나 \`engram-server start\`(수동/systemd)를 사용하세요.
+`;
+
 export const USAGE = `사용법: engram-server <command>
 
   setup                   1회용 셋업 코드 생성/표시(이미 관리자 계정이 있으면 안내만)
@@ -57,8 +69,8 @@ export const USAGE = `사용법: engram-server <command>
   group <...>             그룹 관리(생성·삭제·권한·채널)
   config <...>            서버 설정(포트·바인드·보존정책·자동요약·코딩모드)
   preset <...>            클라이언트 배포용 preset.json 내보내기
-  start                   포그라운드로 데몬 실행 — 준비 중
-  service <...>           윈도우 서비스 설치/제거/제어 — 준비 중
+  start                   포그라운드로 데몬 실행(node dist/src/main.js) — 도커 CMD·디버깅용
+  service <...>           윈도우 서비스 설치/제거/제어(설치 시 방화벽 규칙도 함께, 윈도우 전용)
   --help, -h              이 도움말
 
 각 명령의 하위 사용법은 인자 없이 실행하면 안내됩니다(예: \`engram-server user\`).
@@ -242,6 +254,31 @@ export function handlePreset(args: string[], paths: PathResolver): DispatchResul
   return { output: `알 수 없는 하위 명령: ${sub ?? '(없음)'}\n\n${PRESET_USAGE}`, exitCode: 1 };
 }
 
+// ── S5 Task 3: service(윈도우 서비스+방화벽)·start(포그라운드) — 로직은 edge/server-service.ts,
+// 여기는 argv 서브디스패치와 출력 포맷만 ──────────────────────────────────────────────────────
+
+function formatServiceResult(r: ServiceResult): string {
+  return `${r.message}\n`;
+}
+
+export async function handleService(args: string[], paths: PathResolver): Promise<DispatchResult> {
+  const [sub] = args;
+  const deps = buildServiceDeps(paths);
+  if (sub === 'install') {
+    const r = await installService(deps);
+    return { output: formatServiceResult(r), exitCode: r.ok ? 0 : 1 };
+  }
+  if (sub === 'uninstall') {
+    const r = await uninstallService(deps);
+    return { output: formatServiceResult(r), exitCode: r.ok ? 0 : 1 };
+  }
+  if (sub === 'start' || sub === 'stop' || sub === 'status') {
+    const r = await serviceControl(sub, deps);
+    return { output: formatServiceResult(r), exitCode: r.ok ? 0 : 1 };
+  }
+  return { output: `알 수 없는 하위 명령: ${sub ?? '(없음)'}\n\n${SERVICE_USAGE}`, exitCode: 1 };
+}
+
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   const kind = classifyCommand(cmd);
@@ -278,6 +315,11 @@ async function main(): Promise<void> {
     result = handleConfig(argRest, paths);
   } else if (cmd === 'preset') {
     result = handlePreset(argRest, paths);
+  } else if (cmd === 'service') {
+    result = await handleService(argRest, paths);
+  } else if (cmd === 'start') {
+    // 포그라운드 데몬 — main.js가 종료할 때까지(도커 stop·Ctrl-C 등) 대기하고 그 종료코드를 그대로 반영.
+    process.exitCode = await runForeground(buildForegroundDeps(paths));
   }
 
   if (result) {
