@@ -71,7 +71,10 @@ export class CompactService {
 
   // 채널 대화 → 요약 → 위키 게시 → 정리. 빈 채널/요약 실패/위키 저장 실패는 null(대화 그대로 보존).
   async compact(channelId: string, opts: CompactOpts): Promise<CompactResult | null> {
-    const msgs = this.chat.history(channelId, { limit: 500 });
+    // ★전체 대화를 읽는다(리뷰 지적): clearChannel은 채널 전체 jsonl을 지우므로, 요약도 반드시 전체를
+    // 덮어야 한다. 상한(예: 500)을 두면 그걸 넘는 오래된 메시지가 위키에 안 담긴 채 삭제돼 지식이 유실됨.
+    // 채널이 너무 커 브레인이 감당 못 하면 complete가 isError → null 반환 → clear 안 함(안전).
+    const msgs = this.chat.history(channelId, { limit: Number.MAX_SAFE_INTEGER });
     if (msgs.length === 0) return null;
 
     const transcript = msgs.map((m) => `${m.authorName ?? m.authorId}: ${m.text}`).join('\n');
@@ -113,11 +116,18 @@ export class CompactService {
 
     this.chat.clearChannel(channelId);
     // 요약 메시지는 clear 이후 append하는 새 앵커 — 실행취소/백업 대상이 아니다.
-    this.chat.appendMessage(channelId, {
-      authorId: 'engram',
-      authorName: 'Engram',
-      text: `${summary}\n\n📄 위키: ${targetSlug}`,
-    });
+    // never-throw(리뷰 지적): appendMessage는 try/catch가 없어 디스크풀/윈도우 잠금 시 던질 수 있다.
+    // 여기서 던지면 compact가 CompactResult|null 계약을 깨고 caller로 튄다 — 감싸서 로그 후 계속.
+    // (위키 저장은 이미 성공, 원본은 .cleared에 있으므로 앵커 실패해도 지식 손실은 없음.)
+    try {
+      this.chat.appendMessage(channelId, {
+        authorId: 'engram',
+        authorName: 'Engram',
+        text: `${summary}\n\n📄 위키: ${targetSlug}`,
+      });
+    } catch (e) {
+      console.warn(`[compact] 채널 '${channelId}' 앵커 메시지 기록 실패(무시): ${String(e)}`);
+    }
 
     return { summary, slug: targetSlug };
   }

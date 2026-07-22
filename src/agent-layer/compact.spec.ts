@@ -166,4 +166,36 @@ describe('CompactService', () => {
     expect(payload).not.toContain(SECRET_3);
     expect(payload).toBe(FIXED_SUMMARY);
   });
+
+  it('500개 초과 채널도 전체를 요약한다(clear는 채널 전체를 지우므로 요약 범위=삭제 범위 일치·리뷰 지적)', async () => {
+    // 가장 오래된 메시지에 고유 마커 — 500 상한이 있으면 이건 요약 프롬프트에 안 담긴다.
+    const OLDEST = 'OLDEST_MSG_marker_zzz';
+    chat.appendMessage('general', { authorId: 'u1', authorName: 'Alice', text: OLDEST });
+    for (let i = 0; i < 600; i++) chat.appendMessage('general', { authorId: 'u1', text: `m${i}` });
+    const brain = makeBrain();
+
+    const result = await service.compact('general', { brain });
+
+    // 브레인에 넘긴 프롬프트가 가장 오래된 메시지까지 포함해야 함(전체 601개 읽음).
+    const prompt = (brain.complete as jest.Mock).mock.calls[0][0] as string;
+    expect(prompt).toContain(OLDEST);
+    // compact 후 채널 전체가 정리되고 앵커 1줄만 남음 — 요약 안 된 잔여 없음.
+    expect(result).not.toBeNull();
+    expect(chat.history('general', { limit: Number.MAX_SAFE_INTEGER })).toHaveLength(1);
+  });
+
+  it('앵커 append가 던져도(디스크풀/잠금) compact는 throw하지 않고 결과를 반환한다(never-throw·리뷰 지적)', async () => {
+    seedThreeMessages();
+    const brain = makeBrain();
+    // 위키 저장은 성공, 그 다음 앵커 append만 실패하도록. clearChannel은 이미 실행된 뒤.
+    const appendSpy = jest.spyOn(chat, 'appendMessage').mockImplementation(() => { throw new Error('EBUSY'); });
+    try {
+      const result = await service.compact('general', { brain });
+      expect(result).toEqual({ summary: FIXED_SUMMARY, slug: EXPECTED_SLUG }); // throw 아님·결과 반환
+    } finally {
+      appendSpy.mockRestore();
+    }
+    // 위키 저장은 성공했어야 함(앵커 실패와 무관).
+    expect(applier.apply).toHaveBeenCalledTimes(1);
+  });
 });
