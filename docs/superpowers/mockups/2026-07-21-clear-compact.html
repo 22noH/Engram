@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Engram — /clear · /compact 목업</title>
+<style>
+  /* 실제 renderer/src/theme.css 토큰 그대로 (라이트/다크 자동) */
+  :root {
+    --bg:#f2f7fb; --panel:#ffffff; --line:#dce6f0; --text:#1c2733; --dim:#5c6b7a;
+    --accent:#3aa5de; --accent-soft:rgba(58,165,222,.12); --accent-line:rgba(58,165,222,.4);
+    --accent-text:#ffffff; --hover:rgba(28,39,51,.05); --code-bg:#eaf3fa; --pre-bg:#eef5fa;
+    --page:#e7eef5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b0e13; --panel:#12161d; --line:#222a35; --text:#e6edf3; --dim:#8b95a3;
+      --accent:#7ec8e3; --accent-soft:rgba(126,200,227,.13); --accent-line:rgba(126,200,227,.4);
+      --accent-text:#0e1116; --hover:rgba(255,255,255,.05); --code-bg:rgba(255,255,255,.07); --pre-bg:#0b0e13;
+      --page:#070a0e;
+    }
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--page); color:var(--text); font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+         font-size:14px; padding:28px 20px 60px; }
+  h1 { font-size:19px; margin-bottom:4px; }
+  .lead { color:var(--dim); font-size:13px; margin-bottom:8px; max-width:900px; line-height:1.6; }
+  .legend { color:var(--dim); font-size:12.5px; margin-bottom:22px; max-width:900px; line-height:1.7;
+            background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
+  .legend b { color:var(--text); }
+  .cap { font-size:13px; font-weight:700; color:var(--accent); margin:26px 0 8px; letter-spacing:.2px; }
+  .cap span { color:var(--dim); font-weight:400; }
+  .win { width:860px; max-width:100%; height:440px; background:var(--bg); border:1px solid var(--line);
+         border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 6px 22px rgba(0,0,0,.12); }
+  .tbar { height:32px; flex:none; display:flex; align-items:center; gap:8px; padding:0 14px;
+          background:var(--panel); border-bottom:1px solid var(--line); }
+  .tbar .t { font-size:12px; font-weight:600; color:var(--accent); letter-spacing:.4px; }
+  .tbar .u { font-size:11px; color:var(--dim); margin-left:auto; }
+  .app { flex:1; display:flex; min-height:0; position:relative; }
+  .side { width:200px; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .tabs { display:flex; border-bottom:1px solid var(--line); }
+  .tabs .m { flex:1; text-align:center; padding:8px 0; font-size:12.5px; color:var(--dim); border-bottom:2px solid transparent; }
+  .tabs .m.sel { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .chs { flex:1; overflow-y:auto; padding:6px 0; }
+  .ch { padding:8px 14px; color:var(--dim); display:flex; align-items:center; gap:6px; font-size:13px; }
+  .ch.sel { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  .ch .badge { font-size:10.5px; color:var(--dim); margin-left:auto; }
+  .ch .dots { margin-left:auto; color:var(--dim); }
+  .ch.sel .dots { margin-left:6px; }
+  .newch { padding:9px 14px; color:var(--accent); font-size:12.5px; border-top:1px solid var(--line); }
+  .main { flex:1; display:flex; flex-direction:column; min-height:0; }
+  .msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; }
+  .msg { margin-bottom:10px; max-width:78%; }
+  .msg .who { font-size:11px; color:var(--dim); margin-bottom:2px; }
+  .msg .body { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 11px; line-height:1.5; font-size:13px; }
+  .msg.me { margin-left:auto; }
+  .msg.me .body { background:var(--accent-soft); border-color:var(--accent-line); }
+  .msg.other .body { background:var(--code-bg); }
+  .sysline { align-self:center; color:var(--dim); font-size:12px; margin:10px 0; text-align:center; line-height:1.6; }
+  .sysline a { color:var(--accent); text-decoration:none; }
+  .divider { align-self:stretch; display:flex; align-items:center; gap:10px; color:var(--dim); font-size:11px; margin:8px 0; }
+  .divider::before, .divider::after { content:''; flex:1; height:1px; background:var(--line); }
+  .inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); position:relative; }
+  .input { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--text); font-size:13px; }
+  .input.focus { border-color:var(--accent); }
+  .input .ph { color:var(--dim); }
+  .input .typed { color:var(--text); }
+  .input .caret { display:inline-block; width:1px; height:14px; background:var(--accent); vertical-align:-2px; margin-left:1px; }
+  .send { background:var(--accent); border:0; border-radius:8px; padding:0 16px; color:var(--accent-text); font-weight:600; font-size:13px; display:flex; align-items:center; }
+  .chip { display:flex; align-items:center; gap:6px; background:var(--panel); border:1px solid var(--line); color:var(--text); font-size:12px; padding:0 10px; border-radius:8px; }
+  .chip .d { width:7px; height:7px; border-radius:50%; background:#56d364; }
+  /* 슬래시 팔레트 (#palette) */
+  .palette { position:absolute; bottom:60px; left:16px; right:16px; background:var(--panel); border:1px solid var(--line);
+             border-radius:8px; padding:5px; box-shadow:0 8px 24px rgba(0,0,0,.28); z-index:9; }
+  .palette .item { display:flex; gap:10px; align-items:baseline; padding:7px 10px; border-radius:6px; }
+  .palette .item.sel { background:var(--accent-soft); }
+  .palette .cmd { color:var(--accent); font-family:Consolas,'Courier New',monospace; font-size:12.5px; white-space:nowrap; min-width:150px; }
+  .palette .desc { color:var(--dim); font-size:12.5px; }
+  .palette .new { position:relative; }
+  .palette .new::after { content:'NEW'; position:absolute; right:8px; top:8px; font-size:9px; font-weight:700; color:var(--accent); letter-spacing:.5px; }
+  /* ⋯ 팝오버 (#popmenu) */
+  .popmenu { position:absolute; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:4px;
+             box-shadow:0 8px 24px rgba(0,0,0,.3); z-index:12; min-width:180px; }
+  .popmenu div { padding:8px 12px; border-radius:6px; color:var(--text); font-size:13px; }
+  .popmenu div:hover { background:var(--hover); }
+  .popmenu .lbl { padding:8px 12px 2px; font-size:11px; color:var(--dim); }
+  .popmenu .sel { color:var(--accent); font-weight:600; }
+  .popmenu .danger { color:#f26d6d; }
+  .popmenu .sep { height:1px; background:var(--line); margin:4px 6px; }
+  /* 모달 오버레이 (#manageOverlay/#manageModal) */
+  .overlay { position:absolute; inset:0; background:rgba(0,0,0,.42); display:flex; align-items:center; justify-content:center; z-index:20; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; width:440px; max-width:92%; }
+  .modal h3 { font-size:15px; margin-bottom:8px; }
+  .modal p { font-size:13px; color:var(--dim); line-height:1.6; margin-bottom:14px; }
+  .modal .summary { background:var(--pre-bg); border:1px solid var(--line); border-radius:8px; padding:12px 14px;
+                    font-size:12.5px; line-height:1.65; color:var(--text); margin-bottom:14px; max-height:190px; overflow:auto; }
+  .modal .summary .h { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px; }
+  .modal .row { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+  .modal .hint { margin-right:auto; font-size:11.5px; color:var(--dim); }
+  .btn { border-radius:8px; padding:0 15px; height:34px; font-weight:600; font-size:13px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer; }
+  .btn.primary { background:var(--accent); color:var(--accent-text); border-color:var(--accent); }
+  .btn.danger { color:#f26d6d; border-color:#f26d6d; }
+  .note { color:var(--dim); font-size:12px; margin-top:6px; max-width:860px; line-height:1.6; }
+</style>
+</head>
+<body>
+  <h1>Engram — <code>/clear</code> · <code>/compact</code> (앱 채팅)</h1>
+  <p class="lead">앱 채팅에 대화 정리 두 명령을 추가한다. 실제 <code>renderer/src/theme.css</code> 토큰·클래스로 그렸다(라이트/다크 자동). 채널당 동작이며 <b>위키/RAG 지식은 절대 지우지 않는다</b>.</p>
+  <div class="legend">
+    모달 없이 <b>인-챗 방식</b>(사용자 결정): 슬래시/메뉴로 치면 바로 실행.<br>
+    <b>/clear</b> = 이 채널 대화 기록 <b>즉시 삭제</b> (확인창·시스템 메시지 없음 · 요약 안 남김).<br>
+    <b>/compact</b> = 채널 AI가 <b>요약을 채팅 메시지로 한 번 보여주고 → 위키에 바로 저장 → 기록 정리</b>. 그 요약 메시지가 앵커로 남아 RAG가 읽어 이어감.<br>
+    실행 위치 = 입력창 슬래시 명령(기존 팔레트에 슬롯 추가) + 채널 <b>⋯</b> 메뉴 버튼 2개. 위키/RAG 지식은 절대 안 지움.
+  </div>
+
+  <!-- ① 슬래시 팔레트 -->
+  <div class="cap">① 입력창 슬래시 팔레트 <span>— <code>/</code> 치면 기존 명령들과 함께 <code>/clear</code>·<code>/compact</code>가 뜬다</span></div>
+  <div class="win">
+    <div class="tbar"><span class="t">ENGRAM</span><span class="u">eno931103 · owner</span></div>
+    <div class="app">
+      <div class="side">
+        <div class="tabs"><div class="m sel">챗봇</div><div class="m">코드</div><div class="m">위키</div></div>
+        <div class="chs">
+          <div class="ch sel"># 일반<span class="dots">⋯</span></div>
+          <div class="ch"># 아이디어</div>
+          <div class="ch"># 리서치 <span class="badge">qwen</span></div>
+        </div>
+        <div class="newch">+ 새 채널</div>
+      </div>
+      <div class="main">
+        <div class="msgs">
+          <div class="msg other"><div class="who">Engram</div><div class="body">네, RAG 인덱스는 임베딩 후 RRF로 재랭크됩니다. 더 궁금한 게 있으실까요?</div></div>
+          <div class="msg me"><div class="who">나</div><div class="body">고마워, 이제 대화 정리하고 새로 시작할래</div></div>
+        </div>
+        <div class="inputbar">
+          <div class="palette">
+            <div class="item"><span class="cmd">/상태</span><span class="desc">이 채널의 진행 중/최근 작업 상태</span></div>
+            <div class="item"><span class="cmd">/ask &lt;질문&gt;</span><span class="desc">분류 없이 바로 위키 근거 답변</span></div>
+            <div class="item sel new"><span class="cmd">/clear</span><span class="desc">이 채널 대화 기록 삭제 — 컨텍스트·화면 리셋 (되돌리기 불가)</span></div>
+            <div class="item new"><span class="cmd">/compact</span><span class="desc">대화를 요약해 위키에 저장하고 기록 정리 — 요약을 읽어 이어감</span></div>
+            <div class="item"><span class="cmd">/schedule &lt;cron&gt; &lt;task&gt;</span><span class="desc">예약 — 자연어도 됨</span></div>
+          </div>
+          <div class="input focus"><span class="typed">/cl</span><span class="caret"></span></div>
+          <button class="send">보내기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">기존 팔레트(<code>#palette</code>) 그대로. <code>/clear</code>·<code>/compact</code>만 새 항목(NEW). 이 둘은 채팅으로 전송되지 않고 <b>클라이언트가 가로채</b> 아래 확인/미리보기를 띄운다.</p>
+
+  <!-- ② ⋯ 메뉴 -->
+  <div class="cap">② 채널 <b>⋯</b> 메뉴 <span>— 기존 메뉴(응답모드·멤버·모델·삭제)에 정리 항목 2개 추가</span></div>
+  <div class="win">
+    <div class="tbar"><span class="t">ENGRAM</span><span class="u">eno931103 · owner</span></div>
+    <div class="app">
+      <div class="side">
+        <div class="tabs"><div class="m sel">챗봇</div><div class="m">코드</div><div class="m">위키</div></div>
+        <div class="chs">
+          <div class="ch sel"># 일반<span class="dots">⋯</span></div>
+          <div class="ch"># 아이디어</div>
+          <div class="ch"># 리서치 <span class="badge">qwen</span></div>
+        </div>
+        <div class="newch">+ 새 채널</div>
+        <div class="popmenu" style="left:150px; top:70px;">
+          <div>멘션에만 응답</div>
+          <div>멤버 관리</div>
+          <div class="lbl">모델</div>
+          <div class="sel">기본 (Claude)</div>
+          <div>qwen</div>
+          <div class="sep"></div>
+          <div>🧹 요약해서 정리 <span style="color:var(--dim);font-size:11px">(/compact)</span></div>
+          <div class="danger">🗑 대화 기록 삭제 <span style="color:var(--dim);font-size:11px">(/clear)</span></div>
+          <div class="sep"></div>
+          <div class="danger">채널 삭제</div>
+        </div>
+      </div>
+      <div class="main">
+        <div class="msgs">
+          <div class="msg other"><div class="who">Engram</div><div class="body">네, RAG 인덱스는 임베딩 후 RRF로 재랭크됩니다.</div></div>
+          <div class="msg me"><div class="who">나</div><div class="body">고마워</div></div>
+        </div>
+        <div class="inputbar"><div class="input"><span class="ph">메시지를 입력하세요…</span></div><button class="send">보내기</button></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">"대화 기록 삭제"는 기존 "채널 삭제"처럼 danger(빨강). "요약해서 정리"는 일반. 슬래시 명령과 완전히 같은 동작.</p>
+
+  <!-- ③ /clear — 즉시, 모달·메시지 없음 -->
+  <div class="cap">③ <code>/clear</code> — 즉시 삭제 <span>— 확인창도, 시스템 메시지도 없음(사용자 결정: 그냥 바로)</span></div>
+  <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start">
+    <div class="win" style="width:410px; height:320px">
+      <div class="tbar"><span class="t">ENGRAM</span><span class="u">/clear 치기 직전</span></div>
+      <div class="app">
+        <div class="side" style="width:120px"><div class="tabs"><div class="m sel">챗봇</div></div><div class="chs"><div class="ch sel"># 일반<span class="dots">⋯</span></div><div class="ch"># 아이디어</div></div></div>
+        <div class="main">
+          <div class="msgs">
+            <div class="msg other"><div class="who">Engram</div><div class="body">네, RAG는 임베딩 후 RRF로 재랭크됩니다.</div></div>
+            <div class="msg me"><div class="who">나</div><div class="body">고마워</div></div>
+          </div>
+          <div class="inputbar"><div class="input focus"><span class="typed">/clear</span><span class="caret"></span></div><button class="send">보내기</button></div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:22px; color:var(--dim); align-self:center">→</div>
+    <div class="win" style="width:410px; height:320px">
+      <div class="tbar"><span class="t">ENGRAM</span><span class="u">친 직후 (되돌리기 토스트 ~6초)</span></div>
+      <div class="app">
+        <div class="side" style="width:120px"><div class="tabs"><div class="m sel">챗봇</div></div><div class="chs"><div class="ch sel"># 일반<span class="dots">⋯</span></div><div class="ch"># 아이디어</div></div></div>
+        <div class="main" style="position:relative">
+          <div class="msgs"></div>
+          <div style="position:absolute; left:50%; bottom:64px; transform:translateX(-50%); display:flex; align-items:center; gap:12px;
+                      background:var(--text); color:var(--bg); padding:9px 14px; border-radius:8px; font-size:12.5px; box-shadow:0 6px 20px rgba(0,0,0,.3); white-space:nowrap">
+            🗑 대화 기록을 비웠어요
+            <span style="color:var(--accent); font-weight:700; cursor:pointer">실행취소</span>
+          </div>
+          <div class="inputbar"><div class="input"><span class="ph">메시지를 입력하세요…</span></div><button class="send">보내기</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">모달·시스템 메시지 없음 · 즉시 비워짐. 단 <b>몇 초짜리 "실행취소" 토스트</b>가 잠깐 떠서 실수를 되돌릴 수 있음(서버가 지운 기록을 잠깐 백업, 토스트 사라지거나 다음 clear면 완전 삭제). 위키/RAG 지식은 그대로.</p>
+
+  <!-- ④ /compact — 메시지 방식(모달 없음) -->
+  <div class="cap">④ <code>/compact</code> — 메시지로 진행(모달 없음) <span>— 요약을 채팅에 한 번 보여주고 → 위키 저장 → 기록 정리</span></div>
+  <div class="win">
+    <div class="tbar"><span class="t">ENGRAM</span><span class="u">eno931103 · owner</span></div>
+    <div class="app">
+      <div class="side">
+        <div class="tabs"><div class="m sel">챗봇</div><div class="m">코드</div><div class="m">위키</div></div>
+        <div class="chs"><div class="ch sel"># 일반<span class="dots">⋯</span></div><div class="ch"># 아이디어</div><div class="ch"># 리서치 <span class="badge">qwen</span></div></div>
+        <div class="newch">+ 새 채널</div>
+      </div>
+      <div class="main">
+        <div class="msgs">
+          <div class="msg other" style="max-width:90%">
+            <div class="who">Engram · 요약해서 정리했어요</div>
+            <div class="body">
+              <b>RAG 검색 파이프라인</b><br>
+              · 인덱스는 임베딩 후 RRF(순위 융합)로 재랭크된다.<br>
+              · score는 절대 유사도(cosine)가 아니라 상대 순위 점수 — 임계값 병합 금지.<br>
+              · 헤드리스 코어 모드는 텍스트 폴백이라 더 부정확.<br>
+              <span style="display:inline-block; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); color:var(--dim); font-size:12px">
+                📄 위키에 저장됨 · <a href="#" style="color:var(--accent); text-decoration:none">리서치 — 벡터 검색 튜닝</a> · 이전 대화는 정리했어요
+              </span>
+            </div>
+          </div>
+          <div class="divider">여기부터 새 대화 (요약을 읽어 이어감)</div>
+        </div>
+        <div class="inputbar"><div class="input"><span class="ph">메시지를 입력하세요…</span></div><button class="send">보내기</button></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">모달 없이 <b>요약이 채팅 메시지로 한 번</b> 뜨고(무엇을 저장하는지 봄) → 위키에 바로 저장(<code>propose+approve</code>, dedup append) → 옛 기록 정리. 이 요약 메시지가 새 대화의 앵커로 남아 RAG가 읽어 이어감. 슬래시·⋯메뉴 동일.</p>
+
+  <!-- ⑤ 자동 compact -->
+  <div class="cap">⑤ 자동 compact <span>— S4 자동 보존이 오래된 대화를 지우기 <b>직전</b> 자동 요약 → 위키 바로 게시 → 프루닝</span></div>
+  <div class="legend" style="margin:0 0 12px">
+    Engram은 컨텍스트가 "차오르는" 구조가 아니라 <b>항상 최근 6턴 + 위키 RAG</b>만 본다. 그래서 클로드코드식 "꽉 참 게이지"가 아니라,
+    <b>오래된 대화가 보존 정책에 의해 잊혀지기 직전</b>에 자동 요약해 위키로 보낸다 → "잊되 지식은 안 잃는다". 자동 저장은 continuity를 위해
+    <b>바로 게시</b>(대기열이면 RAG가 못 읽어 이어짐이 끊김) + <code>auto-compact</code> 태그로 사후 검토.
+  </div>
+  <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start">
+    <div class="win" style="width:440px; height:340px">
+      <div class="tbar"><span class="t">ENGRAM</span><span class="u">자동 compact 발생 시</span></div>
+      <div class="app">
+        <div class="side" style="width:120px">
+          <div class="tabs"><div class="m sel">챗봇</div></div>
+          <div class="chs"><div class="ch sel"># 리서치<span class="dots">⋯</span></div><div class="ch"># 일반</div></div>
+        </div>
+        <div class="main">
+          <div class="msgs">
+            <div class="sysline" style="margin-top:2px">💾 오래된 대화 24개를 자동 요약해 위키에 저장하고 정리했어요<br><a href="#">📄 리서치 — 벡터 검색 튜닝</a> · <span style="color:var(--dim)">auto-compact</span></div>
+            <div class="divider">여기부터 새 대화</div>
+            <div class="msg other"><div class="who">Engram</div><div class="body">네, 아까 정리한 RRF 튜닝 이어서 볼까요? (위키 요약 참고)</div></div>
+          </div>
+          <div class="inputbar"><div class="input"><span class="ph">메시지를 입력하세요…</span></div><button class="send">보내기</button></div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:1; min-width:320px">
+      <div style="font-size:12.5px; color:var(--dim); margin-bottom:8px">설정 — 대화 보존 행 옆 토글 · <b>서버 콘솔 ⑨ + 데스크톱 개인앱 설정 둘 다</b></div>
+      <div style="background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px">
+        <div style="display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line)">
+          <div style="width:96px; color:var(--dim); font-size:13px">대화 보존</div>
+          <div style="flex:1; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; max-width:200px">채널당 최근 1,000개 ▾</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; padding:10px 0 4px">
+          <div style="width:96px; color:var(--dim); font-size:13px">자동 정리</div>
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer">
+            <span style="width:34px; height:20px; background:var(--accent); border-radius:20px; position:relative; display:inline-block">
+              <span style="position:absolute; right:2px; top:2px; width:16px; height:16px; background:#fff; border-radius:50%"></span>
+            </span>
+            지우기 전에 위키로 요약 (auto-compact) <span style="color:var(--accent); font-size:11px; font-weight:600; margin-left:2px">기본 켜짐</span>
+          </label>
+        </div>
+        <div style="font-size:11.5px; color:var(--dim); margin-left:108px; margin-top:2px; line-height:1.6">
+          켜면(기본) 보존 한도를 넘긴 오래된 대화를 삭제하기 전에 요약해 위키에 저장해요 — 기록은 정리되고 지식은 남아요.<br>
+          끄면 그냥 삭제만 해요(기존 S4 동작).
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">자동 compact는 <b>보존 정책이 켜져(count/days) 있을 때만</b> 동작(무제한이면 프루닝 자체가 없음). 기본값 <b>켜짐</b> · 설정은 <b>서버 콘솔 + 데스크톱 개인앱 둘 다</b>에 노출.</p>
+</body>
+</html>
