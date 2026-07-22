@@ -25,6 +25,8 @@ export class WindowsSupervisor implements SupervisorPort {
     return new Promise<void>((resolve, reject) => {
       svc.on(event, () => resolve());
       svc.on('alreadyinstalled', () => resolve());
+      // uninstall(설치 안 된 서비스)은 node-windows가 'uninstall'이 아닌 'alreadyuninstalled'를 emit — 멱등 요구(S5) 위해 동일 처리.
+      svc.on('alreadyuninstalled', () => resolve());
       svc.on('error', (e) => reject(e instanceof Error ? e : new Error(String(e))));
       action();
     });
