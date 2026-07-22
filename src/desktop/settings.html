@@ -1256,18 +1256,30 @@
       days: { mode: 'days', value: 90 },
       unlimited: { mode: 'unlimited' },
     };
+    // ★콘솔 retentionTouched 게이트를 데스크톱에도 이식(리뷰 지적, 콘솔 aa7cf41과 동일 함정):
+    // select는 mode만 추적하고 저장 시 프리셋으로 눌러버리므로, 자동정리 토글만 바꿔 저장하면 손편집으로
+    // 넣어둔 비프리셋 값(예: count=5000)이 프리셋(count=1000)으로 조여져 초과 대화가 영구 프루닝된다.
+    // 사용자가 보존 select를 실제로 건드렸을 때만 프리셋을 보내고, 아니면 로드된 실제 값을 그대로 라운드트립.
+    let loadedRetention = { mode: 'unlimited' };
+    let retentionTouched = false;
     async function loadChatRetention() {
       $('chat-hint').hidden = true;
       const { retention, autoCompact } = await window.engram.getChatRetention();
+      loadedRetention = retention;
+      retentionTouched = false;
       $('chat-retention').value = retention.mode;
       $('auto-compact').checked = autoCompact;
     }
     async function saveChatRetention() {
-      await window.engram.setChatRetention(RETENTION_PRESETS[$('chat-retention').value], $('auto-compact').checked);
+      // 보존 select를 안 건드렸으면 로드된 실제 값을 그대로(비프리셋 값 보존), 건드렸으면 그 프리셋을 보낸다.
+      const retention = retentionTouched ? RETENTION_PRESETS[$('chat-retention').value] : loadedRetention;
+      await window.engram.setChatRetention(retention, $('auto-compact').checked);
+      loadedRetention = retention; // 방금 저장한 값이 이후 라운드트립 기준
+      retentionTouched = false;
       $('chat-hint').textContent = t.saved;
       $('chat-hint').hidden = false;
     }
-    $('chat-retention').onchange = saveChatRetention;
+    $('chat-retention').onchange = () => { retentionTouched = true; saveChatRetention(); };
     $('auto-compact').onchange = saveChatRetention;
 
     // ---- Wiki sync: remote/branch/interval 폼 ----
