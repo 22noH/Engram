@@ -3,9 +3,16 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { PathResolver } from '../pal/path-resolver';
+import { getCommandMode } from '../desktop/permissions-file';
+import { readPresetFile } from '../desktop/preset-file';
 import { AccountStore } from './auth/account-store';
+import { GroupStore } from './auth/group-store';
 import { ChatStore } from './messenger/chat-store';
-import { dirSizeBytes, runSetup, runStatus } from './server-admin';
+import {
+  dirSizeBytes, runConfigGet, runConfigSet, runGroupCreate, runGroupDelete, runGroupList,
+  runGroupSetChannels, runGroupSetPerms, runPresetExport, runSetup, runStatus, runUserApprove,
+  runUserList, runUserResetPassword, runUserSuspend,
+} from './server-admin';
 
 // listening 프로브 테스트용: 방금 닫은 포트를 재사용 — 실제 개발 머신엔 흔히 다른 프로세스가
 // 뭔가를 띄워두고 있어(예: 실행 중인 Engram 인스턴스) 기본 포트(47800) 고정 가정은 비결정적이다.
@@ -156,6 +163,218 @@ describe('server-admin', () => {
       fs.writeFileSync(path.join(dir, 'a', 'x.txt'), '12345'); // 5
       fs.writeFileSync(path.join(sub, 'y.txt'), '1234567'); // 7
       expect(dirSizeBytes(path.join(dir, 'a'))).toBe(12);
+    });
+  });
+
+  // ── S5 Task 2: user·group·config·preset ──────────────────────────────────────────────────
+
+  describe('user', () => {
+    it('pending → approve → active', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('kim', 'pw12345', 'Kim', { role: 'member', status: 'pending' });
+      const r = runUserApprove(paths, created.id);
+      expect(r.ok).toBe(true);
+      expect(accounts.get(created.id)?.status).toBe('active');
+    });
+
+    it('approve: pending이 아니면 거부하고 상태를 바꾸지 않는다', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('lee', 'pw12345', 'Lee', { role: 'member', status: 'active' });
+      const r = runUserApprove(paths, created.id);
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain('active');
+      expect(accounts.get(created.id)?.status).toBe('active'); // 불변
+    });
+
+    it('suspend: active → suspended', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('park', 'pw12345', 'Park', { role: 'member', status: 'active' });
+      const r = runUserSuspend(paths, created.id);
+      expect(r.ok).toBe(true);
+      expect(accounts.get(created.id)?.status).toBe('suspended');
+    });
+
+    it('reset-password: 비어있지 않은 임시 비번을 반환하고 실제로 로그인 비번이 바뀐다', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      const created = accounts.createPassword('choi', 'oldpassword', 'Choi', { role: 'member', status: 'active' });
+      const r = runUserResetPassword(paths, created.id);
+      expect(r.ok).toBe(true);
+      expect(r.tempPassword).toBeTruthy();
+      expect(r.tempPassword!.length).toBeGreaterThan(0);
+      // 옛 비번은 더는 통과하지 않고, 새 임시 비번은 통과한다(setPassword가 실제로 반영됐는지 검증).
+      expect(accounts.verifyPassword('choi', 'oldpassword')).toBeNull();
+      expect(accounts.verifyPassword('choi', r.tempPassword!)?.id).toBe(created.id);
+    });
+
+    it('없는 id: approve/suspend/reset-password 전부 명확한 에러(ok=false)', () => {
+      expect(runUserApprove(paths, 'no-such-id').ok).toBe(false);
+      expect(runUserSuspend(paths, 'no-such-id').ok).toBe(false);
+      const r = runUserResetPassword(paths, 'no-such-id');
+      expect(r.ok).toBe(false);
+      expect(r.tempPassword).toBeUndefined();
+    });
+
+    it('list: id·loginId·displayName·role·status를 반환', () => {
+      const accounts = new AccountStore(paths.getStateDir());
+      accounts.createPassword('a1', 'pw12345', 'A One', { role: 'owner', status: 'active' });
+      accounts.createPassword('a2', 'pw12345', 'A Two', { role: 'member', status: 'pending' });
+      const list = runUserList(paths);
+      expect(list).toHaveLength(2);
+      expect(list.map((u) => u.loginId).sort()).toEqual(['a1', 'a2']);
+      expect(list[0]).toHaveProperty('role');
+      expect(list[0]).toHaveProperty('status');
+    });
+  });
+
+  describe('group', () => {
+    it('create → list에 반영', () => {
+      const r = runGroupCreate(paths, 'Engineers');
+      expect(r.ok).toBe(true);
+      expect(r.group?.name).toBe('Engineers');
+      const list = runGroupList(paths);
+      expect(list).toHaveLength(1);
+      expect(list[0].name).toBe('Engineers');
+    });
+
+    it('delete: 존재하면 제거하고 ok=true, 없으면 ok=false', () => {
+      const created = runGroupCreate(paths, 'Temp').group!;
+      expect(runGroupDelete(paths, created.id).ok).toBe(true);
+      expect(runGroupList(paths)).toHaveLength(0);
+      expect(runGroupDelete(paths, created.id).ok).toBe(false); // 이미 지워짐
+    });
+
+    it('set-perms: 잘못된 권한이 섞이면 전부 거부(부분 적용 없음)', () => {
+      const created = runGroupCreate(paths, 'Reviewers').group!;
+      const r = runGroupSetPerms(paths, created.id, ['wiki.approve', 'not.a.real.perm']);
+      expect(r.ok).toBe(false);
+      const groups = new GroupStore(paths.getStateDir());
+      expect(groups.get(created.id)?.permissions).toEqual([]); // 부분 적용 안 됨
+    });
+
+    it('set-perms: 화이트리스트 안 권한은 저장된다', () => {
+      const created = runGroupCreate(paths, 'Approvers').group!;
+      const r = runGroupSetPerms(paths, created.id, ['wiki.approve', 'wiki.edit']);
+      expect(r.ok).toBe(true);
+      const groups = new GroupStore(paths.getStateDir());
+      expect(groups.get(created.id)?.permissions.sort()).toEqual(['wiki.approve', 'wiki.edit']);
+    });
+
+    it('set-channels: 채널 id 목록을 저장', () => {
+      const created = runGroupCreate(paths, 'DevChannel').group!;
+      const r = runGroupSetChannels(paths, created.id, ['dev', 'general']);
+      expect(r.ok).toBe(true);
+      const groups = new GroupStore(paths.getStateDir());
+      expect(groups.get(created.id)?.channelIds.sort()).toEqual(['dev', 'general']);
+    });
+  });
+
+  describe('config', () => {
+    it('get: 미설정 상태의 기본값(port 47800·bind 127.0.0.1·retention unlimited·autoCompact true·coding auto)', () => {
+      const c = runConfigGet(paths);
+      expect(c.port).toBe(47800);
+      expect(c.bind).toBe('127.0.0.1');
+      expect(c.retention).toEqual({ mode: 'unlimited' });
+      expect(c.autoCompact).toBe(true);
+      expect(c.codingMode).toBe('auto');
+    });
+
+    it('set port: 유효값 저장 후 get으로 왕복, 무효값(0·범위 밖·비숫자) 거부', () => {
+      expect(runConfigSet(paths, 'port', '8080').ok).toBe(true);
+      expect(runConfigGet(paths).port).toBe(8080);
+      expect(runConfigSet(paths, 'port', '0').ok).toBe(false);
+      expect(runConfigSet(paths, 'port', '99999').ok).toBe(false);
+      expect(runConfigSet(paths, 'port', 'abc').ok).toBe(false);
+      expect(runConfigGet(paths).port).toBe(8080); // 무효 시도 후에도 이전 유효값 보존
+    });
+
+    it('set bind: 화이트리스트(127.0.0.1/0.0.0.0)만 허용, 그 외 거부', () => {
+      expect(runConfigSet(paths, 'bind', '0.0.0.0').ok).toBe(true);
+      expect(runConfigGet(paths).bind).toBe('0.0.0.0');
+      expect(runConfigSet(paths, 'bind', '10.0.0.5').ok).toBe(false);
+      expect(runConfigSet(paths, 'bind', 'localhost').ok).toBe(false);
+      expect(runConfigGet(paths).bind).toBe('0.0.0.0'); // 무효 시도 후에도 이전 유효값 보존
+    });
+
+    it('set retention: "count:2" 파싱 → {mode:count,value:2}, get으로 왕복', () => {
+      expect(runConfigSet(paths, 'retention', 'count:2').ok).toBe(true);
+      expect(runConfigGet(paths).retention).toEqual({ mode: 'count', value: 2 });
+    });
+
+    it('set retention: "days:90" 파싱 → {mode:days,value:90}', () => {
+      expect(runConfigSet(paths, 'retention', 'days:90').ok).toBe(true);
+      expect(runConfigGet(paths).retention).toEqual({ mode: 'days', value: 90 });
+    });
+
+    it('set retention: "unlimited" 파싱 → {mode:unlimited}', () => {
+      runConfigSet(paths, 'retention', 'count:5');
+      expect(runConfigSet(paths, 'retention', 'unlimited').ok).toBe(true);
+      expect(runConfigGet(paths).retention).toEqual({ mode: 'unlimited' });
+    });
+
+    it('set retention: 잘못된 문법·음수/0·정수 아닌 count는 거부', () => {
+      expect(runConfigSet(paths, 'retention', 'bogus').ok).toBe(false);
+      expect(runConfigSet(paths, 'retention', 'count:0').ok).toBe(false);
+      expect(runConfigSet(paths, 'retention', 'count:-5').ok).toBe(false);
+      expect(runConfigSet(paths, 'retention', 'count:1.5').ok).toBe(false);
+      expect(runConfigSet(paths, 'retention', 'days:0').ok).toBe(false);
+    });
+
+    it('set autoCompact: true/false 저장, 그 외 거부', () => {
+      expect(runConfigSet(paths, 'autoCompact', 'false').ok).toBe(true);
+      expect(runConfigGet(paths).autoCompact).toBe(false);
+      expect(runConfigSet(paths, 'autoCompact', 'true').ok).toBe(true);
+      expect(runConfigGet(paths).autoCompact).toBe(true);
+      expect(runConfigSet(paths, 'autoCompact', 'yes').ok).toBe(false);
+    });
+
+    it('set coding: auto/allowlist/off 저장 후 getCommandMode·runConfigGet 양쪽에서 왕복, 그 외 거부', () => {
+      expect(runConfigSet(paths, 'coding', 'allowlist').ok).toBe(true);
+      expect(runConfigGet(paths).codingMode).toBe('allowlist');
+      expect(getCommandMode(paths.getConfigDir())).toBe('allowlist');
+      expect(runConfigSet(paths, 'coding', 'off').ok).toBe(true);
+      expect(runConfigGet(paths).codingMode).toBe('off');
+      expect(runConfigSet(paths, 'coding', 'bogus').ok).toBe(false);
+    });
+
+    it('알 수 없는 키는 거부', () => {
+      expect(runConfigSet(paths, 'nope', 'x').ok).toBe(false);
+    });
+
+    it('port/bind/retention/autoCompact는 재시작 후 적용(appliesAfterRestart=true), coding은 즉시(false)', () => {
+      expect(runConfigSet(paths, 'port', '9090').appliesAfterRestart).toBe(true);
+      expect(runConfigSet(paths, 'bind', '0.0.0.0').appliesAfterRestart).toBe(true);
+      expect(runConfigSet(paths, 'retention', 'unlimited').appliesAfterRestart).toBe(true);
+      expect(runConfigSet(paths, 'autoCompact', 'true').appliesAfterRestart).toBe(true);
+      expect(runConfigSet(paths, 'coding', 'auto').appliesAfterRestart).toBe(false);
+    });
+  });
+
+  describe('preset', () => {
+    it('export: configDir/preset.json을 생성하고 name·endpoint를 포함', () => {
+      const r = runPresetExport(paths);
+      expect(r.ok).toBe(true);
+      expect(fs.existsSync(path.join(paths.getConfigDir(), 'preset.json'))).toBe(true);
+      expect(r.preset.name).toBeTruthy();
+      expect(r.preset.endpoint).toMatch(/^ws:\/\//);
+      const onDisk = readPresetFile(paths.getConfigDir());
+      expect(onDisk).toEqual(r.preset);
+    });
+
+    it('export: 지정한 경로로 내보내면 그 경로에 파일이 생긴다', () => {
+      const outPath = path.join(dir, 'exported', 'my-preset.json');
+      const r = runPresetExport(paths, outPath);
+      expect(r.ok).toBe(true);
+      expect(r.path).toBe(outPath);
+      expect(fs.existsSync(outPath)).toBe(true);
+      const written = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+      expect(written).toEqual(r.preset);
+    });
+
+    it('export: bind/port을 반영(saveChatBootConfig로 설정한 값이 preset endpoint에 반영)', () => {
+      runConfigSet(paths, 'port', '5555');
+      runConfigSet(paths, 'bind', '127.0.0.1');
+      const r = runPresetExport(paths);
+      expect(r.preset.endpoint).toBe('ws://127.0.0.1:5555');
     });
   });
 });
