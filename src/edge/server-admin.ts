@@ -314,8 +314,11 @@ export type ConfigKey = (typeof CONFIG_KEYS)[number];
 export interface ConfigSetResult extends ActionResult {
   // 데몬은 부팅 시 이 값들을 chat.json/permissions.json에서 한 번만 읽으므로(server-admin은
   // 별도 프로세스라 실행 중인 서버의 메모리를 직접 건드릴 수 없다), port/bind/retention/
-  // autoCompact는 전부 재시작 후 적용된다. coding(permissions.json의 commandMode)만 예외 —
-  // 코딩 게이트는 명령 실행 시점마다 파일을 새로 읽어(getCommandMode 호출부 참고) 즉시 반영된다.
+  // autoCompact는 전부 재시작 후 적용된다. coding도 마찬가지 — 실제 게이트는 PermissionFence
+  // (agent-layer.module.ts가 부팅 시 fence.load()를 단 한 번 호출)이고 CodingSpecialist는
+  // fence.shellEnabled()/assertCommandAllowed()로 그 메모리 값을 참조한다. getCommandMode는
+  // admin-http 설정 화면·데스크톱 IPC가 표시용으로 파일을 읽는 것일 뿐 fence가 재조회하지
+  // 않으므로, coding도 재시작 전까지는 실행 중인 서버에 반영되지 않는다.
   appliesAfterRestart: boolean;
 }
 
@@ -360,7 +363,7 @@ export function runConfigSet(paths: PathResolver, key: string, value: string): C
         return { ok: false, message: `잘못된 값: ${value}(auto/allowlist/off)`, appliesAfterRestart: false };
       }
       setCommandMode(configDir, value);
-      return { ok: true, message: `코딩 모드 저장됨: ${value}`, appliesAfterRestart: false };
+      return { ok: true, message: `코딩 모드 저장됨: ${value}`, appliesAfterRestart: true };
     }
     default:
       return { ok: false, message: `알 수 없는 키: ${key}(port/bind/retention/autoCompact/coding)`, appliesAfterRestart: false };

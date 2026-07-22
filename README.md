@@ -55,7 +55,7 @@ Three ways to start it, pick what fits:
 engram-server service install
 ```
 
-Use `engram-server service uninstall|start|stop|status` to manage it afterward.
+Use `engram-server service uninstall|start|stop|status` to manage it afterward. Opening the firewall port doesn't by itself make the server reachable from other machines — it still binds `127.0.0.1` (loopback-only) by default, so for LAN access also run `engram-server config set bind 0.0.0.0` and restart the service.
 
 **② Docker** — build and run the headless server in a container:
 
@@ -101,18 +101,18 @@ Everything the console does is also available from the **`engram-server` CLI** (
 | `engram-server status` | Heartbeat, chat/knowledge size, member & channel counts, whether the port is listening |
 | `engram-server user list\|approve\|activate\|suspend\|reset-password <id>` | Approve join requests, reinstate a suspended account, suspend, or issue a temp password |
 | `engram-server group list\|create\|delete\|set-perms\|set-channels <id>` | Create/delete groups, set their permissions and channel access |
-| `engram-server config get [key]` / `config set <key> <value>` | Read or change `port` / `bind` / `retention` / `autoCompact` / `coding` — all but `coding` apply after a restart |
+| `engram-server config get [key]` / `config set <key> <value>` | Read or change `port` / `bind` / `retention` / `autoCompact` / `coding` — all apply after a restart (the running daemon reads them once at boot) |
 | `engram-server preset export [path]` | Write a `preset.json` for client deployment (same file the console downloads) |
-| `engram-server service install\|uninstall\|start\|stop\|status` | Windows service + firewall management (Windows only) |
+| `engram-server service install\|uninstall\|start\|stop\|status` | Windows service management (Windows only); `install`/`uninstall` also add/remove the firewall rule, `start`/`stop`/`status` don't touch it |
 | `engram-server start` | Run the daemon in the foreground (what Docker's `CMD` and manual/systemd setups use) |
 
-Run any command with no arguments (e.g. `engram-server user`) to see its detailed usage.
+Run any command with no arguments (e.g. `engram-server user`) to see its detailed usage. `user`/`group`/`config` write the same files the running server reads — each write is a fresh read-modify-write, so collisions are unlikely, but for heavy concurrent admin on a live server prefer the web console.
 
 ### Give the app to teammates
 
 Hand out the desktop app together with the `preset.json` from the console (drop it in the app's install folder). Their app then opens straight to **your server's login screen** — they sign in (or request access → you approve) and land in the team's **Chat** tab, where everyone talks in shared channels and the server's AI answers `@Engram`.
 
-> Exposing a server to the public internet needs TLS in front of it (a reverse proxy or tunnel) — don't open a plain connection directly, and only open the port you actually mean to expose (47800, or your reverse proxy's) in the firewall.
+> Exposing a server to the public internet needs TLS in front of it (a reverse proxy or tunnel) — don't open a plain connection directly, and only open the port you actually mean to expose (47800, or your reverse proxy's) in the firewall. `service install`'s firewall rule applies to all Windows firewall profiles, including Public — on an untrusted network, scope it yourself (`netsh advfirewall firewall set rule ... profile=`) or just keep `bind` at `127.0.0.1`.
 
 ---
 

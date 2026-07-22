@@ -110,7 +110,9 @@ function runCli(args: string[], dataDir: string): CliResult {
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status };
 }
 
-function getFreePortSync(): number {
+// 이름 그대로 무작위 포트 하나 뽑을 뿐, 실제로 비어있는지는 확인하지 않는다(리뷰 지적: 이전
+// 이름 getFreePortSync는 "free"를 확인하는 것처럼 오해하게 함).
+function randomPort(): number {
   return 40000 + Math.floor(Math.random() * 20000);
 }
 
@@ -155,7 +157,7 @@ async function probeServerCli(tmpBase: string, cleanup: Array<() => Promise<void
   console.log('\n[Probe server-cli] engram-server CLI — node dist/src/server-cli.js 실행 + node dist/src/main.js 실 부트');
   const dataDir = path.join(tmpBase, 'server');
   fs.mkdirSync(dataDir, { recursive: true });
-  const port = getFreePortSync();
+  const port = randomPort();
 
   // ── ① setup: 셋업 코드 생성(서버 부팅 전) ──
   const setupRes = runCli(['setup'], dataDir);

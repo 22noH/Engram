@@ -55,7 +55,7 @@ Engram 하나를 서버로 돌려 팀이 공유합니다. 서버는 **창이 없
 engram-server service install
 ```
 
-이후 관리는 `engram-server service uninstall|start|stop|status`로.
+이후 관리는 `engram-server service uninstall|start|stop|status`로. 방화벽 포트를 여는 것만으로 다른 컴퓨터에서 접속 가능해지지는 않습니다 — 데몬은 기본값이 `127.0.0.1`(루프백 전용)이라, 내부망(LAN) 접속까지 원하면 `engram-server config set bind 0.0.0.0` 실행 후 서비스를 재시작해야 합니다.
 
 **② 도커** — 컨테이너에서 헤드리스 서버를 빌드+실행:
 
@@ -101,18 +101,18 @@ engram-server start
 | `engram-server status` | 하트비트·대화/지식 용량·멤버·채널 수·포트 리슨 여부 |
 | `engram-server user list\|approve\|activate\|suspend\|reset-password <id>` | 가입 요청 승인, 정지 계정 복구, 정지, 임시 비밀번호 발급 |
 | `engram-server group list\|create\|delete\|set-perms\|set-channels <id>` | 그룹 생성·삭제·권한·채널 접근 설정 |
-| `engram-server config get [key]` / `config set <key> <value>` | `port`/`bind`/`retention`/`autoCompact`/`coding` 조회·변경 — `coding` 외엔 재시작 후 적용 |
+| `engram-server config get [key]` / `config set <key> <value>` | `port`/`bind`/`retention`/`autoCompact`/`coding` 조회·변경 — 전부 재시작 후 적용(실행 중인 데몬은 부팅 시 한 번만 읽음) |
 | `engram-server preset export [path]` | 클라이언트 배포용 `preset.json` 내보내기(콘솔이 내려받는 것과 같은 파일) |
-| `engram-server service install\|uninstall\|start\|stop\|status` | 윈도우 서비스+방화벽 관리(윈도우 전용) |
+| `engram-server service install\|uninstall\|start\|stop\|status` | 윈도우 서비스 관리(윈도우 전용) — 방화벽 규칙 추가/제거는 `install`/`uninstall`만 하고 `start`/`stop`/`status`는 건드리지 않음 |
 | `engram-server start` | 데몬을 포그라운드로 실행(도커 `CMD`와 수동/systemd 구성이 쓰는 방식) |
 
-인자 없이 실행하면(예: `engram-server user`) 그 명령의 자세한 사용법이 나옵니다.
+인자 없이 실행하면(예: `engram-server user`) 그 명령의 자세한 사용법이 나옵니다. `user`/`group`/`config`는 실행 중인 서버가 읽는 것과 같은 파일에 씁니다 — 매번 새로 읽고-고쳐-쓰는 방식이라 충돌 가능성은 낮지만, 라이브 서버에서 동시 관리 작업이 많다면 웹 콘솔을 쓰는 게 낫습니다.
 
 ### 팀원에게 앱 배포
 
 데스크톱 앱과 콘솔에서 받은 `preset.json`을 함께 나눠주세요(앱 설치 폴더에 넣으면 됩니다). 그러면 팀원 앱은 켜자마자 **이 서버의 로그인 화면**으로 시작합니다 — 로그인(또는 가입 요청 → owner 승인)하면 팀의 **채팅** 탭으로 들어가 다 같이 채널에서 대화하고, 서버의 AI가 `@Engram`에 답합니다.
 
-> 서버를 인터넷에 공개하려면 앞단에 TLS(리버스 프록시·터널)가 필요합니다 — 평문으로 바로 열지 마세요. 그리고 방화벽엔 실제로 열려는 포트(47800, 또는 리버스 프록시 포트)만 열어두세요.
+> 서버를 인터넷에 공개하려면 앞단에 TLS(리버스 프록시·터널)가 필요합니다 — 평문으로 바로 열지 마세요. 그리고 방화벽엔 실제로 열려는 포트(47800, 또는 리버스 프록시 포트)만 열어두세요. `service install`이 여는 방화벽 규칙은 Public을 포함한 모든 윈도우 방화벽 프로필에 적용됩니다 — 신뢰할 수 없는 네트워크라면 직접 범위를 좁히거나(`netsh advfirewall firewall set rule ... profile=`) `bind`를 `127.0.0.1`로 유지하세요.
 
 ---
 

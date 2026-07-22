@@ -546,6 +546,18 @@ describe('ChatStore clearChannel/undoClear/dropClearBackup(Task 1: clear/compact
     expect(fs.existsSync(clearedPath())).toBe(true); // 백업 그대로 — 지우지 않음
     expect(readOnly.undoClear('general')).toBe(true); // 되돌리기 여전히 가능(원본 복원)
   });
+
+  it('readOnly:true + 채널 0개인 빈 데이터 폴더 — listChannels는 기본 general을 돌려주되 channels.json은 만들지 않는다(리뷰 지적: status 무쓰기)', () => {
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-chatstore-empty-'));
+    try {
+      const readOnly = new ChatStore(emptyDir, undefined, { readOnly: true });
+      const list = readOnly.listChannels();
+      expect(list).toEqual([{ id: 'general', name: 'general', respondMode: 'all', mode: 'chat' }]);
+      expect(fs.existsSync(path.join(emptyDir, 'channels.json'))).toBe(false);
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ChatStore removeMessagesByIds(Task 5: clear-compact 자동 compact)', () => {

@@ -366,12 +366,12 @@ describe('server-admin', () => {
       expect(runConfigSet(paths, 'nope', 'x').ok).toBe(false);
     });
 
-    it('port/bind/retention/autoCompact는 재시작 후 적용(appliesAfterRestart=true), coding은 즉시(false)', () => {
+    it('port/bind/retention/autoCompact/coding 전부 재시작 후 적용(appliesAfterRestart=true) — fence는 부팅 시 한 번만 로드', () => {
       expect(runConfigSet(paths, 'port', '9090').appliesAfterRestart).toBe(true);
       expect(runConfigSet(paths, 'bind', '0.0.0.0').appliesAfterRestart).toBe(true);
       expect(runConfigSet(paths, 'retention', 'unlimited').appliesAfterRestart).toBe(true);
       expect(runConfigSet(paths, 'autoCompact', 'true').appliesAfterRestart).toBe(true);
-      expect(runConfigSet(paths, 'coding', 'auto').appliesAfterRestart).toBe(false);
+      expect(runConfigSet(paths, 'coding', 'auto').appliesAfterRestart).toBe(true);
     });
   });
 

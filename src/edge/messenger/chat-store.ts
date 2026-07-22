@@ -74,9 +74,15 @@ export class ChatStore {
   // "읽기 전용"으로 잠깐 열 때(예: engram-server status CLI)를 위한 것. 그 정리는 파일을 지우는 유일한
   // 부작용이라, 실행 중 서버와 데이터 폴더를 공유하는 CLI가 이걸 돌리면 서버의 /clear 되돌리기 백업을
   // 지워버린다(리뷰 지적: 읽기 전용 명령의 데이터 손실). 서버 본체는 부팅 1회 생성이라 기본 동작(정리) 유지.
+  // listChannels()도 같은 이유로 readOnly면 채널이 하나도 없을 때 기본 general 채널을 파일로
+  // 저장하지 않는다(리뷰 지적: status가 빈 데이터 폴더에 channels.json을 만들어버림 — 읽기 전용
+  // 명령은 어떤 파일도 생성/수정하면 안 된다). 값만 메모리에서 만들어 돌려준다.
+  private readonly readOnly: boolean;
+
   constructor(private readonly chatDir: string, retention?: RetentionPolicy, opts?: { readOnly?: boolean }) {
+    this.readOnly = !!opts?.readOnly;
     if (retention) this.setRetention(retention);
-    if (!opts?.readOnly) this.cleanupStaleClearBackups();
+    if (!this.readOnly) this.cleanupStaleClearBackups();
   }
 
   // main.ts에서 wiki 배선이 있을 때만 호출(구조적 타입, DI 순환 회피 — setChannelBrainSource와 동일 결).
@@ -151,7 +157,7 @@ export class ChatStore {
     } catch { /* 파일없음/손상 시 기본 생성 */ }
     if (list.length === 0) {
       list = [{ id: 'general', name: 'general', respondMode: 'all', mode: 'chat' }];
-      this.save(list);
+      if (!this.readOnly) this.save(list);
     }
     return list;
   }
