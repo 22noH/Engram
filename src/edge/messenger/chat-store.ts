@@ -51,10 +51,23 @@ function isPositiveNumber(v: unknown): v is number {
 
 export class ChatStore {
   private retention: RetentionPolicy = UNLIMITED_RETENTION;
+  // Task 5(clear-compact 자동 compact): 프루닝이 버릴 구간이 있을 때, 동기 삭제 대신 이 훅으로 먼저
+  // "요약→위키 게시"를 시도한다. 미주입이면 기존 pruneChannel 동기 삭제 그대로(회귀 0). main.ts에서
+  // wiki 배선이 있을 때만 주입(setChannelBrainSource·setCompactService와 동일한 DI-밖 setter 결).
+  // 반환 true=요약 성공(호출부가 removeMessagesByIds로 정밀 제거)·false=실패(아무것도 지우지 않음).
+  private autoCompactHook?: (channelId: string, dropped: ChatMessage[]) => Promise<boolean>;
+  // 채널별 자동 compact 디바운스: 한 채널에 대해 훅이 진행 중이면 새 프루닝 라운드는 건너뛴다(과다 AI
+  // 호출 방지). 다음 append가 다시 pruneChannel을 호출하므로 건너뛴 라운드는 자연히 재시도된다.
+  private readonly autoCompactInFlight: Set<string> = new Set();
 
   constructor(private readonly chatDir: string, retention?: RetentionPolicy) {
     if (retention) this.setRetention(retention);
     this.cleanupStaleClearBackups();
+  }
+
+  // main.ts에서 wiki 배선이 있을 때만 호출(구조적 타입, DI 순환 회피 — setChannelBrainSource와 동일 결).
+  setAutoCompactHook(fn: (channelId: string, dropped: ChatMessage[]) => Promise<boolean>): void {
+    this.autoCompactHook = fn;
   }
 
   // Task 1(clear/compact): 이전 세션에서 실행취소 창이 만료되지 않은 채 남은 `.cleared`
@@ -267,6 +280,30 @@ export class ChatStore {
         return;
       }
       if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
+
+      // Task 5(clear-compact): 자동 compact 훅이 있으면 동기 삭제 대신 "요약 성공 후에만 제거"로 우회한다.
+      // ★안전 불변식: 메시지는 그 내용이 위키에 성공적으로 요약·게시된 뒤에만 jsonl에서 사라진다.
+      if (this.autoCompactHook) {
+        // kept는 lines의 부분수열(count=suffix slice·days=순서보존 filter) — 두 포인터로 그 여집합(dropped)을
+        // 정확히 복원한다(Set 기반 비교는 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
+        const droppedLines: string[] = [];
+        let ki = 0;
+        for (const l of lines) {
+          if (ki < kept.length && kept[ki] === l) { ki++; continue; }
+          droppedLines.push(l);
+        }
+        const dropped: ChatMessage[] = [];
+        for (const l of droppedLines) {
+          try {
+            const m = JSON.parse(l) as ChatMessage;
+            if (m && typeof m.id === 'string' && typeof m.text === 'string') dropped.push(m);
+          } catch { /* 손상 줄 skip — 어차피 요약할 내용이 없으므로 다음 기회로 보류(안전 우선) */ }
+        }
+        this.runAutoCompact(id, dropped); // fire-and-forget·never-throw(내부에서 전부 삼킴)
+        return; // 동기 프루닝 생략 — 훅이 성공하면 removeMessagesByIds가 나중에 정밀 제거
+      }
+
+      // 훅 미주입(기존 동작, 회귀 0) — 그대로 동기 프루닝.
       fs.mkdirSync(this.chatDir, { recursive: true });
       const tmp = `${p}.tmp-${randomUUID()}`;
       try {
@@ -279,6 +316,66 @@ export class ChatStore {
       }
     } catch (e) {
       console.warn(`[chat-store] 채널 '${id}' 프루닝 실패(무시하고 계속): ${String(e)}`);
+    }
+  }
+
+  // Task 5(clear-compact): pruneChannel이 골라낸 dropped를 autoCompactHook으로 요약→위키 게시 시도.
+  // 채널별 디바운스(이미 진행 중이면 이번 라운드는 건너뜀 — 다음 append가 재시도)·never-throw(fire-and-
+  // forget으로 호출되므로 여기서 던지면 unhandled rejection이 된다 — 반드시 전부 삼킨다).
+  private runAutoCompact(channelId: string, dropped: ChatMessage[]): void {
+    if (dropped.length === 0) return; // 요약할 내용이 없음(예: 전부 손상 줄) — 다음 기회로 보류
+    if (this.autoCompactInFlight.has(channelId)) return; // 디바운스: 진행 중이면 이번 라운드 skip
+    this.autoCompactInFlight.add(channelId);
+    void (async () => {
+      try {
+        const ok = await this.autoCompactHook!(channelId, dropped);
+        if (ok) this.removeMessagesByIds(channelId, new Set(dropped.map((m) => m.id)));
+        // ok=false(요약/위키 저장 실패) — 아무것도 지우지 않음. 다음 append의 pruneChannel이 같은
+        // dropped(+새로 늘어난 구간)를 다시 시도한다(안전 우선 — 지식 유실보다 재시도가 낫다).
+      } catch (e) {
+        console.warn(`[chat-store] 채널 '${channelId}' 자동 compact 실패(무시, 다음 프루닝에서 재시도): ${String(e)}`);
+      } finally {
+        this.autoCompactInFlight.delete(channelId);
+      }
+    })();
+  }
+
+  // Task 5(clear-compact): 자동 compact 성공 후 "정확히 그 메시지들만" 제거. 마지막 N개/최근 M일 같은
+  // 상대적 판정이 아니라 id 집합 매칭이라 — 훅이 요약을 만든 뒤 새로 도착한 메시지가 섞여 들어와도
+  // (같은 채널에 append가 계속될 수 있음) 그 새 메시지는 ids에 없으므로 절대 지워지지 않는다.
+  // never-throw·safeId 가드·pruneChannel과 동일한 원자적 tmp rename 관례.
+  removeMessagesByIds(channelId: string, ids: Set<string>): void {
+    try {
+      if (!safeId(channelId)) return;
+      if (ids.size === 0) return; // 지울 것 없음
+      const p = this.messagesPath(channelId);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(p, 'utf8');
+      } catch {
+        return; // 파일 없음 = 지울 것 없음
+      }
+      const lines = raw.split('\n').filter(Boolean);
+      const kept = lines.filter((l) => {
+        try {
+          const m = JSON.parse(l) as ChatMessage;
+          if (!m || typeof m.id !== 'string') return true; // 파싱 불가/손상 = 안전하게 보존
+          return !ids.has(m.id);
+        } catch {
+          return true; // 손상 줄 = 안전하게 보존(드롭 금지)
+        }
+      });
+      if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
+      fs.mkdirSync(this.chatDir, { recursive: true });
+      const tmp = `${p}.tmp-${randomUUID()}`;
+      try {
+        fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
+        fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+      } finally {
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 정리 실패는 무시 */ }
+      }
+    } catch (e) {
+      console.warn(`[chat-store] 채널 '${channelId}' removeMessagesByIds 실패(무시하고 계속): ${String(e)}`);
     }
   }
 

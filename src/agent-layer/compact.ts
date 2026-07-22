@@ -3,7 +3,7 @@
 // 순서·안전선(요약 실패·위키 저장 실패는 절대 clear 안 함=지식 유실 방지)은 플랜 문서 참조.
 
 import { BrainProvider, BrainResult } from '../brain/brain.port';
-import { ChatStore } from '../edge/messenger/chat-store';
+import { ChatStore, ChatMessage } from '../edge/messenger/chat-store';
 import { loadPrompt } from './prompt-store';
 import { outputDirective } from './language';
 import { slugifyMcpTitle } from '../edge/mcp/mcp-propose';
@@ -75,6 +75,42 @@ export class CompactService {
     // 덮어야 한다. 상한(예: 500)을 두면 그걸 넘는 오래된 메시지가 위키에 안 담긴 채 삭제돼 지식이 유실됨.
     // 채널이 너무 커 브레인이 감당 못 하면 complete가 isError → null 반환 → clear 안 함(안전).
     const msgs = this.chat.history(channelId, { limit: Number.MAX_SAFE_INTEGER });
+    const result = await this.summarizeAndPublish(channelId, msgs, opts);
+    if (!result) return null;
+
+    this.chat.clearChannel(channelId);
+    // 요약 메시지는 clear 이후 append하는 새 앵커 — 실행취소/백업 대상이 아니다.
+    // never-throw(리뷰 지적): appendMessage는 try/catch가 없어 디스크풀/윈도우 잠금 시 던질 수 있다.
+    // 여기서 던지면 compact가 CompactResult|null 계약을 깨고 caller로 튄다 — 감싸서 로그 후 계속.
+    // (위키 저장은 이미 성공, 원본은 .cleared에 있으므로 앵커 실패해도 지식 손실은 없음.)
+    try {
+      this.chat.appendMessage(channelId, {
+        authorId: 'engram',
+        authorName: 'Engram',
+        text: `${result.summary}\n\n📄 위키: ${result.slug}`,
+      });
+    } catch (e) {
+      console.warn(`[compact] 채널 '${channelId}' 앵커 메시지 기록 실패(무시): ${String(e)}`);
+    }
+
+    return result;
+  }
+
+  // Task 5(clear-compact, 자동 compact): 보존 프루닝이 버릴 "특정 메시지 목록"만 요약→위키 게시한다.
+  // compact()와 달리 history()를 읽지 않고(호출부=chat-store.pruneChannel이 이미 골라낸 dropped만 받음),
+  // clearChannel도 호출하지 않으며(대상 채널의 최근 메시지는 그대로 남아야 함) 채널에 메시지도 append하지
+  // 않는다(시스템 알림은 main.ts의 훅이 self.postToChannel로 별도 처리). 위키 payload는 요약뿐(원문 무유출).
+  // never-throw: 빈 msgs/브레인 실패/위키 저장 실패는 전부 null — 호출부(chat-store)는 null=false로 받아
+  // 원본 메시지를 지우지 않는다(안전 불변식: 요약 성공 후에만 제거).
+  async summarizeToWiki(channelId: string, msgs: ChatMessage[], opts: CompactOpts): Promise<{ slug: string } | null> {
+    const result = await this.summarizeAndPublish(channelId, msgs, opts);
+    return result ? { slug: result.slug } : null;
+  }
+
+  // compact()·summarizeToWiki() 공용: 주어진 메시지 목록을 브레인으로 요약하고 위키에 게시한다(dedup:
+  // 기존 slug 있으면 append, 없으면 create). 대화 정리(clearChannel/removeMessagesByIds)는 호출부 책임 —
+  // 이 헬퍼는 절대 chat을 건드리지 않는다(compact와 auto-compact가 "무엇을 지울지"를 다르게 결정하므로).
+  private async summarizeAndPublish(channelId: string, msgs: ChatMessage[], opts: CompactOpts): Promise<CompactResult | null> {
     if (msgs.length === 0) return null;
 
     const transcript = msgs.map((m) => `${m.authorName ?? m.authorId}: ${m.text}`).join('\n');
@@ -85,7 +121,7 @@ export class CompactService {
       r = await opts.brain.complete(prompt);
     } catch (e) {
       console.warn(`[compact] 채널 '${channelId}' 브레인 호출 실패(정리 안 함): ${String(e)}`);
-      return null; // 요약 실패 — 절대 clear 안 함(지식 유실 방지)
+      return null; // 요약 실패 — 절대 지우지 않음(지식 유실 방지)
     }
     if (r.isError || !r.text.trim()) return null; // 위와 동일 이유
 
@@ -109,24 +145,9 @@ export class CompactService {
       });
       await this.applier.apply(p); // propose+approve를 한 번에(명령 자체가 사용자 동의)
     } catch (e) {
-      // 위키 저장 실패 — 정리(clear)하면 지식이 통째로 사라지므로 여기서도 절대 clear 안 함.
+      // 위키 저장 실패 — 정리하면 지식이 통째로 사라지므로 여기서도 절대 지우지 않음.
       console.warn(`[compact] 채널 '${channelId}' 위키 저장 실패(정리 안 함): ${String(e)}`);
       return null;
-    }
-
-    this.chat.clearChannel(channelId);
-    // 요약 메시지는 clear 이후 append하는 새 앵커 — 실행취소/백업 대상이 아니다.
-    // never-throw(리뷰 지적): appendMessage는 try/catch가 없어 디스크풀/윈도우 잠금 시 던질 수 있다.
-    // 여기서 던지면 compact가 CompactResult|null 계약을 깨고 caller로 튄다 — 감싸서 로그 후 계속.
-    // (위키 저장은 이미 성공, 원본은 .cleared에 있으므로 앵커 실패해도 지식 손실은 없음.)
-    try {
-      this.chat.appendMessage(channelId, {
-        authorId: 'engram',
-        authorName: 'Engram',
-        text: `${summary}\n\n📄 위키: ${targetSlug}`,
-      });
-    } catch (e) {
-      console.warn(`[compact] 채널 '${channelId}' 앵커 메시지 기록 실패(무시): ${String(e)}`);
     }
 
     return { summary, slug: targetSlug };

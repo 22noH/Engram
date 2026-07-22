@@ -98,3 +98,53 @@ it('loadChatConfig reads optional language field', () => {
   expect(loadChatConfig(dir, {} as any).language).toBe('ko');
   expect(loadChatConfig(fs.mkdtempSync(path.join(os.tmpdir(), 'cfg2-')), {} as any).language).toBeUndefined();
 });
+
+describe('autoCompact (Task 5: clear-compact)', () => {
+  let dir: string;
+  beforeEach(() => (dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-chatcfg-autocompact-'))));
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('파일 없으면 autoCompact는 undefined(호출부가 true로 취급 — 기본 켜짐)', () => {
+    expect(loadChatConfig(dir, {}).autoCompact).toBeUndefined();
+  });
+
+  it('chat.json에 autoCompact:false가 있으면 그대로 읽힌다', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ autoCompact: false }));
+    expect(loadChatConfig(dir, {}).autoCompact).toBe(false);
+  });
+
+  it('chat.json에 autoCompact:true가 있으면 그대로 읽힌다', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ autoCompact: true }));
+    expect(loadChatConfig(dir, {}).autoCompact).toBe(true);
+  });
+
+  it('비boolean 값(문자열 등)은 무시하고 undefined', () => {
+    fs.writeFileSync(path.join(dir, 'chat.json'), JSON.stringify({ autoCompact: 'yes' }));
+    expect(loadChatConfig(dir, {}).autoCompact).toBeUndefined();
+  });
+
+  it('saveChatBootConfig로 저장 후 loadChatConfig 왕복(false)', () => {
+    saveChatBootConfig(dir, { autoCompact: false });
+    expect(loadChatConfig(dir, {}).autoCompact).toBe(false);
+  });
+
+  it('saveChatBootConfig로 저장 후 loadChatConfig 왕복(true)', () => {
+    saveChatBootConfig(dir, { autoCompact: true });
+    expect(loadChatConfig(dir, {}).autoCompact).toBe(true);
+  });
+
+  it('saveChatBootConfig — autoCompact 미전달이면 기존 값 보존(부분갱신)', () => {
+    saveChatBootConfig(dir, { autoCompact: false });
+    saveChatBootConfig(dir, { port: 9999 }); // autoCompact 미전달
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, 'chat.json'), 'utf8'));
+    expect(raw.autoCompact).toBe(false);
+    expect(raw.port).toBe(9999);
+  });
+
+  it('saveChatBootConfig — retention과 함께 부분갱신해도 서로 침범하지 않는다', () => {
+    saveChatBootConfig(dir, { retention: { mode: 'count', value: 100 }, autoCompact: false });
+    const cfg = loadChatConfig(dir, {});
+    expect(cfg.retention).toEqual({ mode: 'count', value: 100 });
+    expect(cfg.autoCompact).toBe(false);
+  });
+});

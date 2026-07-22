@@ -14,6 +14,9 @@ export interface ChatConfig {
   language?: string; // BCP-47 코드(예 'ko'/'en'). 미설정=OS 로케일 폴백(main.ts).
   role: 'server' | 'brain'; // brain=계정·team·위키승인 미탑재, 127.0.0.1 고정(Phase 16a 스펙 §2.1).
   retention?: RetentionPolicy; // Task 2(S4): 대화 자동 보존 정책. 미설정=ChatStore 기본(unlimited) — 회귀 0.
+  // Task 5(clear-compact): 보존 프루닝 직전 자동 요약→위키 게시 토글. 기본 true — undefined도 true로
+  // 취급(호출부 책임, `chatCfg.autoCompact === false`로만 끈다). 명시적 false만 끔.
+  autoCompact?: boolean;
 }
 
 function validPort(v: unknown): number | null {
@@ -53,7 +56,8 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
   );
   const language = typeof raw.language === 'string' && raw.language.trim() ? raw.language.trim() : undefined;
   const retention = isValidRetention(raw.retention) ? raw.retention : undefined;
-  return { enabled: raw.enabled !== false, port, bind, language, role, retention };
+  const autoCompact = typeof raw.autoCompact === 'boolean' ? raw.autoCompact : undefined;
+  return { enabled: raw.enabled !== false, port, bind, language, role, retention, autoCompact };
 }
 
 // 부팅 설정(port/bind) 저장(서버 콘솔 S3 Task 2 — admin-http server-settings api 전용).
@@ -61,7 +65,10 @@ export function loadChatConfig(configDir: string, env: NodeJS.ProcessEnv = proce
 // (permissions-file.ts의 read-merge-write 관례와 동일 결). env가 항상 파일보다 우선하므로
 // (loadChatConfig) 여기 저장은 "재시작 시 적용"이지 즉시 반영이 아니다 — 콘솔 쪽 "재시작 후 적용"
 // 힌트 문구와 짝을 이룬다. 무효값(범위 밖 port·빈 bind)은 조용히 무시(기존 값 보존).
-export function saveChatBootConfig(configDir: string, patch: { port?: number; bind?: string; retention?: RetentionPolicy }): void {
+export function saveChatBootConfig(
+  configDir: string,
+  patch: { port?: number; bind?: string; retention?: RetentionPolicy; autoCompact?: boolean },
+): void {
   let raw: Partial<ChatConfig> = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(configDir, 'chat.json'), 'utf8')) as unknown;
@@ -76,6 +83,8 @@ export function saveChatBootConfig(configDir: string, patch: { port?: number; bi
   // retention: 호출부(admin-http.ts)가 이미 검증한 값을 넘기는 게 정상 경로지만, 방어적으로 여기서도
   // 한 번 더 걸러(port/bind와 같은 결) 무효값이 파일에 눌러앉지 않게 한다 — 무효면 기존 값 보존.
   if (patch.retention !== undefined && isValidRetention(patch.retention)) next.retention = patch.retention;
+  // autoCompact: retention과 동일한 부분갱신 결(touched 게이트는 Task 6/7 콘솔 쪽 책임 — 여기선 boolean만 검증).
+  if (typeof patch.autoCompact === 'boolean') next.autoCompact = patch.autoCompact;
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'chat.json'), JSON.stringify(next, null, 2));
 }

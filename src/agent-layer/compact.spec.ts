@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ChatStore } from '../edge/messenger/chat-store';
+import { ChatStore, ChatMessage } from '../edge/messenger/chat-store';
 import { CompactService, CompactApplier, CompactProposals, CompactWiki, buildCompactSummaryPrompt, COMPACT_SUMMARY_DEFAULT } from './compact';
 import type { BrainProvider, BrainResult } from '../brain/brain.port';
 import type { NewProposal, Proposal } from '../knowledge-core/proposal-store';
@@ -197,5 +197,104 @@ describe('CompactService', () => {
     }
     // 위키 저장은 성공했어야 함(앵커 실패와 무관).
     expect(applier.apply).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Task 5(clear-compact): 자동 compact가 쓰는 summarizeToWiki — "주어진 메시지 목록만" 요약→위키 게시하고,
+// compact()와 달리 채널 히스토리는 절대 건드리지 않는다(호출부=chat-store가 별도로 정밀 제거한다).
+describe('CompactService.summarizeToWiki', () => {
+  let dir: string;
+  let chat: ChatStore;
+  let wiki: jest.Mocked<CompactWiki>;
+  let proposals: jest.Mocked<CompactProposals>;
+  let applier: jest.Mocked<CompactApplier>;
+  let service: CompactService;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-compact-summarize-'));
+    chat = new ChatStore(dir);
+    chat.listChannels(); // general 채널 생성
+    wiki = { getPage: jest.fn().mockResolvedValue(null) };
+    proposals = { enqueue: jest.fn(async (p: NewProposal) => makeProposal(p)) };
+    applier = { apply: jest.fn().mockResolvedValue(undefined) };
+    service = new CompactService(chat, wiki, proposals, applier);
+  });
+
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  function msg(id: string, text: string, authorId = 'u1', authorName?: string): ChatMessage {
+    return { id, authorId, text, ts: '2026-07-22T00:00:00.000Z', ...(authorName ? { authorName } : {}) };
+  }
+
+  it('enqueue(auto-compact 카테고리)+apply 호출, {slug} 반환', async () => {
+    const brain = makeBrain();
+    const dropped = [msg('m1', SECRET_1, 'u1', 'Alice'), msg('m2', SECRET_2, 'u2', 'Bob')];
+
+    const result = await service.summarizeToWiki('general', dropped, { brain, auto: true });
+
+    expect(result).toEqual({ slug: EXPECTED_SLUG });
+    expect(proposals.enqueue).toHaveBeenCalledTimes(1);
+    const enqueued = proposals.enqueue.mock.calls[0][0];
+    expect(enqueued.category).toBe('auto-compact');
+    expect(enqueued.op).toBe('create');
+    expect(enqueued.payload).toBe(FIXED_SUMMARY); // 요약만 — 원문 아님
+    expect(applier.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('채널 히스토리를 전혀 건드리지 않는다(clearChannel 미호출) — 실제 채널 메시지와 무관한 목록을 넘겨도 그대로', async () => {
+    chat.appendMessage('general', { authorId: 'owner', text: 'stays-1' });
+    chat.appendMessage('general', { authorId: 'owner', text: 'stays-2' });
+    chat.appendMessage('general', { authorId: 'owner', text: 'stays-3' });
+    const brain = makeBrain();
+    const dropped = [msg('other-1', SECRET_1)]; // 채널에 실재하지 않는 임의 메시지 — history()를 안 읽는다는 증거
+
+    const result = await service.summarizeToWiki('general', dropped, { brain });
+
+    expect(result).toEqual({ slug: EXPECTED_SLUG });
+    // 브레인에 넘긴 프롬프트는 dropped(SECRET_1)만 담고, 실채널 메시지(stays-*)는 안 담김.
+    const prompt = (brain.complete as jest.Mock).mock.calls[0][0] as string;
+    expect(prompt).toContain(SECRET_1);
+    expect(prompt).not.toContain('stays-1');
+    // 채널 히스토리는 3개 그대로(정리는 호출부 책임 — 이 메서드는 절대 지우지 않음).
+    expect(chat.history('general').map((m) => m.text)).toEqual(['stays-1', 'stays-2', 'stays-3']);
+  });
+
+  it('빈 msgs → null(브레인 호출 안 함)', async () => {
+    const brain = makeBrain();
+
+    const result = await service.summarizeToWiki('general', [], { brain });
+
+    expect(result).toBeNull();
+    expect((brain.complete as jest.Mock)).not.toHaveBeenCalled();
+    expect(proposals.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('브레인 에러 → null, 위키 저장 시도 안 함', async () => {
+    const brain = makeBrain({ isError: true, text: '' });
+    const dropped = [msg('m1', SECRET_1)];
+
+    const result = await service.summarizeToWiki('general', dropped, { brain });
+
+    expect(result).toBeNull();
+    expect(proposals.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('위키 저장 실패 → null', async () => {
+    applier.apply.mockRejectedValueOnce(new Error('disk full'));
+    const brain = makeBrain();
+    const dropped = [msg('m1', SECRET_1)];
+
+    const result = await service.summarizeToWiki('general', dropped, { brain });
+
+    expect(result).toBeNull();
+  });
+
+  it('auto 미지정(수동 경로 재사용 시)이면 category=compact-summary', async () => {
+    const brain = makeBrain();
+    const dropped = [msg('m1', SECRET_1)];
+
+    await service.summarizeToWiki('general', dropped, { brain });
+
+    expect(proposals.enqueue.mock.calls[0][0].category).toBe('compact-summary');
   });
 });

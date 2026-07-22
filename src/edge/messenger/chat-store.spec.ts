@@ -1,7 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ChatStore } from './chat-store';
+import { ChatStore, ChatMessage } from './chat-store';
+
+// 매크로태스크 경계까지 마이크로태스크를 흘려보낸다(fire-and-forget runAutoCompact 완료 대기용).
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 describe('ChatStore', () => {
   let dir: string;
@@ -531,5 +536,180 @@ describe('ChatStore clearChannel/undoClear/dropClearBackup(Task 1: clear/compact
     const reopened = new ChatStore(dir); // 새 세션(재부팅) 시뮬레이션
     expect(fs.existsSync(clearedPath())).toBe(false);
     expect(reopened.undoClear('general')).toBe(false);
+  });
+});
+
+describe('ChatStore removeMessagesByIds(Task 5: clear-compact 자동 compact)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-removeids-'));
+    store = new ChatStore(dir);
+    store.listChannels();
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('주어진 id들만 정확히 제거하고 나머지는 순서 그대로 보존', () => {
+    const ids = [0, 1, 2, 3].map((i) => store.appendMessage('general', { authorId: 'owner', text: `m${i}` })!.id);
+    store.removeMessagesByIds('general', new Set([ids[0], ids[2]]));
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1', 'm3']);
+  });
+
+  it('빈 id 집합은 no-op', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'a' });
+    store.removeMessagesByIds('general', new Set());
+    expect(store.history('general')).toHaveLength(1);
+  });
+
+  it('존재하지 않는 id는 무해(아무것도 안 지워짐)', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'a' });
+    expect(() => store.removeMessagesByIds('general', new Set(['no-such-id']))).not.toThrow();
+    expect(store.history('general')).toHaveLength(1);
+  });
+
+  it('없는 채널/파일 없는 채널/safeId 아닌 id는 무해', () => {
+    expect(() => store.removeMessagesByIds('no-such-channel', new Set(['x']))).not.toThrow();
+    expect(() => store.removeMessagesByIds('../evil', new Set(['x']))).not.toThrow();
+  });
+
+  it('손상 줄은 안전하게 보존(드롭 금지)', () => {
+    const id = store.appendMessage('general', { authorId: 'owner', text: 'ok' })!.id;
+    fs.appendFileSync(path.join(dir, 'general.jsonl'), '{broken\n');
+    store.removeMessagesByIds('general', new Set([id]));
+    const raw = fs.readFileSync(path.join(dir, 'general.jsonl'), 'utf8').split('\n').filter(Boolean);
+    expect(raw).toHaveLength(1);
+    expect(raw[0]).toContain('broken');
+  });
+
+  it('재로드 후에도 제거 결과가 유지된다', () => {
+    const ids = [0, 1].map((i) => store.appendMessage('general', { authorId: 'owner', text: `m${i}` })!.id);
+    store.removeMessagesByIds('general', new Set([ids[0]]));
+    const again = new ChatStore(dir);
+    expect(again.history('general').map((m) => m.text)).toEqual(['m1']);
+  });
+});
+
+describe('ChatStore 자동 compact 훅(Task 5: clear-compact)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-autocompact-'));
+    store = new ChatStore(dir, { mode: 'count', value: 2 });
+    store.listChannels();
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('훅 미주입 — 기존 동기 프루닝 그대로(회귀 0)', () => {
+    for (let i = 0; i < 3; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1', 'm2']);
+  });
+
+  it('훅 주입 + count=2 + 3개 append — 가장 오래된(dropped) 메시지로 훅이 호출되고, 성공(true) 후에만 제거된다', async () => {
+    const calls: Array<{ channelId: string; dropped: ChatMessage[] }> = [];
+    store.setAutoCompactHook(async (channelId, dropped) => {
+      calls.push({ channelId, dropped });
+      return true;
+    });
+    store.appendMessage('general', { authorId: 'owner', text: 'm0' });
+    store.appendMessage('general', { authorId: 'owner', text: 'm1' });
+    // 세 번째 append 시점에 kept=[m1,m2]·dropped=[m0] — 프루닝 전 파일엔 아직 m0가 남아있어야 한다(동기
+    // 삭제를 우회했다는 증거). 훅이 아직 비동기로 진행 중일 수 있으므로 append 직후 즉시 확인.
+    store.appendMessage('general', { authorId: 'owner', text: 'm2' });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channelId).toBe('general');
+    expect(calls[0].dropped.map((m) => m.text)).toEqual(['m0']);
+
+    await flush();
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1', 'm2']);
+    // 파일 자체에서도 정확히 그 메시지만 사라졌는지(정밀 제거) 확인.
+    const raw = fs.readFileSync(path.join(dir, 'general.jsonl'), 'utf8').split('\n').filter(Boolean);
+    expect(raw).toHaveLength(2);
+  });
+
+  it('훅이 false를 반환하면(요약/위키 저장 실패) 아무것도 지워지지 않는다', async () => {
+    store.setAutoCompactHook(async () => false);
+    store.appendMessage('general', { authorId: 'owner', text: 'm0' });
+    store.appendMessage('general', { authorId: 'owner', text: 'm1' });
+    store.appendMessage('general', { authorId: 'owner', text: 'm2' });
+
+    await flush();
+    // 실패했으므로 3개 전부 남아있어야 함(never-throw·안전 우선).
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['m0', 'm1', 'm2']);
+  });
+
+  it('훅이 reject해도(never-throw) 프로세스가 죽지 않고, 아무것도 지워지지 않는다', async () => {
+    store.setAutoCompactHook(async () => { throw new Error('brain down'); });
+    expect(() => {
+      store.appendMessage('general', { authorId: 'owner', text: 'm0' });
+      store.appendMessage('general', { authorId: 'owner', text: 'm1' });
+      store.appendMessage('general', { authorId: 'owner', text: 'm2' });
+    }).not.toThrow();
+
+    await flush();
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['m0', 'm1', 'm2']);
+  });
+
+  it('unlimited 정책 — 훅이 주입돼도 호출되지 않는다(프루닝 자체가 없음)', async () => {
+    const unlimited = new ChatStore(dir);
+    unlimited.listChannels();
+    const hook = jest.fn(async () => true);
+    unlimited.setAutoCompactHook(hook);
+    for (let i = 0; i < 5; i++) unlimited.appendMessage('general', { authorId: 'owner', text: `x${i}` });
+    await flush();
+    expect(hook).not.toHaveBeenCalled();
+    expect(unlimited.history('general', { limit: 10 })).toHaveLength(5);
+  });
+
+  it('디바운스 — 훅 진행 중에 겹치는 append는 새 라운드를 건너뛰고, 완료 후 다음 append에서 재시도된다', async () => {
+    let resolveHook!: (v: boolean) => void;
+    const hookCalls: ChatMessage[][] = [];
+    store.setAutoCompactHook((_channelId, dropped) => {
+      hookCalls.push(dropped);
+      return new Promise<boolean>((res) => { resolveHook = res; });
+    });
+
+    store.appendMessage('general', { authorId: 'owner', text: 'm0' });
+    store.appendMessage('general', { authorId: 'owner', text: 'm1' });
+    store.appendMessage('general', { authorId: 'owner', text: 'm2' }); // 훅 호출 시작(pending), dropped=[m0]
+    expect(hookCalls).toHaveLength(1);
+
+    // 훅이 아직 안 끝났는데 겹쳐서 append — 디바운스로 이번 라운드는 훅을 다시 부르지 않아야 함.
+    store.appendMessage('general', { authorId: 'owner', text: 'm3' });
+    expect(hookCalls).toHaveLength(1); // 여전히 1회(디바운스로 스킵)
+
+    resolveHook(true);
+    await flush();
+    // 첫 훅 성공 → m0만 제거. 파일엔 m1,m2,m3 남음(동기 프루닝이 스킵됐으므로 count=2 초과 상태 그대로).
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['m1', 'm2', 'm3']);
+
+    // 다음 append가 다시 프루닝을 트리거 — 이번엔 in-flight가 아니므로 훅이 재호출된다.
+    store.appendMessage('general', { authorId: 'owner', text: 'm4' });
+    expect(hookCalls).toHaveLength(2);
+    expect(hookCalls[1].map((m) => m.text)).toEqual(['m1', 'm2']); // count=2 유지 목표: kept=[m3,m4]
+    resolveHook(true);
+    await flush();
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['m3', 'm4']);
+  });
+
+  it('요약 대상(dropped) 메시지는 위키에 저장된 것과 동일한 내용이고, 제거는 그 이후에만 일어난다(순서 증명)', async () => {
+    const order: string[] = [];
+    let wikiSaved: string[] = [];
+    store.setAutoCompactHook(async (_channelId, dropped) => {
+      order.push('summarize-start');
+      wikiSaved = dropped.map((m) => m.text); // "위키 게시"를 흉내(실제 게시 성공을 표현)
+      order.push('summarize-done');
+      return true;
+    });
+    store.appendMessage('general', { authorId: 'owner', text: 'old-1' });
+    store.appendMessage('general', { authorId: 'owner', text: 'old-2' });
+    store.appendMessage('general', { authorId: 'owner', text: 'new-1' }); // dropped=[old-1]
+
+    // 훅이 아직 진행 중이거나 막 끝난 시점 — removeMessagesByIds는 훅 완료 이후에만 실행되므로,
+    // "제거" 단계가 시작되기 전엔 이미 'summarize-done'이 order에 기록돼 있어야 한다.
+    await flush();
+    expect(order).toEqual(['summarize-start', 'summarize-done']);
+    expect(wikiSaved).toEqual(['old-1']); // 위키에 저장된 내용 = dropped 메시지
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['old-2', 'new-1']); // 그 후 제거
   });
 });

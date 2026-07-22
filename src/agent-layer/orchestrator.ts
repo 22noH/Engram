@@ -35,6 +35,7 @@ import type { Action } from '../../shared/protocol';
 import { outputDirective, configuredLang } from './language';
 import { t } from './i18n';
 import { ChannelBrainResolver } from './channel-brain-resolver';
+import type { ChatMessage } from '../edge/messenger/chat-store';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 type PostFn = (text: string, actions?: Action[]) => Promise<void>;
@@ -87,8 +88,10 @@ export class Orchestrator {
   private chatStoreForBrain?: { listChannels(): Array<{ id: string; brain?: string }> };
   // /compact 실행기(CompactService) — main.ts에서 setter 주입(구조적 타입, 순환 회피 —
   // main.ts에서만 조립 가능한 chatStore를 CompactService가 필요로 해 DI로는 못 넣는다. clear-compact Task 3b).
+  // summarizeToWiki는 Task 5(자동 compact)가 쓴다 — 같은 CompactService 인스턴스가 두 메서드를 다 가진다.
   private compactSvc?: {
     compact(channelId: string, opts: { brain: BrainProvider; auto?: boolean }): Promise<{ summary: string; slug: string } | null>;
+    summarizeToWiki(channelId: string, msgs: ChatMessage[], opts: { brain: BrainProvider; auto?: boolean }): Promise<{ slug: string } | null>;
   };
 
   constructor(
@@ -141,9 +144,11 @@ export class Orchestrator {
   }
 
   // CompactService 주입(clear-compact Task 3b). main.ts에서 wiki 배선이 있을 때만(메인 서버) 호출 —
-  // 미주입이면 compactChannel이 null(자기위임 없음, self.adapter의 compact 케이스는 무크래시 no-op).
+  // 미주입이면 compactChannel/autoCompact가 null(자기위임 없음, self.adapter의 compact 케이스·chat-store의
+  // autoCompactHook 둘 다 무크래시 no-op으로 흡수).
   setCompactService(svc: {
     compact(channelId: string, opts: { brain: BrainProvider; auto?: boolean }): Promise<{ summary: string; slug: string } | null>;
+    summarizeToWiki(channelId: string, msgs: ChatMessage[], opts: { brain: BrainProvider; auto?: boolean }): Promise<{ slug: string } | null>;
   }): void {
     this.compactSvc = svc;
   }
@@ -170,6 +175,26 @@ export class Orchestrator {
       return r ? { slug: r.slug } : null;
     } catch (err) {
       this.logger.warn(`compact 실패(무시): ${String(err)}`, 'Orchestrator');
+      return null;
+    }
+  }
+
+  // clear-compact Task 5: chat-store.setAutoCompactHook이 부르는 훅(main.ts가 이 메서드를 그대로
+  // 훅으로 넘긴다). compactChannel과 달리 채널 전체가 아니라 프루닝이 버릴 dropped 메시지만 받아
+  // CompactService.summarizeToWiki(clear/append 없음, 위키 게시만)로 넘긴다 — 채널 정리는 chat-store가
+  // 이 메서드의 성공 여부(null 아님)를 보고 removeMessagesByIds로 정밀 수행한다.
+  // 브레인은 "이 채널의 현재" 브레인을 channelBrainOf로 조회(재개 발사와 동일 결 — Finding 1 재사용).
+  // never-throw — compactSvc 미주입/브레인 미해소/summarizeToWiki 자체 실패는 전부 null(chat-store가
+  // false로 받아 아무것도 지우지 않는다).
+  async autoCompact(channelId: string, dropped: ChatMessage[]): Promise<{ slug: string } | null> {
+    if (!this.compactSvc) return null;
+    const brainName = this.channelBrainOf(channelId);
+    const brain = this.resolveMsgBrain({ text: '', userId: channelId, ...(brainName ? { brain: brainName } : {}) });
+    if (!brain) return null;
+    try {
+      return await this.compactSvc.summarizeToWiki(channelId, dropped, { brain, auto: true });
+    } catch (err) {
+      this.logger.warn(`자동 compact 실패(무시): ${String(err)}`, 'Orchestrator');
       return null;
     }
   }
