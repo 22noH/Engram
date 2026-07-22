@@ -2300,6 +2300,48 @@ describe('clearHistory/undoClear 권한 게이트(clear-compact Task 3)', () => 
     const f = await nextFrame(c);
     expect(f).toEqual({ t: 'historyCleared', channelId: 'general' });
   });
+
+  // ★deny 경로 회귀 방지(리뷰 지적): clearHistory만 intruder 테스트가 있고 undoClear/dropClearBackup은
+  // 없었다 — 게이트가 미래 리팩터로 빠져도 안 잡힘. 각 케이스의 무단 소켓 거부를 실증한다.
+  it('비공개 채널의 비주인 소켓은 undoClear 무시(권한 없음 — 복원 안 됨)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const intruder = deps.accounts.createPassword('intruder', 'pw', 'Intruder', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    store.appendMessage(ch.id, { authorId: creator.id, text: 'private msg' });
+    store.clearChannel(ch.id); // 백업 생성(라이브 jsonl 없음)
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(deps, intruder);
+    ws.send(JSON.stringify({ t: 'undoClear', id: ch.id }));
+    ws.send(JSON.stringify({ t: 'channels' })); // 순서 왕복 — undoClear가 처리된 뒤 도착
+    const f = await nextFrame(ws);
+    expect(f.t).toBe('channels'); // historyRestored가 아니라 channels가 온다(무동작)
+    expect(store.history(ch.id)).toHaveLength(0); // 복원되지 않았음
+  });
+
+  it('비공개 채널의 비주인 소켓은 dropClearBackup 무시(백업 보존 — 되돌리기 여전히 가능)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const intruder = deps.accounts.createPassword('intruder', 'pw', 'Intruder', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    store.appendMessage(ch.id, { authorId: creator.id, text: 'private msg' });
+    store.clearChannel(ch.id); // 백업 생성
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(deps, intruder);
+    ws.send(JSON.stringify({ t: 'dropClearBackup', id: ch.id }));
+    ws.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(ws);
+    expect(f.t).toBe('channels');
+    // 백업이 지워지지 않았어야 함 — 되돌리기가 여전히 가능(무단 소켓이 되돌리기를 영구 파괴 못 함)
+    expect(store.undoClear(ch.id)).toBe(true);
+    expect(store.history(ch.id).map((m) => m.text)).toEqual(['private msg']);
+  });
 });
 
 describe('compact(clear-compact Task 3)', () => {
@@ -2361,5 +2403,30 @@ describe('compact(clear-compact Task 3)', () => {
     client.send(JSON.stringify({ t: 'channels' }));
     const f = await nextFrame(client);
     expect(f.t).toBe('channels');
+  });
+
+  it('비공개 채널의 비주인 소켓은 compact 무시(핸들러 미호출·무브로드캐스트 — 게이트 실증)', async () => {
+    // ★리뷰 지적: compact 테스트가 전부 authDeps 없는 bypass 소켓이라 게이트 deny 경로가 미검증이었다.
+    // 브레인 배선(Task 3b) 후 무단 소켓이 남의 비공개 채널을 요약·게시·정리하면 안 된다.
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const intruder = deps.accounts.createPassword('intruder', 'pw', 'Intruder', { status: 'active' });
+    const gated = new ChatStore(path.join(dir, 'chat2'));
+    const ch = gated.createChannel('secret', 'chat', creator.id, 'private')!;
+    gated.appendMessage(ch.id, { authorId: creator.id, text: 'x' });
+    let called = false;
+    const compactHandler = async () => { called = true; return { slug: 'x' }; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, gated, { logger: noLog, compactHandler }, undefined, deps);
+    await sm.start();
+
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+    client.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(intruder.id).token }));
+    await nextFrame(client); // authOk
+    client.send(JSON.stringify({ t: 'compact', id: ch.id }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels'); // compacted가 아니라 channels가 온다(무동작)
+    expect(called).toBe(false); // 게이트가 막아 핸들러가 아예 호출되지 않음
   });
 });
