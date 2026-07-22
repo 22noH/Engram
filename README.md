@@ -43,20 +43,42 @@ Runs entirely on your PC. No account, no login — open it and use it.
 
 ## Team server + clients
 
-Run one Engram as a server and let a team share it. The server has **no window** — you manage it from a **web console in any browser**.
+Run one Engram as a server and let a team share it. The server has **no window** — you manage it from a **web console in any browser**, or the CLI.
 
 ### Run the server
 
-Start Engram in server mode (headless). On first launch it prints a one-time **setup code**.
+Three ways to start it, pick what fits:
+
+**① Windows service** — installs as an auto-starting Windows service (restarts itself if it crashes) and opens the firewall for the port. Needs an elevated (Administrator) terminal:
+
+```bash
+engram-server service install
+```
+
+Use `engram-server service uninstall|start|stop|status` to manage it afterward.
+
+**② Docker** — build and run the headless server in a container:
+
+```bash
+docker compose up -d
+```
+
+Listens on port 47800. Data (wiki, chat, config, and the downloaded embedding model) lives in the named Docker volume `engram-data` — run `docker volume inspect engram-data` to find where that is on disk, and back that path up like any other Engram data folder. The first-run **setup code** is printed to the container's logs: `docker compose logs -f engram`.
+
+**③ Manual** (any OS — pair with your own process manager, e.g. systemd):
 
 ```bash
 # from an installed app folder or a checkout
 ENGRAM_CHAT_BIND=0.0.0.0 ENGRAM_CHAT_PORT=47800 node dist/src/main.js
+# or, once engram-server is on your PATH:
+engram-server start
 ```
+
+On first launch (any of the three ways) it prints a one-time **setup code**.
 
 - `ENGRAM_CHAT_BIND=0.0.0.0` opens it to your network (LAN). Leave it at the default `127.0.0.1` to keep it to the server machine only.
 
-### Manage it from the web console
+### Manage it — web console or CLI
 
 Open **`http://<server-address>:47800/admin`** in any browser — from any computer on the network.
 
@@ -71,11 +93,26 @@ Open **`http://<server-address>:47800/admin`** in any browser — from any compu
    - **Server settings** — name, port, exposure, SSO (OIDC), whether coding is allowed.
    - **Client deployment** — download a `preset.json` to hand out with the app so teammates' apps open straight to your server's login.
 
+Everything the console does is also available from the **`engram-server` CLI** (same binary as `service`/`start` above) — handy for scripting or a server with no browser access:
+
+| Command | What it does |
+|---|---|
+| `engram-server setup` | Print the one-time setup code (or confirm the server's already configured) |
+| `engram-server status` | Heartbeat, chat/knowledge size, member & channel counts, whether the port is listening |
+| `engram-server user list\|approve\|activate\|suspend\|reset-password <id>` | Approve join requests, reinstate a suspended account, suspend, or issue a temp password |
+| `engram-server group list\|create\|delete\|set-perms\|set-channels <id>` | Create/delete groups, set their permissions and channel access |
+| `engram-server config get [key]` / `config set <key> <value>` | Read or change `port` / `bind` / `retention` / `autoCompact` / `coding` — all but `coding` apply after a restart |
+| `engram-server preset export [path]` | Write a `preset.json` for client deployment (same file the console downloads) |
+| `engram-server service install\|uninstall\|start\|stop\|status` | Windows service + firewall management (Windows only) |
+| `engram-server start` | Run the daemon in the foreground (what Docker's `CMD` and manual/systemd setups use) |
+
+Run any command with no arguments (e.g. `engram-server user`) to see its detailed usage.
+
 ### Give the app to teammates
 
 Hand out the desktop app together with the `preset.json` from the console (drop it in the app's install folder). Their app then opens straight to **your server's login screen** — they sign in (or request access → you approve) and land in the team's **Chat** tab, where everyone talks in shared channels and the server's AI answers `@Engram`.
 
-> Exposing a server to the public internet needs TLS in front of it (a reverse proxy or tunnel) — don't open a plain connection directly.
+> Exposing a server to the public internet needs TLS in front of it (a reverse proxy or tunnel) — don't open a plain connection directly, and only open the port you actually mean to expose (47800, or your reverse proxy's) in the firewall.
 
 ---
 
