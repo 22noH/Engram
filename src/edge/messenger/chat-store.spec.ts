@@ -406,3 +406,110 @@ describe('ChatStore 대화 보존 정책(Task 1: S4)', () => {
     expect(missing.historyBytes()).toBe(0);
   });
 });
+
+describe('ChatStore clearChannel/undoClear/dropClearBackup(Task 1: clear/compact)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-clear-'));
+    store = new ChatStore(dir);
+    store.listChannels(); // general 채널 생성
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  function jsonlPath(id = 'general'): string { return path.join(dir, `${id}.jsonl`); }
+  function clearedPath(id = 'general'): string { return `${jsonlPath(id)}.cleared`; }
+
+  it('clearChannel — jsonl이 .cleared로 rename되고 history는 빈배열', () => {
+    for (let i = 0; i < 3; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    store.clearChannel('general');
+    expect(fs.existsSync(jsonlPath())).toBe(false);
+    expect(fs.existsSync(clearedPath())).toBe(true);
+    expect(store.history('general')).toEqual([]);
+  });
+
+  it('undoClear — clear 후 되돌리면 history가 원복되고 백업은 사라짐', () => {
+    for (let i = 0; i < 3; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    store.clearChannel('general');
+    expect(store.undoClear('general')).toBe(true);
+    expect(store.history('general').map((m) => m.text)).toEqual(['m0', 'm1', 'm2']);
+    expect(fs.existsSync(clearedPath())).toBe(false);
+  });
+
+  it('undoClear — 백업이 없으면 false', () => {
+    expect(store.undoClear('general')).toBe(false);
+  });
+
+  it('clear 두 번 — 첫 백업은 지워지고 두 번째 것만 남음(백업 1개 유지)', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'first' });
+    store.clearChannel('general');
+    const firstBackupContent = fs.readFileSync(clearedPath(), 'utf8');
+    expect(firstBackupContent).toContain('first');
+
+    store.appendMessage('general', { authorId: 'owner', text: 'second' });
+    store.clearChannel('general');
+    const entries = fs.readdirSync(dir).filter((f) => f.endsWith('.cleared'));
+    expect(entries).toHaveLength(1);
+    const secondBackupContent = fs.readFileSync(clearedPath(), 'utf8');
+    expect(secondBackupContent).toContain('second');
+    expect(secondBackupContent).not.toContain('first');
+  });
+
+  it('dropClearBackup — 백업 제거 후 undoClear는 false', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'x' });
+    store.clearChannel('general');
+    store.dropClearBackup('general');
+    expect(fs.existsSync(clearedPath())).toBe(false);
+    expect(store.undoClear('general')).toBe(false);
+  });
+
+  it('dropClearBackup — 백업 없어도 무해(never-throw)', () => {
+    expect(() => store.dropClearBackup('general')).not.toThrow();
+  });
+
+  it('clear 후 새 메시지가 쌓이면(새 jsonl 생성) undoClear는 덮어쓰지 않고 false', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'old' });
+    store.clearChannel('general');
+    store.appendMessage('general', { authorId: 'owner', text: 'new' });
+    expect(store.undoClear('general')).toBe(false);
+    // 덮어쓰지 않았으므로 새 메시지와 백업 둘 다 그대로.
+    expect(store.history('general').map((m) => m.text)).toEqual(['new']);
+    expect(fs.existsSync(clearedPath())).toBe(true);
+  });
+
+  it('없는 채널/파일 없는 채널에 clearChannel·undoClear·dropClearBackup 호출해도 무해', () => {
+    expect(() => store.clearChannel('no-such-channel')).not.toThrow();
+    expect(() => store.undoClear('no-such-channel')).not.toThrow();
+    expect(() => store.dropClearBackup('no-such-channel')).not.toThrow();
+    expect(store.undoClear('no-such-channel')).toBe(false);
+  });
+
+  it('빈 채널(메시지 0개)에 clearChannel — jsonl이 아예 없으므로 no-op, .cleared도 없음', () => {
+    store.clearChannel('general');
+    expect(fs.existsSync(clearedPath())).toBe(false);
+    expect(store.history('general')).toEqual([]);
+  });
+
+  it('손상된 jsonl도 clearChannel/undoClear가 안전하게 rename(내용 검사 없이 통째로 이동)', () => {
+    fs.appendFileSync(jsonlPath(), '{broken json\n');
+    expect(() => store.clearChannel('general')).not.toThrow();
+    expect(fs.existsSync(clearedPath())).toBe(true);
+    expect(() => store.undoClear('general')).not.toThrow();
+    expect(fs.existsSync(jsonlPath())).toBe(true);
+  });
+
+  it('safeId가 아닌 id(경로 구멍)는 무해하게 no-op', () => {
+    expect(() => store.clearChannel('../evil')).not.toThrow();
+    expect(() => store.dropClearBackup('..\\evil')).not.toThrow();
+    expect(store.undoClear('../evil')).toBe(false);
+  });
+
+  it('부팅 정리 — 이전 세션의 잔여 .cleared 백업은 새 ChatStore 생성 시 제거된다', () => {
+    store.appendMessage('general', { authorId: 'owner', text: 'x' });
+    store.clearChannel('general');
+    expect(fs.existsSync(clearedPath())).toBe(true);
+    const reopened = new ChatStore(dir); // 새 세션(재부팅) 시뮬레이션
+    expect(fs.existsSync(clearedPath())).toBe(false);
+    expect(reopened.undoClear('general')).toBe(false);
+  });
+});

@@ -54,6 +54,19 @@ export class ChatStore {
 
   constructor(private readonly chatDir: string, retention?: RetentionPolicy) {
     if (retention) this.setRetention(retention);
+    this.cleanupStaleClearBackups();
+  }
+
+  // Task 1(clear/compact): 이전 세션에서 실행취소 창이 만료되지 않은 채 남은 `.cleared`
+  // 백업(토스트 미확정분)을 부팅 시 정리. never-throw(chatDir 없음=정리할 것 없음).
+  private cleanupStaleClearBackups(): void {
+    try {
+      const entries = fs.readdirSync(this.chatDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isFile() || !e.name.endsWith('.cleared')) continue;
+        try { fs.unlinkSync(path.join(this.chatDir, e.name)); } catch { /* 개별 실패는 무시하고 계속 */ }
+      }
+    } catch { /* chatDir 없음/읽기 실패 = 정리할 것 없음 */ }
   }
 
   // 정책 소스(설정 파일 값)는 Task 2에서 배선 — 여기선 세터만 제공.
@@ -71,6 +84,9 @@ export class ChatStore {
   }
   private messagesPath(channelId: string): string {
     return path.join(this.chatDir, `${channelId}.jsonl`);
+  }
+  private clearedPath(channelId: string): string {
+    return `${this.messagesPath(channelId)}.cleared`;
   }
   private save(list: ChatChannel[]): void {
     fs.mkdirSync(this.chatDir, { recursive: true });
@@ -263,6 +279,51 @@ export class ChatStore {
       }
     } catch (e) {
       console.warn(`[chat-store] 채널 '${id}' 프루닝 실패(무시하고 계속): ${String(e)}`);
+    }
+  }
+
+  // Task 1(clear/compact): /clear = jsonl을 `.cleared`로 원자적 rename(삭제 아님 — 실행취소 가능).
+  // 백업은 항상 최신 1개만 유지(이전 백업이 있으면 먼저 버림). 위키/RAG 폴더는 별개 경로라 무관.
+  // never-throw: 실패해도 대화 자체는 그대로 남아있으므로 로그만 남기고 계속.
+  clearChannel(id: string): void {
+    try {
+      if (!safeId(id)) return;
+      const p = this.messagesPath(id);
+      if (!fs.existsSync(p)) return; // 대화 없음 = no-op
+      const backup = this.clearedPath(id);
+      // 이전 백업이 남아있으면(실행취소 안 하고 또 clear) 먼저 지워 백업 1개만 유지.
+      try { if (fs.existsSync(backup)) fs.unlinkSync(backup); } catch { /* 개별 실패 무시, rename에서 재시도 안 함 */ }
+      fs.renameSync(p, backup); // 원자적 rename(같은 디렉터리 내 이동 — tmp 불필요)
+    } catch (e) {
+      console.warn(`[chat-store] 채널 '${id}' clear 실패(무시하고 계속): ${String(e)}`);
+    }
+  }
+
+  // clearChannel의 되돌리기. 백업 없으면 false. 되돌리기 창 동안 새 메시지가 쌓여
+  // 현재 jsonl이 이미 존재하면(다시 대화 시작됨) 덮어쓰지 않고 false — 데이터 유실 방지.
+  undoClear(id: string): boolean {
+    try {
+      if (!safeId(id)) return false;
+      const backup = this.clearedPath(id);
+      if (!fs.existsSync(backup)) return false; // 백업 없음
+      const p = this.messagesPath(id);
+      if (fs.existsSync(p)) return false; // 그새 새 대화가 쌓임 — 덮어쓰기 금지
+      fs.renameSync(backup, p); // 원자적 rename으로 복원
+      return true;
+    } catch (e) {
+      console.warn(`[chat-store] 채널 '${id}' undoClear 실패(무시): ${String(e)}`);
+      return false;
+    }
+  }
+
+  // 실행취소 창 만료(또는 다음 clear 직전 정리)에 호출 — 백업만 지움, 대화 상태는 무관.
+  dropClearBackup(id: string): void {
+    try {
+      if (!safeId(id)) return;
+      const backup = this.clearedPath(id);
+      if (fs.existsSync(backup)) fs.unlinkSync(backup);
+    } catch (e) {
+      console.warn(`[chat-store] 채널 '${id}' 백업 삭제 실패(무시): ${String(e)}`);
     }
   }
 
