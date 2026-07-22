@@ -1443,6 +1443,18 @@ describe('AdminHttp', () => {
         const body = await (await authFetch('/admin/api/server-settings', ownerTok)).json() as any;
         expect(body.autoCompact).toBe(false); // 이전에 저장한 false가 그대로 보존됨(비boolean에 안 덮임)
       });
+
+      it('런타임 즉시 적용: POST autoCompact가 이 요청의 chat 인스턴스에 setAutoCompactEnabled로 바로 반영', async () => {
+        // 최종 리뷰 지적: retention은 setRetention 라이브 테스트(위)가 있는데 autoCompact 라이브 배선(admin-http.ts
+        // `setAutoCompactEnabled`)엔 가드가 없었다 — 그 한 줄을 지우면 콘솔 토글이 재시작까지 미반영으로 회귀해
+        // "retention만 조여지고 요약은 꺼진" 데이터 손실 창이 다시 열린다. spy로 그 배선을 직접 가드한다.
+        const spy = jest.spyOn(chat, 'setAutoCompactEnabled');
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: false });
+        expect(spy).toHaveBeenCalledWith(false);
+        await post('/admin/api/server-settings', ownerTok, { autoCompact: true });
+        expect(spy).toHaveBeenLastCalledWith(true);
+        spy.mockRestore();
+      });
     });
   });
 });

@@ -296,8 +296,8 @@ function readJsonlLines(jsonlPath: string): any[] {
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // Boot A: /clear+undo(①) · /compact(②) · 권한 게이트(④) · auto-compact ON(③a) — mockbrain 필요.
 // retention은 처음 unlimited(①②④에 영향 없게)로 두다가, ③a 직전 admin api로 count:2 런타임 전환한다
-// (admin-http.ts:888 this.deps.chat.setRetention — 재시작 없이 즉시 반영. autoCompact 훅 설치 자체는
-// 부팅 시점 1회 결정이라 재부팅 불필요 — chatCfg.autoCompact가 false가 아니면 기본 true로 훅이 걸린다).
+// (admin-http.ts this.deps.chat.setRetention — 재시작 없이 즉시 반영). autoCompact 훅은 부팅 때 항상 설치되고
+// "켜짐 여부"만 런타임 플래그(setAutoCompactEnabled)로 admin이 setRetention과 함께 즉시 뒤집는다 — 기본 true.
 // ══════════════════════════════════════════════════════════════════════════════════════════
 async function probeBootA(tmpBase: string, cleanup: Array<() => Promise<void>>): Promise<void> {
   console.log('\n[Probe A] /clear+undo · /compact(위키 저장) · 권한 게이트 · auto-compact ON');
@@ -512,9 +512,10 @@ async function probeBootA(tmpBase: string, cleanup: Array<() => Promise<void>>):
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// Boot B: autoCompact=false(부팅 시점 설정, 재시작 필요 — admin-http.ts 주석: "autoCompact는 retention과
-// 달리 런타임 세터가 없다") + retention count:2. 훅이 아예 설치 안 되므로 pruneChannel은 raw 동기
-// 삭제(S4 그대로) — 브레인 불필요. scripts/smoke-console-s4.ts의 retention-prune 검증과 동일한 결.
+// Boot B: autoCompact=false(부팅 시점 chat.json 설정) + retention count:2. 훅은 설치되지만 enabled=false라
+// pruneChannel이 훅을 호출조차 안 하고 raw 동기 삭제(S4 그대로) — 브레인 불필요. (런타임에도 admin이
+// setAutoCompactEnabled로 즉시 켜고 끌 수 있지만, 여기선 부팅 시점 false 경로를 검증한다.)
+// scripts/smoke-console-s4.ts의 retention-prune 검증과 동일한 결.
 // ══════════════════════════════════════════════════════════════════════════════════════════
 async function probeBootB(tmpBase: string, cleanup: Array<() => Promise<void>>): Promise<void> {
   console.log('\n[Probe B] auto-compact OFF — raw 프루닝(S4)만, 위키 미생성');
