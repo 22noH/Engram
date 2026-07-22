@@ -2157,3 +2157,209 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
     expect(body.members).toBe(1);
   });
 });
+
+describe('clearHistory/undoClear/dropClearBackup(clear-compact Task 3)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger;
+  let client: WebSocket;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-clear-'));
+    store = new ChatStore(dir);
+    store.listChannels(); // general 생성
+    store.appendMessage('general', { authorId: 'owner', text: 'one' });
+    store.appendMessage('general', { authorId: 'owner', text: 'two' });
+    store.appendMessage('general', { authorId: 'owner', text: 'three' });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+  });
+  afterEach(async () => {
+    client.terminate();
+    await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('clearHistory → jsonl 비움 + historyCleared 브로드캐스트', async () => {
+    expect(store.history('general')).toHaveLength(3);
+    client.send(JSON.stringify({ t: 'clearHistory', id: 'general' }));
+    const f = await nextFrame(client);
+    expect(f).toEqual({ t: 'historyCleared', channelId: 'general' });
+    expect(store.history('general')).toHaveLength(0);
+  });
+
+  it('undoClear → 메시지 복원 + historyRestored 브로드캐스트', async () => {
+    client.send(JSON.stringify({ t: 'clearHistory', id: 'general' }));
+    await nextFrame(client); // historyCleared
+    client.send(JSON.stringify({ t: 'undoClear', id: 'general' }));
+    const f = await nextFrame(client);
+    expect(f).toEqual({ t: 'historyRestored', channelId: 'general' });
+    expect(store.history('general').map((m) => m.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('dropClearBackup → 백업 제거, 이후 undoClear는 무동작(복원 없음)', async () => {
+    client.send(JSON.stringify({ t: 'clearHistory', id: 'general' }));
+    await nextFrame(client); // historyCleared
+    client.send(JSON.stringify({ t: 'dropClearBackup', id: 'general' }));
+    // dropClearBackup은 응답 프레임이 없다 — 뒤이어 무해한 채널 확인 프레임으로 처리 완료를 확인.
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    client.send(JSON.stringify({ t: 'undoClear', id: 'general' }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f2 = await nextFrame(client);
+    expect(f2.t).toBe('channels'); // undoClear가 historyRestored를 보냈다면 이 자리에 먼저 왔을 것
+    expect(store.history('general')).toHaveLength(0); // 복원 안 됨
+  });
+
+  it('잘못된 f.id 타입(비문자열)은 무해(크래시/변경 없음)', async () => {
+    client.send(JSON.stringify({ t: 'clearHistory', id: 123 }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(store.history('general')).toHaveLength(3); // 변경 없음
+  });
+});
+
+describe('clearHistory/undoClear 권한 게이트(clear-compact Task 3)', () => {
+  let dir: string;
+  let sm: SelfMessenger | undefined;
+  let clients: WebSocket[];
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-clear-gate-'));
+    clients = [];
+  });
+  afterEach(async () => {
+    for (const c of clients) c.terminate();
+    clients = [];
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function connectAs(deps: AuthDeps, acc: Account): Promise<WebSocket> {
+    const c = new WebSocket(`ws://127.0.0.1:${sm!.addressPort()}`);
+    clients.push(c);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(acc.id).token }));
+    await nextFrame(c); // authOk
+    return c;
+  }
+
+  it('비공개 채널의 비주인 소켓은 clearHistory 무시(권한 없음 — 대화 그대로)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const intruder = deps.accounts.createPassword('intruder', 'pw', 'Intruder', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('secret', 'chat', creator.id, 'private')!;
+    store.appendMessage(ch.id, { authorId: creator.id, text: 'private msg' });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(deps, intruder);
+    ws.send(JSON.stringify({ t: 'clearHistory', id: ch.id }));
+    // intruder는 canAccessChannel도 실패하는 비공개 채널이라 history 조회로 무동작을 확인한다.
+    ws.send(JSON.stringify({ t: 'history', channelId: ch.id }));
+    const f = await nextFrame(ws);
+    expect(f.t).toBe('history');
+    expect(f.messages).toEqual([]); // 비접근이라 애초에 빈 응답(그러나 실제 store는 안 지워짐)
+    expect(store.history(ch.id)).toHaveLength(1); // 실제로 지워지지 않았음
+  });
+
+  it('비공개 채널의 주인은 clearHistory 가능(canAdminChannel 통과)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const store = new ChatStore(path.join(dir, 'chat'));
+    const ch = store.createChannel('secret2', 'chat', creator.id, 'private')!;
+    store.appendMessage(ch.id, { authorId: creator.id, text: 'private msg' });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+
+    const ws = await connectAs(deps, creator);
+    ws.send(JSON.stringify({ t: 'clearHistory', id: ch.id }));
+    const f = await nextFrame(ws);
+    expect(f).toEqual({ t: 'historyCleared', channelId: ch.id });
+    expect(store.history(ch.id)).toHaveLength(0);
+  });
+
+  it('개인 free 소켓(계정0+루프백)은 canAdminChannel 우회로 clearHistory 가능', async () => {
+    // Task 1(스탠드얼론) 회귀: 계정이 하나도 없으면 bypassAuth=true → 팀 채널 게이트 없이 통과.
+    const deps = makeAuthDeps(dir);
+    const store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    store.appendMessage('general', { authorId: 'owner', text: 'hi' });
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog }, undefined, deps);
+    await sm.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    clients.push(c);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'clearHistory', id: 'general' }));
+    const f = await nextFrame(c);
+    expect(f).toEqual({ t: 'historyCleared', channelId: 'general' });
+  });
+});
+
+describe('compact(clear-compact Task 3)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger | undefined;
+  let client: WebSocket | undefined;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-compact-'));
+    store = new ChatStore(dir);
+    store.listChannels(); // general 생성
+  });
+  afterEach(async () => {
+    client?.terminate();
+    if (sm) await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('compactHandler 주입 시: (channelId, brainName)로 호출 + compacted{slug} 브로드캐스트', async () => {
+    const calls: Array<{ channelId: string; brainName?: string }> = [];
+    const compactHandler = async (channelId: string, brainName?: string) => {
+      calls.push({ channelId, brainName });
+      return { slug: 'x' };
+    };
+    store.setChannelBrain('general', 'qwen');
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, compactHandler });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'compact', id: 'general' }));
+    const f = await nextFrame(client);
+    expect(f).toEqual({ t: 'compacted', channelId: 'general', slug: 'x' });
+    expect(calls).toEqual([{ channelId: 'general', brainName: 'qwen' }]);
+  });
+
+  it('compactHandler 미주입: 무크래시·무브로드캐스트(안전한 no-op)', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'compact', id: 'general' }));
+    // compact 케이스가 아무 것도 안 보냈다면, 뒤이은 channels 요청의 응답이 먼저(그리고 유일하게) 온다.
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+  });
+
+  it('compactHandler가 null 반환(요약 실패 등) → 브로드캐스트 없음(무크래시)', async () => {
+    const compactHandler = async () => null;
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, compactHandler });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'compact', id: 'general' }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+  });
+});

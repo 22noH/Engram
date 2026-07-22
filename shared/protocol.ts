@@ -64,6 +64,10 @@ export type ClientFrame =
   | { t: 'setRepoPath'; id: string; repoPath: string }
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
   | { t: 'setChannelBrain'; id: string; brain: string | null }
+  | { t: 'clearHistory'; id: string }
+  | { t: 'undoClear'; id: string }
+  | { t: 'dropClearBackup'; id: string }
+  | { t: 'compact'; id: string }
   | { t: 'wikiList' }
   | { t: 'wikiGet'; slug: string }
   | { t: 'wikiSearch'; query: string }
@@ -91,6 +95,9 @@ export type ServerFrame =
   | { t: 'channels'; list: Channel[]; brainNames: string[]; defaultBrain: string }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
+  | { t: 'historyCleared'; channelId: string }
+  | { t: 'historyRestored'; channelId: string }
+  | { t: 'compacted'; channelId: string; slug: string }
   | { t: 'authOk'; user: UserDto }
   | { t: 'authErr' }
   | { t: 'error'; text: string }

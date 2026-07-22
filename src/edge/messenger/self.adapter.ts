@@ -92,6 +92,10 @@ export class SelfMessenger implements MessengerPort {
       // Task 4(리뷰 지적): 현재 기본 두뇌 이름. brainNames와 같은 결로 요청마다 재조회(캐시 금지).
       // 미주입 시 ''(안전 폴백 — channels 응답의 defaultBrain='').
       defaultBrain?: () => string;
+      // clear-compact Task 3: compact ws 케이스가 호출하는 훅. 실제 브레인 배선(오케스트레이터
+      // 메서드+bridge)은 별도 후속 태스크 — 여기선 훅 계약만 정의한다. 미주입(brain 모드/미배선)이면
+      // compact 케이스는 조용한 no-op(무크래시, 브로드캐스트 없음).
+      compactHandler?: (channelId: string, brainName?: string) => Promise<{ slug: string } | null>;
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
@@ -422,6 +426,46 @@ export class SelfMessenger implements MessengerPort {
             }
           }
           this.broadcastChannels();
+          return;
+        }
+        case 'clearHistory': {
+          // clear-compact Task 3: setChannelBrain과 동일 게이트(canAdminChannel). 채널 대화 jsonl만
+          // 건드린다(위키/RAG 무관 — Task 1 chat-store.clearChannel이 백업 rename으로 보장).
+          if (typeof f.id === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) {
+              this.store.clearChannel(f.id);
+              this.broadcastToChannel(f.id, { t: 'historyCleared', channelId: f.id });
+            }
+          }
+          return;
+        }
+        case 'undoClear': {
+          if (typeof f.id === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch) && this.store.undoClear(f.id)) {
+              this.broadcastToChannel(f.id, { t: 'historyRestored', channelId: f.id });
+            }
+          }
+          return;
+        }
+        case 'dropClearBackup': {
+          if (typeof f.id === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) this.store.dropClearBackup(f.id);
+          }
+          return;
+        }
+        case 'compact': {
+          // compact 코어(요약→위키 게시→정리)는 브레인이 필요해 self.adapter가 직접 못 한다 — opts.compactHandler
+          // 훅으로만 위임(미주입=brain 모드/미배선이면 조용한 no-op, 무크래시). 실제 훅 배선은 후속 태스크.
+          if (typeof f.id === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) {
+              const r = this.opts.compactHandler ? await this.opts.compactHandler(f.id, ch?.brain) : null;
+              if (r) this.broadcastToChannel(f.id, { t: 'compacted', channelId: f.id, slug: r.slug });
+            }
+          }
           return;
         }
         case 'wikiList': {
