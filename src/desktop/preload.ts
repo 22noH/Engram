@@ -39,4 +39,7 @@ contextBridge.exposeInMainWorld('engram', {
   addMcpServer: (name: string, command: string, argsLine: string) => ipcRenderer.invoke('engram:add-mcp-server', name, command, argsLine),
   removeMcpServer: (name: string) => ipcRenderer.invoke('engram:remove-mcp-server', name),
   syncClaudeMcp: () => ipcRenderer.invoke('engram:sync-claude-mcp'),
+  getChatRetention: () => ipcRenderer.invoke('engram:get-chat-retention'),
+  setChatRetention: (retention: { mode: 'count' | 'days' | 'unlimited'; value?: number }, autoCompact: boolean) =>
+    ipcRenderer.invoke('engram:set-chat-retention', retention, autoCompact),
 });

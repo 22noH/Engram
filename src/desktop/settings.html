@@ -163,6 +163,7 @@
       <button class="nav-item" data-sec="sec-coding"><span class="tile" style="background:#7f77dd"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 4-3.5 4L5 12M11 4l3.5 4L11 12"/></svg></span><span data-t="secCoding"></span></button>
       <button class="nav-item" data-sec="sec-repos"><span class="tile" style="background:#ba7517"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 2h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10.5a1 1 0 0 1-1-1z"/></svg></span><span data-t="secRepos"></span></button>
       <button class="nav-item" data-sec="sec-sched"><span class="tile" style="background:#d4537e"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></span><span data-t="secSched"></span></button>
+      <button class="nav-item" data-sec="sec-chat"><span class="tile" style="background:#d97706"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5V10.5H3a1 1 0 0 1-1-1z"/></svg></span><span data-t="secChat"></span></button>
       <button class="nav-item" data-sec="sec-wiki"><span class="tile" style="background:#1d9e75"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 11.5a3 3 0 1 1 .4-5.97 4 4 0 0 1 7.6 1.2 2.5 2.5 0 0 1-.5 4.77z"/><path d="M8 13.5V9m0 0-1.8 1.8M8 9l1.8 1.8"/></svg></span><span data-t="secWiki"></span></button>
       <button class="nav-item" data-sec="sec-mcp"><span class="tile" style="background:#0d9488"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 1.5v4M10.5 1.5v4M4 5.5h8v2.5a4 4 0 0 1-8 0z"/><path d="M8 12v2.5"/></svg></span><span>MCP</span></button>
       <button class="nav-item" data-sec="sec-messenger"><span class="tile" style="background:#5865f2"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5h12v8H6l-3 2.5v-2.5H2z"/></svg></span><span>Discord</span></button>
@@ -290,6 +291,28 @@
     <p class="cap" id="sched-hint" style="color:var(--accent)" hidden></p>
   </section>
 
+  <section id="sec-chat">
+    <h2 data-t="secChat"></h2>
+    <div class="grp">
+      <div class="li">
+        <label for="chat-retention" style="font-size:13px" data-t="retentionLabel"></label>
+        <span class="val"><select id="chat-retention">
+          <option value="count" data-t="retentionCountOpt"></option>
+          <option value="days" data-t="retentionDaysOpt"></option>
+          <option value="unlimited" data-t="retentionUnlimitedOpt"></option>
+        </select></span>
+      </div>
+      <div class="li">
+        <label style="font-size:13px" data-t="autoCompactLabel"></label>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="auto-compact" /><span data-t="autoCompactCheckboxLabel"></span>
+        </label>
+      </div>
+    </div>
+    <div class="cap" data-t="chatRetentionHint"></div>
+    <p class="cap ok" id="chat-hint" hidden></p>
+  </section>
+
   <section id="sec-wiki">
     <h2 data-t="secWiki"></h2>
     <div class="grp">
@@ -387,7 +410,7 @@
     const t = KO ? {
       tagline2: '설정', search: '검색',
       secStatus: '상태', secBrain: '모델', secAdvanced: '고급',
-      secRepos: '코딩 프로젝트', secSched: '예약', secWiki: '위키 동기화',
+      secRepos: '코딩 프로젝트', secSched: '예약', secChat: '대화', secWiki: '위키 동기화',
       checking: '확인 중…', running: '정상 동작 중', notResponding: '응답 없음', restarting: '재시작 중…',
       warnBadge: '재시작이 계속 실패하고 있어요 — 로그를 확인하세요',
       lastBeat: '마지막 생존 신호', embedModel: '임베딩 모델', dataFolder: '데이터 위치',
@@ -420,6 +443,9 @@
       aliasCap: "채팅에서 'engram 고쳐줘'라고 부를 때의 그 이름이에요.",
       rootsCap: '별칭에 없으면 이 폴더들에서 이름으로 찾아요.',
       addAlias: '별칭 추가', browse: '찾아보기',
+      retentionLabel: '대화 보존', retentionCountOpt: '채널당 최근 1,000개', retentionDaysOpt: '최근 90일', retentionUnlimitedOpt: '무제한',
+      autoCompactLabel: '자동 정리', autoCompactCheckboxLabel: '지우기 전에 위키로 요약',
+      chatRetentionHint: '켜면 지우기 전에 위키로 요약해요 · 끄면 오래된 대화를 요약 없이 그냥 삭제해요. 저장은 재시작 후 적용돼요.',
       wikiRemote: '원격 주소', wikiBranch: '브랜치', wikiInterval: '동기화 주기(초)',
       namePlaceholder: '모델 이름', nameHint: '채팅에서 이 이름으로 부릅니다 — 예: "qwen3-8b한테 물어봐"',
       overwrite: '덮어쓰기', del: '삭제', defaultBadge: '기본',
@@ -452,7 +478,7 @@
     } : {
       tagline2: 'Settings', search: 'Search',
       secStatus: 'Status', secBrain: 'Model', secAdvanced: 'Advanced',
-      secRepos: 'Code repos', secSched: 'Schedules', secWiki: 'Wiki sync',
+      secRepos: 'Code repos', secSched: 'Schedules', secChat: 'Chat', secWiki: 'Wiki sync',
       checking: 'Checking…', running: 'Running', notResponding: 'Not responding', restarting: 'Restarting…',
       warnBadge: 'Restarts keep failing — check the logs',
       lastBeat: 'Last heartbeat', embedModel: 'Embedding model', dataFolder: 'Data folder',
@@ -485,6 +511,9 @@
       aliasCap: 'The name you use in chat — "fix engram".',
       rootsCap: 'Folders searched by name when no alias matches.',
       addAlias: 'Add alias', browse: 'Browse',
+      retentionLabel: 'Conversation retention', retentionCountOpt: 'Last 1,000 per channel', retentionDaysOpt: 'Last 90 days', retentionUnlimitedOpt: 'Unlimited',
+      autoCompactLabel: 'Auto cleanup', autoCompactCheckboxLabel: 'Summarize to wiki before deleting',
+      chatRetentionHint: 'On summarizes old messages to the wiki before deleting them · Off just deletes them, no summary. Applies after a restart.',
       wikiRemote: 'Remote', wikiBranch: 'Branch', wikiInterval: 'Sync interval (sec)',
       namePlaceholder: 'Model name', nameHint: 'This is how you call it in chat — e.g. "ask qwen3-8b"',
       overwrite: 'Overwrite', del: 'Delete', defaultBadge: 'default',
@@ -533,6 +562,7 @@
       'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist, t.autoModeHint, t.cmdListCap, t.cmdBuiltin, t.resetDefault],
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
+      'sec-chat': [t.secChat, t.retentionLabel, t.autoCompactLabel, t.autoCompactCheckboxLabel, t.chatRetentionHint],
       'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
       'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7', t.mcpWrite,
         t.mcpSynced, t.mcpSyncedCap, t.mcpSyncedEmpty],
@@ -1218,6 +1248,28 @@
       }
     }
 
+    // ---- Chat: 대화 보존 + 자동 정리(auto-compact, clear-compact Task 7) ----
+    // 콘솔(console/src/views/ServerSettings.tsx RETENTION_PRESETS)과 정확히 같은 3프리셋 —
+    // select는 "이 3가지 중 하나"라는 계약이라 로드 시점에 mode만 보고 프리셋으로 정규화한다.
+    const RETENTION_PRESETS = {
+      count: { mode: 'count', value: 1000 },
+      days: { mode: 'days', value: 90 },
+      unlimited: { mode: 'unlimited' },
+    };
+    async function loadChatRetention() {
+      $('chat-hint').hidden = true;
+      const { retention, autoCompact } = await window.engram.getChatRetention();
+      $('chat-retention').value = retention.mode;
+      $('auto-compact').checked = autoCompact;
+    }
+    async function saveChatRetention() {
+      await window.engram.setChatRetention(RETENTION_PRESETS[$('chat-retention').value], $('auto-compact').checked);
+      $('chat-hint').textContent = t.saved;
+      $('chat-hint').hidden = false;
+    }
+    $('chat-retention').onchange = saveChatRetention;
+    $('auto-compact').onchange = saveChatRetention;
+
     // ---- Wiki sync: remote/branch/interval 폼 ----
     async function loadWikiRemote() {
       $('wiki-hint').hidden = true;
@@ -1408,6 +1460,7 @@
     loadPermissions();
     loadCodeRepos();
     loadSchedules();
+    loadChatRetention();
     loadWikiRemote();
     loadMcpServers();
     loadMcpWriteMode();

@@ -20,6 +20,7 @@ import { readPresetFile } from './preset-file';
 import { loadCodeRepos } from '../agent-layer/coderepos';
 import { saveDiscordToken } from './messenger-writer';
 import { loadChatConfig } from '../edge/messenger/chat.config';
+import { getChatRetention, setChatRetention } from './chat-retention-file';
 import { resolveLanguage } from '../agent-layer/language';
 import { loadLocalBrains, addLocalBrain } from './local-brains';
 import { readSetupCode } from '../edge/auth/setup-code';
@@ -261,6 +262,12 @@ function registerIpc(): void {
   ipcMain.handle('engram:set-code-alias', (_e, alias: string, targetPath: string) => setAlias(configDir, alias, targetPath));
   ipcMain.handle('engram:remove-code-alias', (_e, alias: string) => { removeAlias(configDir, alias); });
   ipcMain.handle('engram:set-search-roots', (_e, roots: string[]) => { setSearchRoots(configDir, roots); });
+  // clear-compact Task 7: 개인앱은 로그인이 없어 서버 콘솔 admin-http API 대신 로컬 config를
+  // 직접 조회/저장한다(chat-retention-file.ts에 위임 — 로직·검증은 거기서 테스트됨).
+  ipcMain.handle('engram:get-chat-retention', () => getChatRetention(configDir));
+  ipcMain.handle('engram:set-chat-retention', (_e, retention: unknown, autoCompact: unknown) => {
+    setChatRetention(configDir, retention, autoCompact);
+  });
   ipcMain.handle('engram:list-schedules', () => listSchedules(configDir));
   ipcMain.handle('engram:remove-schedule', (_e, id: string) => removeScheduleFromFile(configDir, id));
   ipcMain.handle('engram:get-wiki-remote', () => readWikiRemoteFile(configDir));
