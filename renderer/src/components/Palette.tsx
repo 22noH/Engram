@@ -19,8 +19,8 @@ const COMMANDS: Command[] = [
   {
     insert: CLEAR_INSERT, label: '/clear', isNew: true,
     desc: ko
-      ? '이 채널 대화 기록 삭제 — 컨텍스트·화면 리셋 (되돌리기 불가)'
-      : "Delete this channel's history — resets context & screen (irreversible)",
+      ? '이 채널 대화 기록 삭제 — 컨텍스트·화면 리셋 (몇 초간 실행취소 가능)'
+      : "Delete this channel's history — resets context & screen (brief undo available)",
   },
   {
     insert: COMPACT_INSERT, label: '/compact', isNew: true,

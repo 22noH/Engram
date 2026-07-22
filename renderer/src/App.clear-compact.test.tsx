@@ -132,3 +132,31 @@ it('compacted 수신 → 그 채널 메시지를 재로드(history 재요청)한
     expect(ws.sent.some((s) => s.includes('"history"') && s.includes('"channelId":"g1"'))).toBe(true);
   });
 });
+
+it('연속 /clear(다른 채널)이 historyCleared 전에 와도 이전 채널 백업을 확정 삭제한다(orphan·undo 소실 방지)', async () => {
+  // ★리뷰 지적 회귀 방지: 토스트가 뜨기 전(왕복 전) 두 번째 clear가 오면 이전 clear의 백업이 orphan되고
+  // undo가 소실됐다. pendingClearRef(동기 추적)로 두 번째 clear 시점에 이전 채널 dropClearBackup을 보낸다.
+  render(<App />);
+  act(() => { FakeWS.last.onopen!(); });
+  act(() => { FakeWS.last.onmessage!({ data: JSON.stringify({ t: 'channels', list: [
+    { id: 'g1', name: 'general', respondMode: 'all', mode: 'chat' },
+    { id: 'g2', name: 'random', respondMode: 'all', mode: 'chat' },
+  ] }) }); });
+  await waitFor(() => expect(screen.getByText('# random')).toBeInTheDocument());
+  const ws = FakeWS.last;
+  ws.sent = [];
+
+  // g1 ⋯메뉴 → 대화 기록 삭제 (historyCleared 아직 안 옴)
+  const m1 = document.querySelectorAll('#channels .ch .menu');
+  fireEvent.click(m1[0] as HTMLElement);
+  act(() => { fireEvent.click(screen.getByText(/대화 기록 삭제|Delete history/)); });
+  // g2 ⋯메뉴 → 대화 기록 삭제 (여전히 historyCleared 없이 연속)
+  const m2 = document.querySelectorAll('#channels .ch .menu');
+  fireEvent.click(m2[1] as HTMLElement);
+  act(() => { fireEvent.click(screen.getByText(/대화 기록 삭제|Delete history/)); });
+
+  expect(ws.sent.some((s) => s.includes('"clearHistory"') && s.includes('"id":"g1"'))).toBe(true);
+  expect(ws.sent.some((s) => s.includes('"clearHistory"') && s.includes('"id":"g2"'))).toBe(true);
+  // 핵심: g2 clear 시점에 g1 백업이 확정 삭제돼 orphan되지 않음
+  expect(ws.sent.some((s) => s.includes('"dropClearBackup"') && s.includes('"id":"g1"'))).toBe(true);
+});

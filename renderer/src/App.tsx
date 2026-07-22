@@ -73,6 +73,9 @@ export default function App() {
   const [clearToast, setClearToast] = useState<{ connId: string; channelId: string } | null>(null);
   const clearToastRef = useRef<{ connId: string; channelId: string } | null>(null); clearToastRef.current = clearToast;
   const clearToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ★진행 중인 clear를 동기적으로 추적(리뷰 지적): 토스트(clearToast)는 historyCleared 왕복 후에야 세팅되므로,
+  // 그 전에 다른 채널을 또 clear하면 이전 백업을 확정하지 못해 orphan+undo 소실. runClear에서 즉시 세팅한다.
+  const pendingClearRef = useRef<{ connId: string; channelId: string } | null>(null);
 
   // 최신 값을 ref로도 들고 있는다(chat.html/Phase11의 currentRef 패턴) — WS 이벤트 콜백이
   // React 커밋 사이 타이밍에서도 항상 "마지막 렌더 기준 최신값"을 읽게 하기 위함.
@@ -130,6 +133,8 @@ export default function App() {
       // Task 4(clear-compact) — 그 채널 transcript를 즉시 비우고(모달·시스템 메시지 없음) 실행취소 토스트를 띄운다.
       setMsgsByConnCh((prev) => new Map(prev).set(`${connId}::${f.channelId}`, []));
       if (clearToastTimer.current) clearTimeout(clearToastTimer.current);
+      // 확정 대상을 실제 clear된 (connId,channelId)로 동기화(드롭/확정이 정확한 백업을 가리키게).
+      pendingClearRef.current = { connId, channelId: f.channelId };
       setClearToast({ connId, channelId: f.channelId });
       clearToastTimer.current = setTimeout(() => dismissClearToast(true), 6000); // ~6초 뒤 백업 확정 삭제
     } else if (f.t === 'historyRestored') {
@@ -380,17 +385,26 @@ export default function App() {
   // drop=false는 undoClear/historyRestored처럼 이미 되돌려졌거나 되돌리는 중이라 백업을 지우면 안 될 때.
   const dismissClearToast = (drop: boolean) => {
     if (clearToastTimer.current) { clearTimeout(clearToastTimer.current); clearToastTimer.current = null; }
-    const t = clearToastRef.current;
+    // 확정 대상은 pendingClearRef(runClear에서 동기 세팅) — 토스트가 아직 안 떴어도 in-flight clear를 안다.
+    const t = pendingClearRef.current;
     if (t && drop) send(t.connId, { t: 'dropClearBackup', id: t.channelId });
+    pendingClearRef.current = null;
     setClearToast(null);
   };
 
-  // /clear — 확인창 없이 즉시(스펙 §목업③). 이미 뜬 토스트가 있으면(다른 clear가 진행 중) 그 백업부터
-  // 확정 삭제하고 새로 시작한다.
+  // /clear — 확인창 없이 즉시(스펙 §목업③). 진행 중인 clear가 있으면(토스트가 떴든 왕복 전이든)
+  // 그 백업부터 확정 삭제하고 새로 시작한다 — pendingClearRef로 동기 판정(리뷰 지적: clearToastRef는
+  // 왕복 후에야 세팅돼 연속 clear에서 이전 채널 백업을 놓쳤다).
   const runClear = (name: string) => {
     const id = resolveDefaultChanId(name);
     if (!id) return;
-    if (clearToastRef.current) dismissClearToast(true);
+    const prev = pendingClearRef.current;
+    // 다른 채널의 미확정 clear가 있으면 그 백업을 확정 삭제(서버 orphan 방지). 같은 채널이면 서버 clearChannel이
+    // 이전 백업을 덮으므로 dropClearBackup 불필요 — 타이머만 리셋해 옛 타이머가 새 백업을 조기 삭제하지 않게.
+    if (prev && prev.channelId !== id) send(prev.connId, { t: 'dropClearBackup', id: prev.channelId });
+    if (clearToastTimer.current) { clearTimeout(clearToastTimer.current); clearToastTimer.current = null; }
+    setClearToast(null);
+    pendingClearRef.current = { connId: connState.defaultConnId, channelId: id };
     send(connState.defaultConnId, { t: 'clearHistory', id });
   };
   // /compact — 서버가 요약→위키 게시→정리까지 다 하고 compacted로 알려준다(클라 모달 없음).
