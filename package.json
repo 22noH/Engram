@@ -16,7 +16,8 @@
   "main": "dist/src/desktop/main.js",
   "bin": {
     "engram": "dist/src/cli.js",
-    "engram-wiki-mcp": "dist/src/mcp-headless.js"
+    "engram-wiki-mcp": "dist/src/mcp-headless.js",
+    "engram-server": "dist/src/server-cli.js"
   },
   "files": [
     "dist",
