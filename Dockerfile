@@ -3,9 +3,11 @@
 # chat.json에서 읽고, ENGRAM_CHAT_BIND/ENGRAM_CHAT_PORT 환경변수가 있으면 그 값이 우선한다.
 # ENGRAM_DESKTOP은 절대 설정하지 않는다 — 설정 시 /admin 웹 콘솔이 비활성화된다(데스크톱 앱 전용 가드).
 #
-# 멀티스테이지: builder에서 컴파일 산출물(dist/·console/dist)을 만들고,
-# runner에는 그 산출물과 "npm ci --omit=dev"로 새로 설치한 프로덕션 전용 node_modules만 담는다
-# (builder의 node_modules는 electron 등 devDependencies를 포함해 그대로 옮기면 이미지가 비대해진다).
+# 멀티스테이지: builder에서 컴파일 산출물(dist/·console/dist)을 만들고 root node_modules를
+# "npm prune --omit=dev"로 프로덕션 전용으로 정리한 뒤, runner는 그 산출물과 pruned node_modules를
+# 그대로 COPY만 한다(재설치 안 함). electron 등 devDependencies는 prune으로 제거되고, 네이티브
+# 폴백 빌드가 필요했다면 builder의 빌드 툴체인(python3 make g++)으로 이미 끝난 뒤이므로 runner에
+# 별도 툴체인이 없어도 비대칭이 생기지 않는다(runner에서 새로 npm ci를 돌리지 않기 때문).
 
 # ---- Stage 1: builder — nest build + 웹 콘솔(console/dist) 빌드 ----
 FROM node:20-bookworm-slim AS builder
@@ -25,6 +27,9 @@ COPY nest-cli.json tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
+# devDependencies(electron 등) 제거 — 이제부터는 runner로 그대로 옮길 프로덕션 전용 node_modules.
+RUN npm prune --omit=dev
+
 # admin-http.ts가 resolveResourceDir('console/dist')로 정적 서빙하는 /admin 웹 콘솔.
 # console/dist는 저장소에 커밋되지 않는 빌드 산출물이라 이미지 안에서 직접 빌드해야 한다.
 COPY console/package.json console/package-lock.json ./console/
@@ -41,9 +46,8 @@ ENV ENGRAM_DATA_DIR=/data
 # 재다운로드된다 — 데이터 볼륨(/data) 밑에 두어 볼륨과 함께 영속되게 한다.
 ENV ENGRAM_MODEL_CACHE_DIR=/data/models
 
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/console/dist ./console/dist
 COPY prompts ./prompts

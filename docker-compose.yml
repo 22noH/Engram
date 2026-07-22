@@ -2,13 +2,23 @@
 # 첫 실행 설정 코드(서버 미설정 시 로그에 찍히는 초기 설정 코드)는 컨테이너 로그에서 확인:
 #   docker compose logs -f engram
 # 임베딩 모델 캐시가 데이터 볼륨(/data/models) 아래에 남도록 하는 안내는 README(Task 5) 참조.
+#
+# named volume 사용(바인드 마운트 ./engram-data:/data 대신) — Dockerfile은 non-root(uid 1000 node
+# 유저)로 실행되는데, 리눅스 호스트에서 ./engram-data:/data 같은 바인드 마운트는 존재하지 않으면
+# root 소유로 자동 생성돼 node 유저가 /data에 쓰지 못하고(EACCES) 크래시한다. named volume은 첫
+# 사용 시 이미지가 만들어둔 /data 소유권(RUN chown -R node:node /data, Dockerfile)을 그대로 물려받아
+# 이 문제가 없다. 바인드 마운트를 꼭 써야 하면 호스트 쪽 디렉터리를 미리 `chown -R 1000:1000
+# ./engram-data`로 맞춰야 한다.
 services:
   engram:
     build: .
     ports:
       - "47800:47800"
     volumes:
-      - ./engram-data:/data
+      - engram-data:/data
     environment:
       - ENGRAM_CHAT_BIND=0.0.0.0
     restart: unless-stopped
+
+volumes:
+  engram-data:
