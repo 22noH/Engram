@@ -176,15 +176,16 @@ async function bootstrap(): Promise<void> {
       compactHandler = (id, brainName) => orchestrator.compactChannel(id, brainName);
 
       // clear-compact Task 5: 보존 프루닝 직전 자동 compact 훅. wiki 배선(isServer)이 있을 때만 주입 —
-      // 미주입이면 chat-store.pruneChannel이 기존 동기 프루닝 그대로 돈다(회귀 0). 브레인 해소는
+      // 미주입이면 chat-store.pruneChannel이 기존 동기 프루닝(=raw 삭제, S4) 그대로 돈다(회귀 0). 브레인 해소는
       // orchestrator.autoCompact(채널의 "현재" 브레인을 channelBrainOf로 조회)에 위임 — compactChannel과
       // 동일한 DI-밖 setter 결(순환 회피)을 재사용한다. self는 이 if(isServer) 블록 아래에서 조립되므로
       // 클로저로 참조하되(let self — 재할당은 이 함수 스코프 안에서 곧 일어남), 훅은 실제 프루닝이 발생하는
       // "부팅 이후" 시점에만 호출되므로 그때는 이미 non-null이다(방어적으로 null 체크는 남겨둔다).
-      chatStore.setAutoCompactHook(async (channelId, dropped) => {
-        // 콘솔/데스크톱 토글(Task 6/7)이 저장한 값 — false면 요약을 시도조차 하지 않는다. 기본(undefined)은
-        // true 취급이라 아무 설정도 안 건드린 사용자는 항상 자동 compact가 켜져 있다.
-        if (chatCfg.autoCompact === false) return false;
+      // ★리뷰 지적(중요): 토글은 훅 "주입 조건"으로 쓴다(플랜 Task 5). autoCompact=false면 훅을 아예 안 걸어
+      // pruneChannel이 기존 동기 raw 삭제로 떨어진다(스펙 ⑤ "끄면 그냥 삭제만"). 훅 안에서 false를 반환하면
+      // chat-store가 그것을 "요약 실패=보존"으로 오해해 프루닝이 영구 정지되는 버그였다(false 의미 이중화).
+      // 보존/자동정리는 재시작 적용(chatCfg=부팅 스냅샷)이라 주입 시점 게이팅으로 충분하다.
+      if (chatCfg.autoCompact !== false) chatStore.setAutoCompactHook(async (channelId, dropped) => {
         const r = await orchestrator.autoCompact(channelId, dropped);
         if (!r) return false; // 요약/위키 저장 실패 — chat-store는 아무것도 지우지 않는다(안전 우선)
         // 안내 메시지는 best-effort(목업 ⑤): 실패해도 요약은 이미 성공했으므로 true를 반환해 정리는 진행.
