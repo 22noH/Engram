@@ -886,9 +886,11 @@ export class AdminHttp {
     // (파일 저장은 "재시작 시 적용"이 기본이던 다른 서버 설정과 달리) 여기서 세터를 바로 호출하면
     // 재시작 없이 이번 요청부터 새 정책이 적용된다 — 브리프 요구("가능하면 즉시").
     if (retention !== undefined) this.deps.chat.setRetention(retention);
-    // autoCompact는 retention과 달리 런타임 세터가 없다 — 프루닝 훅은 main.ts가 부팅 시점에 1회
-    // 주입하는 콜백(Task 5 `setAutoCompactHook`)이라 재바인드할 실행 중 객체가 없다. 포트/바인드처럼
-    // "재시작 후 적용"(파일에만 반영, 다음 부팅부터 새 훅 배선이 이 값을 읽는다).
+    // autoCompact도 즉시 반영(최종 리뷰 지적): 훅은 부팅 때 항상 설치돼 있고 "켜짐 여부"만 런타임 플래그
+    // (setAutoCompactEnabled)로 분리했다. 그래서 여기서 retention과 함께 즉시 뒤집으면, 예전처럼 "autoCompact를
+    // 켠 즉시엔 미반영 → retention만 조여져 요약 없이 raw 삭제"로 새던 비대칭이 사라진다(둘이 같은 요청에서
+    // 함께 적용). 브레인 미배선(비서버)이면 setAutoCompactEnabled 자체가 무해(훅이 없어 raw 프루닝).
+    if (autoCompact !== undefined) this.deps.chat.setAutoCompactEnabled(autoCompact);
     if (codingMode !== undefined) setCommandMode(this.deps.configDir, codingMode);
 
     // serverName·oidc는 auth.json 하나에 같이 산다(saveAuthSettings가 부분patch가 아니라 전체

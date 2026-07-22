@@ -162,7 +162,7 @@ export function ServerSettings({ serverName, role, active, onNavigate }: {
                        onChange={(e) => { setAutoCompact(e.target.checked); setAutoCompactTouched(true); }} />
                 {T.autoCompactCheckboxLabel}
               </label>
-              <span className="hint">{T.autoCompactHint} · {T.restartHint}</span>
+              <span className="hint">{T.autoCompactHint}</span>
             </div>
           </div>
           <div className="savebar"><button disabled={busy} onClick={submit}>{T.save}</button></div>

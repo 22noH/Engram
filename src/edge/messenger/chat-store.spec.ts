@@ -596,12 +596,23 @@ describe('ChatStore 자동 compact 훅(Task 5: clear-compact)', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-autocompact-'));
     store = new ChatStore(dir, { mode: 'count', value: 2 });
     store.listChannels();
+    store.setAutoCompactEnabled(true); // 자동정리 켜짐(런타임 플래그) — 훅이 설치되면 defer 경로를 탄다
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('훅 미주입 — 기존 동기 프루닝 그대로(회귀 0)', () => {
     for (let i = 0; i < 3; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
     expect(store.history('general').map((m) => m.text)).toEqual(['m1', 'm2']);
+  });
+
+  it('훅은 설치됐지만 enabled=false면 동기 raw 프루닝(S4) — 훅 미호출(최종 리뷰: 라이브 토글 비대칭 방지)', async () => {
+    const calls: string[] = [];
+    store.setAutoCompactHook(async (channelId) => { calls.push(channelId); return true; });
+    store.setAutoCompactEnabled(false); // 자동정리 꺼짐 → 요약 없이 그냥 삭제
+    for (let i = 0; i < 3; i++) store.appendMessage('general', { authorId: 'owner', text: `m${i}` });
+    await new Promise((r) => setImmediate(r));
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1', 'm2']); // count=2 raw 프루닝
+    expect(calls).toEqual([]); // 훅은 호출조차 되지 않음
   });
 
   it('훅 주입 + count=2 + 3개 append — 가장 오래된(dropped) 메시지로 훅이 호출되고, 성공(true) 후에만 제거된다', async () => {

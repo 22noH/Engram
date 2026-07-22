@@ -59,6 +59,16 @@ export class ChatStore {
   // 채널별 자동 compact 디바운스: 한 채널에 대해 훅이 진행 중이면 새 프루닝 라운드는 건너뛴다(과다 AI
   // 호출 방지). 다음 append가 다시 pruneChannel을 호출하므로 건너뛴 라운드는 자연히 재시도된다.
   private readonly autoCompactInFlight: Set<string> = new Set();
+  // 자동 compact "켜짐" 여부(런타임 토글 가능 — 최종 리뷰 지적). 훅 주입과 분리한 이유: 훅은 부팅 1회
+  // 설치(wiki 배선)지만, 콘솔에서 retention은 즉시 적용되는데 autoCompact가 재시작까지 미반영이면,
+  // autoCompact를 켬과 동시에 retention을 조인 저장이 "요약 없이 raw 삭제"로 새는 비대칭이 생긴다.
+  // enabled를 런타임 세터로 두면 admin이 retention(setRetention)과 함께 즉시 적용해 둘이 항상 같이 뒤집힌다.
+  // enabled=false면 pruneChannel은 훅을 호출조차 안 하고 동기 raw 삭제(S4)로 떨어진다(스펙 ⑤).
+  private autoCompactEnabled = false;
+
+  setAutoCompactEnabled(enabled: boolean): void {
+    this.autoCompactEnabled = enabled;
+  }
 
   constructor(private readonly chatDir: string, retention?: RetentionPolicy) {
     if (retention) this.setRetention(retention);
@@ -281,9 +291,11 @@ export class ChatStore {
       }
       if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
 
-      // Task 5(clear-compact): 자동 compact 훅이 있으면 동기 삭제 대신 "요약 성공 후에만 제거"로 우회한다.
+      // Task 5(clear-compact): 자동 compact가 켜져 있고(enabled) 훅이 있으면 동기 삭제 대신 "요약 성공 후에만
+      // 제거"로 우회한다. enabled=false면 이 분기를 타지 않고 아래 동기 raw 삭제(S4)로 떨어진다(최종 리뷰:
+      // 훅 설치 여부만으로 판정하면 콘솔에서 autoCompact를 켠 즉시엔 반영 안 돼 raw 삭제로 새던 것 방지).
       // ★안전 불변식: 메시지는 그 내용이 위키에 성공적으로 요약·게시된 뒤에만 jsonl에서 사라진다.
-      if (this.autoCompactHook) {
+      if (this.autoCompactHook && this.autoCompactEnabled) {
         // kept는 lines의 부분수열(count=suffix slice·days=순서보존 filter) — 두 포인터로 그 여집합(dropped)을
         // 정확히 복원한다(Set 기반 비교는 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
         const droppedLines: string[] = [];

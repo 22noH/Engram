@@ -181,11 +181,12 @@ async function bootstrap(): Promise<void> {
       // 동일한 DI-밖 setter 결(순환 회피)을 재사용한다. self는 이 if(isServer) 블록 아래에서 조립되므로
       // 클로저로 참조하되(let self — 재할당은 이 함수 스코프 안에서 곧 일어남), 훅은 실제 프루닝이 발생하는
       // "부팅 이후" 시점에만 호출되므로 그때는 이미 non-null이다(방어적으로 null 체크는 남겨둔다).
-      // ★리뷰 지적(중요): 토글은 훅 "주입 조건"으로 쓴다(플랜 Task 5). autoCompact=false면 훅을 아예 안 걸어
-      // pruneChannel이 기존 동기 raw 삭제로 떨어진다(스펙 ⑤ "끄면 그냥 삭제만"). 훅 안에서 false를 반환하면
-      // chat-store가 그것을 "요약 실패=보존"으로 오해해 프루닝이 영구 정지되는 버그였다(false 의미 이중화).
-      // 보존/자동정리는 재시작 적용(chatCfg=부팅 스냅샷)이라 주입 시점 게이팅으로 충분하다.
-      if (chatCfg.autoCompact !== false) chatStore.setAutoCompactHook(async (channelId, dropped) => {
+      // 훅은 항상 설치하고, "켜짐 여부"는 별도 런타임 플래그(setAutoCompactEnabled)로 둔다(최종 리뷰 지적).
+      // 이렇게 하면 콘솔에서 autoCompact를 켬과 동시에 retention을 조여도 둘이 즉시 함께 적용돼(admin-http가
+      // setRetention·setAutoCompactEnabled를 같이 호출) "요약 없이 raw 삭제"로 새는 비대칭이 없다. enabled=false면
+      // pruneChannel이 훅을 호출조차 안 하고 동기 raw 삭제(S4)로 떨어진다. false 의미 이중화(요약실패 vs 꺼짐)도
+      // pruneChannel이 enabled로 먼저 갈라지므로 사라진다.
+      chatStore.setAutoCompactHook(async (channelId, dropped) => {
         const r = await orchestrator.autoCompact(channelId, dropped);
         if (!r) return false; // 요약/위키 저장 실패 — chat-store는 아무것도 지우지 않는다(안전 우선)
         // 안내 메시지는 best-effort(목업 ⑤): 실패해도 요약은 이미 성공했으므로 true를 반환해 정리는 진행.
@@ -201,6 +202,7 @@ async function bootstrap(): Promise<void> {
         }
         return true;
       });
+      chatStore.setAutoCompactEnabled(chatCfg.autoCompact !== false); // 부팅 초기 상태(기본 true)
     }
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,

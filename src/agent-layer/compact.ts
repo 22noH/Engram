@@ -78,8 +78,13 @@ export class CompactService {
     const result = await this.summarizeAndPublish(channelId, msgs, opts);
     if (!result) return null;
 
-    this.chat.clearChannel(channelId);
-    // 요약 메시지는 clear 이후 append하는 새 앵커 — 실행취소/백업 대상이 아니다.
+    // ★요약된 메시지 id만 제거한다(최종 리뷰 지적: read-then-clear 레이스). summarizeAndPublish는 수초짜리
+    // LLM 대기라, 그 사이 도착한 메시지가 clearChannel(파일 전체 rename)에 휩쓸리면 요약 안 된 채 .cleared로
+    // 사라진다. auto-compact와 동일하게 "방금 요약한 id 집합"만 제거하면 동시 도착 메시지는 그대로 남는다.
+    // (부수효과: /compact는 .cleared 백업을 만들지 않게 됨 — /compact는 되돌리기 대상이 아니고 요약이 위키에
+    //  있으므로 무방하며, 이는 리뷰가 지적한 orphan .cleared 문제도 함께 없앤다.)
+    this.chat.removeMessagesByIds(channelId, new Set(msgs.map((m) => m.id)));
+    // 요약 메시지는 제거 이후 append하는 새 앵커 — 실행취소/백업 대상이 아니다.
     // never-throw(리뷰 지적): appendMessage는 try/catch가 없어 디스크풀/윈도우 잠금 시 던질 수 있다.
     // 여기서 던지면 compact가 CompactResult|null 계약을 깨고 caller로 튄다 — 감싸서 로그 후 계속.
     // (위키 저장은 이미 성공, 원본은 .cleared에 있으므로 앵커 실패해도 지식 손실은 없음.)

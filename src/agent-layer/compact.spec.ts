@@ -184,6 +184,27 @@ describe('CompactService', () => {
     expect(chat.history('general', { limit: Number.MAX_SAFE_INTEGER })).toHaveLength(1);
   });
 
+  it('요약 중(LLM 대기) 도착한 메시지는 지워지지 않는다 — 요약된 id만 제거(read-then-clear 레이스·최종 리뷰)', async () => {
+    seedThreeMessages(); // m1..m3가 요약 대상
+    // 브레인이 요약을 만드는 "동안" 새 메시지가 도착하는 상황: complete() 안에서 채널에 append.
+    const brain = {
+      complete: jest.fn(async () => {
+        chat.appendMessage('general', { authorId: 'u9', authorName: 'Late', text: 'CONCURRENT_during_summary' });
+        return { text: FIXED_SUMMARY, costUsd: 0, isError: false };
+      }),
+    } as unknown as BrainProvider;
+
+    const result = await service.compact('general', { brain });
+
+    expect(result).not.toBeNull();
+    const texts = chat.history('general').map((m) => m.text);
+    expect(texts.some((t) => t.includes('CONCURRENT_during_summary'))).toBe(true); // 동시 도착 메시지 생존
+    expect(texts).not.toContain(SECRET_1); // 요약된 원문은 제거됨
+    expect(texts).not.toContain(SECRET_2);
+    expect(texts).not.toContain(SECRET_3);
+    expect(texts.some((t) => t.includes(EXPECTED_SLUG))).toBe(true); // 앵커 존재
+  });
+
   it('앵커 append가 던져도(디스크풀/잠금) compact는 throw하지 않고 결과를 반환한다(never-throw·리뷰 지적)', async () => {
     seedThreeMessages();
     const brain = makeBrain();
