@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { Action, QuestionItem } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, QuestionItem } from '../../../shared/protocol';
+import type { AttachmentStore } from './attachment-store';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
 // 채널 목록=state/chat/channels.json. 손상 줄 skip(ConversationStore 관례).
@@ -16,6 +17,7 @@ export interface ChatMessage {
   actions?: Action[];
   question?: { questions: QuestionItem[] }; // Task 1(ask-user): 질문 카드(두뇌 게시)
   answersId?: string;                        // Task 1(ask-user): 이 메시지가 답하는 카드 메시지 id
+  attachments?: AttachmentMeta[];            // Task 1(chat-attachments): 첨부(메시지와 운명 공유)
   ts: string; // ISO
 }
 
@@ -33,7 +35,8 @@ export interface ChatChannel {
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
-function safeId(id: string): boolean {
+// Task 1(chat-attachments): AttachmentStore도 동일한 channelId 검증이 필요해 export(중복 구현 회피).
+export function safeId(id: string): boolean {
   return typeof id === 'string' && id.length > 0 && !/[\\/]|\.\./.test(id);
 }
 
@@ -81,8 +84,18 @@ export class ChatStore {
   // 명령은 어떤 파일도 생성/수정하면 안 된다). 값만 메모리에서 만들어 돌려준다.
   private readonly readOnly: boolean;
 
-  constructor(private readonly chatDir: string, retention?: RetentionPolicy, opts?: { readOnly?: boolean }) {
+  // Task 1(chat-attachments): 첨부 실파일 저장소 — 미주입이면 아래 세 삭제 훅 지점 모두 no-op(회귀 0).
+  // 주입되면 프루닝/자동compact 정밀제거/clear 백업 확정 시점에 그 메시지들의 첨부도 함께 지워
+  // "메시지와 첨부는 운명을 공유한다"를 만족한다.
+  private readonly attachmentStore?: AttachmentStore;
+
+  constructor(
+    private readonly chatDir: string,
+    retention?: RetentionPolicy,
+    opts?: { readOnly?: boolean; attachmentStore?: AttachmentStore },
+  ) {
     this.readOnly = !!opts?.readOnly;
+    this.attachmentStore = opts?.attachmentStore;
     if (retention) this.setRetention(retention);
     if (!this.readOnly) this.cleanupStaleClearBackups();
   }
@@ -255,6 +268,7 @@ export class ChatStore {
       actions?: Action[];
       question?: ChatMessage['question'];
       answersId?: string;
+      attachments?: AttachmentMeta[];
     },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
@@ -267,6 +281,7 @@ export class ChatStore {
       ...(input.actions ? { actions: input.actions } : {}),
       ...(input.question ? { question: input.question } : {}),
       ...(input.answersId ? { answersId: input.answersId } : {}),
+      ...(input.attachments && input.attachments.length ? { attachments: input.attachments } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });
@@ -313,28 +328,31 @@ export class ChatStore {
       }
       if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
 
+      // dropped 객체 계산(훅 브랜치·no-hook 브랜치 공용 — Task 1 chat-attachments에서 no-hook 쪽도
+      // attachmentStore.deleteFor에 쓰려고 끌어올림). kept는 lines의 부분수열(count=suffix slice·
+      // days=순서보존 filter) — 두 포인터로 그 여집합(dropped)을 정확히 복원한다(Set 기반 비교는
+      // 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
+      const droppedLines: string[] = [];
+      let ki = 0;
+      for (const l of lines) {
+        if (ki < kept.length && kept[ki] === l) { ki++; continue; }
+        droppedLines.push(l);
+      }
+      const dropped: ChatMessage[] = [];
+      for (const l of droppedLines) {
+        try {
+          const m = JSON.parse(l) as ChatMessage;
+          if (m && typeof m.id === 'string' && typeof m.text === 'string') dropped.push(m);
+        } catch { /* 손상 줄 skip — 어차피 요약/삭제할 내용을 특정할 수 없으므로 다음 기회로 보류(안전 우선) */ }
+      }
+
       // Task 5(clear-compact): 자동 compact가 켜져 있고(enabled) 훅이 있으면 동기 삭제 대신 "요약 성공 후에만
       // 제거"로 우회한다. enabled=false면 이 분기를 타지 않고 아래 동기 raw 삭제(S4)로 떨어진다(최종 리뷰:
       // 훅 설치 여부만으로 판정하면 콘솔에서 autoCompact를 켠 즉시엔 반영 안 돼 raw 삭제로 새던 것 방지).
       // ★안전 불변식: 메시지는 그 내용이 위키에 성공적으로 요약·게시된 뒤에만 jsonl에서 사라진다.
       if (this.autoCompactHook && this.autoCompactEnabled) {
-        // kept는 lines의 부분수열(count=suffix slice·days=순서보존 filter) — 두 포인터로 그 여집합(dropped)을
-        // 정확히 복원한다(Set 기반 비교는 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
-        const droppedLines: string[] = [];
-        let ki = 0;
-        for (const l of lines) {
-          if (ki < kept.length && kept[ki] === l) { ki++; continue; }
-          droppedLines.push(l);
-        }
-        const dropped: ChatMessage[] = [];
-        for (const l of droppedLines) {
-          try {
-            const m = JSON.parse(l) as ChatMessage;
-            if (m && typeof m.id === 'string' && typeof m.text === 'string') dropped.push(m);
-          } catch { /* 손상 줄 skip — 어차피 요약할 내용이 없으므로 다음 기회로 보류(안전 우선) */ }
-        }
         this.runAutoCompact(id, dropped); // fire-and-forget·never-throw(내부에서 전부 삼킴)
-        return; // 동기 프루닝 생략 — 훅이 성공하면 removeMessagesByIds가 나중에 정밀 제거
+        return; // 동기 프루닝 생략 — 훅이 성공하면 removeMessagesByIds가 나중에 정밀 제거(+첨부 삭제)
       }
 
       // 훅 미주입(기존 동작, 회귀 0) — 그대로 동기 프루닝.
@@ -343,6 +361,9 @@ export class ChatStore {
       try {
         fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
         fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+        // Task 1(chat-attachments): raw 프루닝 경로(no-hook)도 dropped 메시지의 첨부를 함께 지운다.
+        // 미주입=no-op(회귀 0). deleteFor 자체가 never-throw.
+        this.attachmentStore?.deleteFor(dropped);
       } finally {
         // rename 실패(윈도우 AV/잠금 등) 시 tmp가 남아 매 프루닝마다 누적되는 것 방지(리뷰 지적).
         // 성공 시엔 rename으로 이미 사라졌으므로 unlink는 no-op(존재하면만 제거).
@@ -378,38 +399,46 @@ export class ChatStore {
   // 상대적 판정이 아니라 id 집합 매칭이라 — 훅이 요약을 만든 뒤 새로 도착한 메시지가 섞여 들어와도
   // (같은 채널에 append가 계속될 수 있음) 그 새 메시지는 ids에 없으므로 절대 지워지지 않는다.
   // never-throw·safeId 가드·pruneChannel과 동일한 원자적 tmp rename 관례.
-  removeMessagesByIds(channelId: string, ids: Set<string>): void {
+  // Task 1(chat-attachments): 제거된 ChatMessage[]를 반환(additive — 기존 호출부는 void처럼 무시해도 무방)
+  // 하고, 내부에서 attachmentStore.deleteFor(removed)를 호출해 첨부 운명 공유를 여기 한 곳에 모은다
+  // (compact.ts의 직접 호출·runAutoCompact 양쪽 호출부 모두 수정 없이 혜택을 받는다).
+  removeMessagesByIds(channelId: string, ids: Set<string>): ChatMessage[] {
     try {
-      if (!safeId(channelId)) return;
-      if (ids.size === 0) return; // 지울 것 없음
+      if (!safeId(channelId)) return [];
+      if (ids.size === 0) return []; // 지울 것 없음
       const p = this.messagesPath(channelId);
       let raw: string;
       try {
         raw = fs.readFileSync(p, 'utf8');
       } catch {
-        return; // 파일 없음 = 지울 것 없음
+        return []; // 파일 없음 = 지울 것 없음
       }
       const lines = raw.split('\n').filter(Boolean);
+      const removed: ChatMessage[] = [];
       const kept = lines.filter((l) => {
         try {
           const m = JSON.parse(l) as ChatMessage;
           if (!m || typeof m.id !== 'string') return true; // 파싱 불가/손상 = 안전하게 보존
-          return !ids.has(m.id);
+          if (ids.has(m.id)) { removed.push(m); return false; }
+          return true;
         } catch {
           return true; // 손상 줄 = 안전하게 보존(드롭 금지)
         }
       });
-      if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
+      if (kept.length === lines.length) return []; // 변경 없음 — 불필요한 쓰기 생략
       fs.mkdirSync(this.chatDir, { recursive: true });
       const tmp = `${p}.tmp-${randomUUID()}`;
       try {
         fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '');
         fs.renameSync(tmp, p); // 원자적 교체(임시파일 rename)
+        this.attachmentStore?.deleteFor(removed); // 첨부 운명 공유(미주입=no-op, 회귀 0)
       } finally {
         try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 정리 실패는 무시 */ }
       }
+      return removed;
     } catch (e) {
       console.warn(`[chat-store] 채널 '${channelId}' removeMessagesByIds 실패(무시하고 계속): ${String(e)}`);
+      return [];
     }
   }
 
@@ -448,11 +477,28 @@ export class ChatStore {
   }
 
   // 실행취소 창 만료(또는 다음 clear 직전 정리)에 호출 — 백업만 지움, 대화 상태는 무관.
+  // Task 1(chat-attachments): unlink 전에 백업 jsonl을 파싱해 그 메시지들의 첨부도 함께 지운다.
+  // clearChannel/undoClear는 건드리지 않는다(백업 생존 규칙 — 실행취소 유예 동안 첨부도 함께 살아있어야 함).
   dropClearBackup(id: string): void {
     try {
       if (!safeId(id)) return;
       const backup = this.clearedPath(id);
-      if (fs.existsSync(backup)) fs.unlinkSync(backup);
+      if (!fs.existsSync(backup)) return;
+      if (this.attachmentStore) {
+        try {
+          const raw = fs.readFileSync(backup, 'utf8');
+          const lines = raw.split('\n').filter(Boolean);
+          const msgs: ChatMessage[] = [];
+          for (const l of lines) {
+            try {
+              const m = JSON.parse(l) as ChatMessage;
+              if (m && typeof m.id === 'string') msgs.push(m);
+            } catch { /* 손상 줄 skip — 지울 첨부를 특정할 수 없음 */ }
+          }
+          this.attachmentStore.deleteFor(msgs);
+        } catch { /* 백업 파싱 실패해도 unlink는 계속 진행(백업 자체는 지워야 함) */ }
+      }
+      fs.unlinkSync(backup);
     } catch (e) {
       console.warn(`[chat-store] 채널 '${id}' 백업 삭제 실패(무시): ${String(e)}`);
     }

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ChatStore, ChatMessage } from './chat-store';
+import { AttachmentStore } from './attachment-store';
 
 // 매크로태스크 경계까지 마이크로태스크를 흘려보낸다(fire-and-forget runAutoCompact 완료 대기용).
 function flush(): Promise<void> {
@@ -760,5 +761,131 @@ describe('ChatStore 자동 compact 훅(Task 5: clear-compact)', () => {
     expect(order).toEqual(['summarize-start', 'summarize-done']);
     expect(wikiSaved).toEqual(['old-1']); // 위키에 저장된 내용 = dropped 메시지
     expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['old-2', 'new-1']); // 그 후 제거
+  });
+});
+
+// Task 1(chat-attachments): AttachmentStore + 프로토콜 + 운명 공유.
+describe('ChatStore + AttachmentStore 운명 공유(Task 1: chat-attachments)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-chatattach-')); });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('appendMessage — attachments가 저장되고 history 왕복에도 보존된다(allow-list 함정 가드)', () => {
+    const store = new ChatStore(dir);
+    store.listChannels();
+    const atts = [{ id: '11111111-1111-1111-1111-111111111111', name: 'photo.png', mime: 'image/png', size: 42 }];
+    const m = store.appendMessage('general', { authorId: 'owner', text: '사진', attachments: atts })!;
+    expect(m.attachments).toEqual(atts);
+    expect(store.history('general')[0].attachments).toEqual(atts);
+  });
+
+  it('appendMessage — attachments 미전달이면 필드 자체가 없다(회귀 0)', () => {
+    const store = new ChatStore(dir);
+    store.listChannels();
+    const m = store.appendMessage('general', { authorId: 'owner', text: '평문' })!;
+    expect('attachments' in m).toBe(false);
+  });
+
+  it('AttachmentStore 미주입 — 프루닝/removeMessagesByIds/dropClearBackup 전부 기존 동작 그대로(회귀 0)', () => {
+    const store = new ChatStore(dir, { mode: 'count', value: 1 });
+    store.listChannels();
+    const atts = [{ id: '11111111-1111-1111-1111-111111111111', name: 'a.txt', mime: 'text/plain', size: 1 }];
+    store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: atts });
+    expect(() => store.appendMessage('general', { authorId: 'owner', text: 'm1' })).not.toThrow();
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1']);
+  });
+
+  it('removeMessagesByIds — 제거된 ChatMessage[]를 반환한다(additive 반환값)', () => {
+    const store = new ChatStore(dir);
+    store.listChannels();
+    const ids = [0, 1, 2].map((i) => store.appendMessage('general', { authorId: 'owner', text: `m${i}` })!.id);
+    const removed = store.removeMessagesByIds('general', new Set([ids[0], ids[2]]));
+    expect(removed.map((m) => m.text).sort()).toEqual(['m0', 'm2']);
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1']);
+  });
+
+  it('removeMessagesByIds — 아무것도 안 지워지면 빈 배열 반환', () => {
+    const store = new ChatStore(dir);
+    store.listChannels();
+    store.appendMessage('general', { authorId: 'owner', text: 'a' });
+    expect(store.removeMessagesByIds('general', new Set(['no-such-id']))).toEqual([]);
+    expect(store.removeMessagesByIds('general', new Set())).toEqual([]);
+  });
+
+  it('pruneChannel(훅 미주입, no-hook 동기 경로) — 밀려난 메시지의 첨부 실파일이 실제로 사라진다', () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const store = new ChatStore(dir, { mode: 'count', value: 1 }, { attachmentStore });
+    store.listChannels();
+
+    const a = attachmentStore.save('general', 'old.txt', 'text/plain', Buffer.from('old'))!;
+    const b = attachmentStore.save('general', 'new.txt', 'text/plain', Buffer.from('new'))!;
+    store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: [a] });
+    expect(fs.existsSync(attachmentStore.path('general', a.id)!)).toBe(true);
+
+    // count=1이므로 이 append가 m0을 밀어낸다(pruneChannel의 no-hook 동기 삭제 경로).
+    store.appendMessage('general', { authorId: 'owner', text: 'm1', attachments: [b] });
+
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1']);
+    expect(attachmentStore.path('general', a.id)).toBeNull(); // 밀려난 메시지의 첨부 = 삭제됨
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(false); // 실파일 소멸 실증
+    expect(attachmentStore.path('general', b.id)).toBeTruthy(); // 남은 메시지의 첨부는 보존
+  });
+
+  it('removeMessagesByIds(직접 호출) — 제거된 메시지의 첨부 실파일도 함께 사라진다', () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const store = new ChatStore(dir, undefined, { attachmentStore });
+    store.listChannels();
+    const a = attachmentStore.save('general', 'a.txt', 'text/plain', Buffer.from('a'))!;
+    const m0 = store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: [a] })!;
+    store.appendMessage('general', { authorId: 'owner', text: 'm1' });
+
+    store.removeMessagesByIds('general', new Set([m0.id]));
+
+    expect(store.history('general').map((m) => m.text)).toEqual(['m1']);
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(false);
+  });
+
+  it('dropClearBackup — 백업 확정 시점에 백업 속 메시지의 첨부 실파일이 사라진다', () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const store = new ChatStore(dir, undefined, { attachmentStore });
+    store.listChannels();
+    const a = attachmentStore.save('general', 'a.txt', 'text/plain', Buffer.from('a'))!;
+    store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: [a] });
+
+    store.clearChannel('general');
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(true); // 유예 창 = 첨부 생존
+
+    store.dropClearBackup('general');
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(false); // 확정 = 첨부 소멸
+  });
+
+  it('undoClear — 실행취소 유예 동안엔 첨부가 그대로 보존되고, 되돌린 뒤 메시지에도 그대로 남는다', () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const store = new ChatStore(dir, undefined, { attachmentStore });
+    store.listChannels();
+    const a = attachmentStore.save('general', 'a.txt', 'text/plain', Buffer.from('a'))!;
+    store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: [a] });
+
+    store.clearChannel('general');
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(true); // clearChannel 자체는 무변경
+
+    expect(store.undoClear('general')).toBe(true);
+    expect(store.history('general')[0].attachments).toEqual([a]);
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(true); // 되돌린 뒤에도 그대로
+  });
+
+  it('자동 compact 훅 성공 경로 — dropped 메시지의 첨부도 removeMessagesByIds를 거쳐 삭제된다', async () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const store = new ChatStore(dir, { mode: 'count', value: 1 }, { attachmentStore });
+    store.setAutoCompactEnabled(true);
+    store.setAutoCompactHook(async () => true);
+    store.listChannels();
+    const a = attachmentStore.save('general', 'a.txt', 'text/plain', Buffer.from('a'))!;
+    store.appendMessage('general', { authorId: 'owner', text: 'm0', attachments: [a] });
+    store.appendMessage('general', { authorId: 'owner', text: 'm1' }); // m0을 dropped로 만듦
+
+    await new Promise((r) => setImmediate(r));
+    expect(store.history('general', { limit: 10 }).map((m) => m.text)).toEqual(['m1']);
+    expect(fs.existsSync(path.join(dir, 'attachments', 'general', a.id))).toBe(false);
   });
 });

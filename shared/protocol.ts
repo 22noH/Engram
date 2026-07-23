@@ -30,7 +30,12 @@ export interface Message {
   actions?: Action[];
   question?: { questions: QuestionItem[] }; // 질문 카드(두뇌 게시)
   answersId?: string;                        // 이 메시지가 답하는 카드 메시지 id
+  attachments?: AttachmentMeta[];            // 채팅 첨부(이미지/파일) — 메시지와 운명 공유
 }
+
+// 채팅 첨부 메타(Task 1). 실파일은 dataDir/attachments/<channelId>/<id>. 사용자 파일명은
+// 메타로만 보존(경로엔 서버 발급 uuid만 — traversal 원천 차단).
+export interface AttachmentMeta { id: string; name: string; mime: string; size: number }
 
 export interface QuestionOption { label: string; desc?: string; recommended?: boolean }
 export interface QuestionItem { q: string; header?: string; multiSelect?: boolean; options: QuestionOption[] }
@@ -63,7 +68,7 @@ export type ClientFrame =
   | { t: 'auth'; token: string }
   | { t: 'channels' }
   | { t: 'history'; channelId: string; before?: string }
-  | { t: 'send'; channelId: string; text: string; threadId?: string; answersId?: string }
+  | { t: 'send'; channelId: string; text: string; threadId?: string; answersId?: string; attachments?: string[] }
   | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team'; visibility?: 'public' | 'private' }
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }
