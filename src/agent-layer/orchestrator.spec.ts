@@ -25,7 +25,7 @@ describe('Orchestrator (스텁)', () => {
     const cb = jest.fn();
     const out = await orch.route({ text: 'q', userId: 'default' }, cb);
     expect(out).toBe('답');
-    expect(reader.handle).toHaveBeenCalledWith({ text: 'q', userId: 'default' }, cb, expect.any(Function));
+    expect(reader.handle).toHaveBeenCalledWith({ text: 'q', userId: 'default' }, cb, expect.any(Function), undefined);
   });
 
   it('route 후 대화를 ConversationStore에 적재한다', async () => {

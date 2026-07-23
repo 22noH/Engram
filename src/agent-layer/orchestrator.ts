@@ -135,6 +135,13 @@ export class Orchestrator {
     await post(text, actions);
   }
 
+  // ask_user 도구 경로(Task 4): 도구 호출 중간에 곧바로 카드를 게시하는 클로저 — postReply의 펜스텍스트
+  // 경로와 게시 형태를 맞춘다(폴백 텍스트+question). route()가 인터랙티브·예약을 안 가리므로 이 클로저도
+  // 항상 넘긴다(브리프: 새 플래그 배관 없이 기존 프롬프트 지침에 의존).
+  private askUserFor(post: PostFn): (q: AskUserPayload) => Promise<void> {
+    return async (q) => { await post(questionFallbackText(q), undefined, q); };
+  }
+
   // 이 메시지가 쓸 두뇌를 요청 한정으로 해소(스펙 §3.2) — 결과는 지역 변수로만 쓴다(싱글턴 필드 오염 금지).
   // channelBrain 미주입 시 기존 codeBrain 그대로(회귀 0). msg.brain 미지정이면 resolve가 기본(=codeBrain)을 돌려준다.
   private resolveMsgBrain(msg: CoreMessage): BrainProvider | undefined {
@@ -216,9 +223,12 @@ export class Orchestrator {
     }
   }
 
-  async route(msg: CoreMessage, onChunk?: (t: string) => void): Promise<string> {
+  // askUser(Task 4): 있으면 reader.handle로 그대로 흘려 CompleteOpts.askUser에 실린다(delegate와 동일 결).
+  // route()는 인터랙티브 호출(handleMention)과 예약 재주입(resumeInterrupted 등)이 같은 경로를 타 여기서
+  // 인터랙티브 여부를 가르지 않는다 — TOOL_USAGE_GUIDANCE 프롬프트 지침이 예약 턴 사용을 이미 막는다.
+  async route(msg: CoreMessage, onChunk?: (t: string) => void, askUser?: (q: AskUserPayload) => Promise<void>): Promise<string> {
     let sources: string[] = [];
-    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; });
+    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; }, askUser);
     try {
       await this.conversations.append(msg.userId, {
         ts: new Date().toISOString(), question: msg.text, answer, sources,
@@ -345,7 +355,10 @@ export class Orchestrator {
       return;
     }
     if (trimmed.startsWith('ask ')) {
-      await this.postReply(await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }), post);
+      await this.postReply(
+        await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }, undefined, this.askUserFor(post)),
+        post,
+      );
       return;
     }
 
@@ -390,7 +403,7 @@ export class Orchestrator {
       this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
       return;
     }
-    await this.postReply(await this.route(msg), post);
+    await this.postReply(await this.route(msg, undefined, this.askUserFor(post)), post);
   }
 
   // collaborate를 백그라운드로 detach. 끝나면 결과 게시 + 대화로그 적재 + 트래커 종료.

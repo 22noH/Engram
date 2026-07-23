@@ -1,3 +1,5 @@
+import type { QuestionItem } from '../../shared/protocol';
+
 // 교체 가능한 두뇌 포트(설계 §7.5). Phase 1 어댑터 = ClaudeCliBrain 1개.
 export interface BrainResult {
   text: string; // 최종 답 본문
@@ -18,6 +20,11 @@ export interface CompleteOpts {
   extraArgs?: string[];  // 도구 플래그 등 추가 인수
   timeoutMs?: number;    // 호출별 타임아웃(코딩은 길다)
   delegate?: DelegateHandle;   // Phase 8d: 있으면 엔그램 하네스가 ask_brain 도구를 노출
+  // Task 4: 있으면 엔그램 하네스가 ask_user 도구를 노출(delegate와 같은 관례). 페이로드 타입은
+  // agent-layer의 AskUserPayload와 구조적으로 동일한 shape(shared/protocol.ts의 Message['question']과도
+  // 동일)를 여기서 직접 선언 — src/brain이 src/agent-layer를 import하면 계층이 역전되므로(agent-layer가
+  // brain에 의존하는 현재 방향과 반대) shared/protocol.ts(계층 중립)의 QuestionItem만 가져와 구조적 타입으로 대체.
+  askUser?: (q: { questions: QuestionItem[] }) => Promise<void>;
   codeGuard?: (absPath: string) => void; // Phase 8b-1: 코딩 쓰기 허용 판정(주입). 있으면 API 두뇌가 코딩 루프.
   cmdGuard?: (command: string) => void; // Phase 8b-2: 명령 판정(주입). 있으면 coding 루프가 Bash 노출. auto면 무조건 통과.
 }

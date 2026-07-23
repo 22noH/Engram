@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import { SearchResult } from '../knowledge-core/rag/rag.types';
-import { BRAIN, BrainProvider } from '../brain/brain.port';
+import { BRAIN, BrainProvider, CompleteOpts } from '../brain/brain.port';
 import { PinoLogger } from '../pal/logger';
 import { CoreMessage } from '../edge/core-message';
 import { InsightContext } from '../knowledge-core/insight/insight-context';
@@ -11,6 +11,7 @@ import { t } from './i18n';
 import { BrainDelegator } from './brain-delegator';
 import { ChannelBrainResolver } from './channel-brain-resolver';
 import { loadPrompt } from './prompt-store';
+import { AskUserPayload } from './ask-user-block';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
 
@@ -55,6 +56,10 @@ export class ReaderAgent {
     msg: CoreMessage,
     onChunk?: (t: string) => void,
     onSources?: (slugs: string[]) => void,
+    // Task 4: 있으면 위임(delegate)과 같은 자리에서 CompleteOpts.askUser로 실어보낸다(자체 하네스가
+    // ask_user 도구를 노출). 호출부(orchestrator.route)가 인터랙티브/예약을 가르지 않으므로 여기도
+    // 가르지 않는다 — TOOL_USAGE_GUIDANCE(프롬프트 지침)가 예약 턴에서 쓰지 말라고 이미 안내한다.
+    askUser?: (q: AskUserPayload) => Promise<void>,
   ): Promise<string> {
     const emit = (s: string): void => onChunk?.(s);
     // 요청 한정 지역 변수(스펙 §3.2) — this.brain(싱글턴)에 대입하지 않는다.
@@ -80,10 +85,13 @@ export class ReaderAgent {
       // 재진입으로 데드락하지 않는다. 기본 지휘자(msg.brain 미설정)는 undefined → 전 목록 그대로(회귀 0).
       const session = this.delegator && brain.canDelegate ? this.delegator.handle(msg.brain) : undefined;
       const handle = session && session.brains.length > 0 ? session : undefined;
+      const completeOpts: CompleteOpts | undefined = handle || askUser
+        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}) }
+        : undefined;
       const result = await brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle),
         onChunk,
-        handle ? { delegate: handle } : undefined,
+        completeOpts,
       );
       // 위임 비용 노출(응답 문자열엔 비용 필드가 없어 로그로) — 스펙 §2.4 "비용 합산".
       if (handle && handle.spentUsd() > 0) {

@@ -6,6 +6,7 @@ import { sseJson } from './sse';
 import { runToolLoop, ToolCall, TurnResult, MAX_TOOL_ITERATIONS } from './tool-loop';
 import { WEB_TOOL_DEFS, WebToolDef, executeWebTool } from './web-tools';
 import { askBrainDef, runAskBrain } from './brain-tools';
+import { askUserDef, runAskUser } from './ask-user-tool';
 import { CODING_TOOL_DEFS, executeCodingTool, MAX_CODING_ITERATIONS } from './coding-tools';
 import { BASH_TOOL_DEF, runShellTool } from './shell-tool';
 import { McpSession, MCP_TOOL_PREFIX } from './mcp-client';
@@ -46,7 +47,7 @@ export class AnthropicApiBrain implements BrainProvider {
       const history: AnthropicMsg[] = [{ role: 'user', content: prompt }];
       const toolDefs: WebToolDef[] = coding
         ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
-        : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : [])];
+        : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : []), ...(opts?.askUser ? [askUserDef()] : [])];
       // 8c-1: mcp.json 서버의 도구를 채팅·코딩 공통 toolDefs 끝에 병합(라우팅은 mcp__ 프리픽스 우선 판정).
       const mcpSessions: McpSession[] = [];
       const executor = (name: string, input: unknown): Promise<string> => {
@@ -58,7 +59,9 @@ export class AnthropicApiBrain implements BrainProvider {
           ? name === 'Bash'
             ? runShellTool(input, opts!.cwd!, opts!.cmdGuard!, ctrl.signal)
             : executeCodingTool(name, input, opts!.cwd!, opts!.codeGuard!, ctrl.signal)
-          : name === 'ask_brain' ? runAskBrain(input, opts?.delegate) : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal);
+          : name === 'ask_brain' ? runAskBrain(input, opts?.delegate)
+          : name === 'ask_user' ? runAskUser(input, opts?.askUser)
+          : executeWebTool(name, input, this.profile, this.fetchFn, ctrl.signal);
       };
       try {
         if (this.configDir) {

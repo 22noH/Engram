@@ -177,6 +177,38 @@ describe('AnthropicApiBrain', () => {
     expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
   });
 
+  it('opts.askUser 있으면 ask_user 도구 노출 + 호출 시 askUser 라우팅(Task 4)', async () => {
+    const ASK_USER_TURN = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'au1', name: 'ask_user' } },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"questions":[{"q":"어느 브랜치?","options":[{"label":"main"},{"label":"staging"}]}]}' },
+      },
+      { type: 'message_delta', usage: { output_tokens: 2 } },
+    ];
+    let call = 0;
+    const fetchFn = jest.fn(async () => { call++; return call === 1 ? sse(ASK_USER_TURN) : sse(TEXT_TURN); }) as unknown as typeof fetch;
+    const asked: unknown[] = [];
+    const askUser = async (q: unknown) => { asked.push(q); };
+    const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('do it', undefined, { askUser });
+    expect(r.isError).toBe(false);
+    expect(asked).toHaveLength(1);
+    const firstBody = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    const askDef = firstBody.tools.find((t: { name: string }) => t.name === 'ask_user');
+    expect(askDef).toBeDefined();
+    expect(askDef.input_schema.required).toEqual(['questions']);
+    expect(JSON.stringify((fetchFn as jest.Mock).mock.calls[1][1].body)).toContain('질문 카드를 게시했다');
+  });
+
+  it('opts.askUser 없으면 ask_user 미노출(web 도구만)', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('hi');
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['web_search', 'web_fetch']);
+  });
+
   it('opts.cwd+codeGuard면 코딩 루프: Write 도구가 파일을 만든다', async () => {
     const WRITE_TURN = [
       { type: 'message_start', message: { usage: { input_tokens: 10 } } },

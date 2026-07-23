@@ -232,6 +232,21 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
     expect(seen[0].prompt).not.toContain('ask_brain');
   });
 
+  it('askUser 인자를 주면 opts.askUser로 그대로 실린다(Task 4, delegate와 같은 결)', async () => {
+    const { brain, seen } = recordingBrain(true);
+    const reader = new ReaderAgent(rag8d, brain, logger8d);
+    const askUser = async () => {};
+    await reader.handle(msg8d, undefined, undefined, askUser);
+    expect(seen[0].opts?.askUser).toBe(askUser);
+  });
+
+  it('askUser 인자 없으면 opts.askUser 미전달(회귀)', async () => {
+    const { brain, seen } = recordingBrain(true);
+    const reader = new ReaderAgent(rag8d, brain, logger8d);
+    await reader.handle(msg8d);
+    expect(seen[0].opts?.askUser).toBeUndefined();
+  });
+
   // MCP-parity Task 4 리뷰 지적: 도구 사용 지침은 conductor 게이트와 무관하게 항상 프롬프트에 있어야 한다.
   const TOOL_USAGE_GUIDANCE_TEXT =
     'In a scheduled or automatic-execution context, only use tools that write externally';
