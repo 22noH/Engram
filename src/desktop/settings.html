@@ -4,32 +4,40 @@
   <meta charset="utf-8" />
   <title>Engram</title>
   <style>
-    /* 라이트=화이트+하늘색, 다크=블랙+하늘색 — 채팅 창과 동일 팔레트(시스템 설정 자동 추종) */
+    /* Task 3(Quiet Library) — 지식 서재 팔레트를 설정창에도 동일 적용: 라이트=종이톤, 다크=따뜻한 흑연.
+       값은 docs/superpowers/specs/2026-07-23-quiet-library-design.md 토큰 표 verbatim(렌더러 theme.css와 동일 이름).
+       전환은 기존 prefers-color-scheme 그대로. 번들러 없는 창이라 폰트는 시스템 산세리프만 유지(세리프 미도입). */
     :root {
-      --bg: #f2f7fb;
-      --panel: #ffffff;
-      --panel-2: #eaf1f8;
-      --line: #dce6f0;
-      --text: #1c2733;
-      --muted: #5c6b7a;
-      --accent: #3aa5de;       /* the single accent — sky */
+      --bg: #f5f6f4;
+      --panel: #fdfdfc;
+      --panel-2: #ffffff;
+      --line: #e4e6e2;
+      --text: #24292e;
+      --dim: #6b7268;
+      --accent: #2e6e63;       /* the single accent — deep teal ink */
       --accent-text: #ffffff;
-      --log-bg: #eef5fa;
+      --code-bg: #eef0ec;
+      --pre-bg: #f0f2ee;
+      --hover: rgba(36,41,46,.05);
+      --danger: #8a4a3a;
       --alive: #56d364;
       --dead: #f26d6d;
       --radius: 12px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0b0e13;
-        --panel: #12161d;
-        --panel-2: #1a222c;
-        --line: #222a35;
-        --text: #e6edf3;
-        --muted: #8b95a3;
-        --accent: #7ec8e3;
-        --accent-text: #0e1116;
-        --log-bg: #0a0d11;
+        --bg: #191b19;
+        --panel: #1f221f;
+        --panel-2: #22251f;
+        --line: #2d312c;
+        --text: #e6e5df;
+        --dim: #9aa096;
+        --accent: #7fb5a6;
+        --accent-text: #141614;
+        --code-bg: rgba(255,255,255,.06);
+        --pre-bg: #161816;
+        --hover: rgba(255,255,255,.05);
+        --danger: #c78a7a;
       }
     }
     * { box-sizing: border-box; }
@@ -47,47 +55,49 @@
     #side { width: 170px; flex: none; background: var(--panel-2); border-right: 1px solid var(--line); padding: 14px 8px 10px; display: flex; flex-direction: column; }
     .side-head { padding: 0 10px 10px; }
     .wordmark { font: 600 15px "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: .3px; display: block; }
-    .side-sub { font-size: 11px; color: var(--muted); }
+    .side-sub { font-size: 11px; color: var(--dim); }
     #nav-search { width: 100%; font-size: 12px; padding: 5px 9px; border-radius: 7px; margin-bottom: 10px; }
     #nav-items { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
     .nav-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; font-size: 13px; color: var(--text); width: 100%; }
-    .nav-item:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+    .nav-item:hover { background: var(--hover); }
     .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .nav-item.on { background: var(--accent); color: var(--accent-text); }
     .tile { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-    .side-foot { margin-top: auto; padding: 8px 10px 0; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted); }
+    .side-foot { margin-top: auto; padding: 8px 10px 0; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--dim); }
     .side-foot .pulse { width: 8px; height: 8px; }
     .side-foot #side-up { margin-left: auto; font-size: 10.5px; }
     #content { flex: 1; overflow-y: auto; padding: 22px 26px; min-width: 0; }
     #content > section { display: none; background: none; border: none; padding: 0; margin: 0 0 8px; }
     #content > section.on { display: block; }
     section h2 { font: 500 19px "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: .2px; text-transform: none; color: var(--text); margin: 0 0 14px; }
-    .grp-h { font-size: 12px; color: var(--muted); margin: 16px 14px 6px; }
+    /* Task 3(Quiet Library) — 기존 그룹 캡션을 눈썹(eyebrow) 스타일로: 10px 대문자 ls1.2px accent(스펙 타이포 스케일).
+       DOM 변경 없음 — 기존 .grp-h 요소의 CSS만 교체. */
+    .grp-h { font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent); margin: 16px 14px 6px; }
     .grp { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
     .li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
     .li:not([hidden]) + .li, .li:not([hidden]) + .li-form, .li-form + .li { border-top: 1px solid var(--line); }
-    .li .val { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .li .val { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; }
     .li .val input, .li .val select { border: none; background: transparent; text-align: right; padding: 3px 4px; }
     .li .val input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
-    .cap { font-size: 12px; color: var(--muted); margin: 6px 14px 0; line-height: 1.5; }
-    .minus { width: 17px; height: 17px; border-radius: 50%; background: var(--dead); color: #fff; border: none; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: pointer; font-size: 12px; line-height: 1; }
+    .cap { font-size: 12px; color: var(--dim); margin: 6px 14px 0; line-height: 1.5; }
+    .minus { width: 17px; height: 17px; border-radius: 50%; background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: pointer; font-size: 12px; line-height: 1; }
     .add-row { color: var(--accent); cursor: pointer; }
-    .chev { color: var(--muted); opacity: .6; }
+    .chev { color: var(--dim); opacity: .6; }
     .li-form { background: var(--panel-2); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
     .li-form .frow { display: flex; align-items: center; gap: 10px; }
-    .li-form .frow label { font-size: 12.5px; color: var(--muted); width: 120px; flex: none; }
+    .li-form .frow label { font-size: 12.5px; color: var(--dim); width: 120px; flex: none; }
     .li-form .frow input, .li-form .frow select { flex: 1; }
     .li-form .actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-    .li-form .actions button.danger { background: var(--dead); border-color: var(--dead); color: #fff; }
+    .li-form .actions button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
     .li-form .actions button.danger:disabled { opacity: 0.4; cursor: default; }
-    .li-form .actions button.danger:disabled:hover { border-color: var(--dead); }
+    .li-form .actions button.danger:disabled:hover { border-color: var(--danger); }
     .li-form .status { font-size: 12px; color: var(--dead); }
     .brain-li { cursor: pointer; }
 
     .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
     /* hidden 속성이 .row(display:flex)에 눌리지 않도록 — author 규칙이 UA [hidden]을 이겨서 안 숨던 걸 고침. */
     [hidden] { display: none !important; }
-    .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+    .hint { color: var(--dim); font-size: 12.5px; margin-top: 8px; }
 
     /* signature: the heartbeat pulse */
     .pulse-line { display: flex; align-items: center; gap: 12px; }
@@ -101,7 +111,7 @@
       .pulse.alive { animation: none; box-shadow: 0 0 0 4px rgba(86, 211, 100, 0.25); }
     }
     .pulse-line strong { font-size: 15px; font-weight: 600; }
-    .meta { color: var(--muted); font-size: 12.5px; margin-top: 8px; display: grid; gap: 3px; }
+    .meta { color: var(--dim); font-size: 12.5px; margin-top: 8px; display: grid; gap: 3px; }
     .meta b { color: var(--text); font-weight: 500; }
     .warn-badge {
       display: none; margin-left: 8px; padding: 2px 8px; border-radius: 20px;
@@ -114,6 +124,7 @@
       border-radius: 8px; padding: 7px 14px;
       border: 1px solid var(--line);
       background: var(--panel-2); color: var(--text);
+      text-transform: none; letter-spacing: normal; /* .grp-h(눈썹) 안에 얹힌 btn-mcp-sync가 대문자·자간을 물려받지 않도록 */
       transition: border-color 0.15s, background 0.15s;
     }
     button:hover { border-color: var(--accent); }
@@ -134,19 +145,19 @@
     .bad { color: var(--dead); }
     code {
       font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px;
-      background: var(--bg); border: 1px solid var(--line);
+      background: var(--code-bg); border: 1px solid var(--line);
       padding: 2px 7px; border-radius: 6px;
     }
 
     details { margin-top: 12px; }
-    details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; user-select: none; }
+    details summary { cursor: pointer; color: var(--dim); font-size: 12.5px; user-select: none; }
     details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     pre {
-      background: var(--log-bg); border: 1px solid var(--line); border-radius: 8px;
+      background: var(--pre-bg); border: 1px solid var(--line); border-radius: 8px;
       padding: 10px 12px; margin: 8px 0 0;
       max-height: 180px; overflow: auto;
       font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.5;
-      color: var(--muted); white-space: pre-wrap; word-break: break-all;
+      color: var(--dim); white-space: pre-wrap; word-break: break-all;
     }
 
     .saved { color: var(--alive); font-size: 12.5px; }
@@ -304,7 +315,7 @@
       </div>
       <div class="li">
         <label style="font-size:13px" data-t="autoCompactLabel"></label>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim);cursor:pointer">
           <input type="checkbox" id="auto-compact" /><span data-t="autoCompactCheckboxLabel"></span>
         </label>
       </div>
@@ -874,7 +885,7 @@
         row.appendChild(name);
 
         const meta = document.createElement('span');
-        meta.style.color = 'var(--muted)';
+        meta.style.color = 'var(--dim)';
         meta.style.fontSize = '11.5px';
         meta.textContent = b.model || b.provider;
         row.appendChild(meta);
@@ -1098,7 +1109,7 @@
         }
         // 파괴적 행위라 add-row의 accent 색 대신 위험색 — ＋추가 줄과 시각적으로 구분.
         const reset = document.createElement('div'); reset.className = 'li'; reset.textContent = t.resetDefault;
-        reset.style.color = 'var(--dead)'; reset.style.cursor = 'pointer';
+        reset.style.color = 'var(--danger)'; reset.style.cursor = 'pointer';
         reset.onclick = () => chained('perm', async () => {
           await window.engram.setPermissionList('commands', null);
           permDetails.commands = null;
@@ -1130,7 +1141,7 @@
       const aliasInput = document.createElement('input'); aliasInput.className = 'mono';
       let chosenPath = '';
       const pathSpan = document.createElement('span'); pathSpan.className = 'mono';
-      pathSpan.style.fontSize = '11.5px'; pathSpan.style.color = 'var(--muted)';
+      pathSpan.style.fontSize = '11.5px'; pathSpan.style.color = 'var(--dim)';
       const browseBtn = document.createElement('button'); browseBtn.textContent = t.browse;
       browseBtn.onclick = async () => {
         const p = await window.engram.pickFolder();
@@ -1176,7 +1187,7 @@
         };
         const label = document.createElement('span'); label.className = 'mono'; label.style.fontSize = '12.5px'; label.textContent = alias;
         const pathSpan = document.createElement('span');
-        pathSpan.style.color = 'var(--muted)'; pathSpan.style.fontSize = '11.5px'; pathSpan.style.marginLeft = 'auto';
+        pathSpan.style.color = 'var(--dim)'; pathSpan.style.fontSize = '11.5px'; pathSpan.style.marginLeft = 'auto';
         pathSpan.style.overflow = 'hidden'; pathSpan.style.textOverflow = 'ellipsis'; pathSpan.style.whiteSpace = 'nowrap'; pathSpan.style.maxWidth = '260px';
         pathSpan.textContent = p;
         row.append(minus, label, pathSpan); grp.appendChild(row);
@@ -1223,7 +1234,7 @@
       grp.textContent = '';
       if (entries.length === 0) {
         const row = document.createElement('div'); row.className = 'li';
-        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.schedEmpty;
+        const label = document.createElement('span'); label.style.color = 'var(--dim)'; label.textContent = t.schedEmpty;
         row.appendChild(label); grp.appendChild(row);
         return;
       }
@@ -1242,7 +1253,7 @@
         task.style.flex = '1'; task.style.minWidth = '0'; task.style.overflow = 'hidden'; task.style.textOverflow = 'ellipsis'; task.style.whiteSpace = 'nowrap';
         task.textContent = e.task;
         const right = document.createElement('span');
-        right.style.color = 'var(--muted)'; right.style.fontSize = '11.5px'; right.style.flex = 'none';
+        right.style.color = 'var(--dim)'; right.style.fontSize = '11.5px'; right.style.flex = 'none';
         right.textContent = e.channelId + (e.once ? ' · once' : '');
         row.append(minus, cron, task, right); grp.appendChild(row);
       }
@@ -1326,7 +1337,7 @@
         const row = document.createElement('div'); row.className = 'li';
         const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.style.flex = 'none'; name.textContent = p.name;
         const desc = document.createElement('span');
-        desc.style.color = 'var(--muted)'; desc.style.fontSize = '11.5px'; desc.style.flex = '1'; desc.style.minWidth = '0';
+        desc.style.color = 'var(--dim)'; desc.style.fontSize = '11.5px'; desc.style.flex = '1'; desc.style.minWidth = '0';
         desc.style.overflow = 'hidden'; desc.style.textOverflow = 'ellipsis'; desc.style.whiteSpace = 'nowrap';
         desc.textContent = KO ? p.ko : p.en;
         const btn = document.createElement('button'); btn.style.flex = 'none'; btn.style.fontSize = '12px'; btn.style.padding = '4px 12px'; btn.textContent = t.addBtn;
@@ -1387,7 +1398,7 @@
       const synced = mcpServers.filter((s) => s.source === 'claude');
       if (synced.length === 0) {
         const row = document.createElement('div'); row.className = 'li';
-        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.mcpSyncedEmpty;
+        const label = document.createElement('span'); label.style.color = 'var(--dim)'; label.textContent = t.mcpSyncedEmpty;
         row.appendChild(label); grp.appendChild(row);
         return;
       }
@@ -1395,7 +1406,7 @@
         const row = document.createElement('div'); row.className = 'li';
         const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.textContent = s.name;
         const summary = document.createElement('span');
-        summary.style.color = 'var(--muted)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
+        summary.style.color = 'var(--dim)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
         summary.style.overflow = 'hidden'; summary.style.textOverflow = 'ellipsis'; summary.style.whiteSpace = 'nowrap'; summary.style.maxWidth = '260px';
         summary.textContent = mcpSummary(s);
         row.append(name, summary); grp.appendChild(row);
@@ -1409,7 +1420,7 @@
       const manual = mcpServers.filter((s) => s.source !== 'claude');
       if (manual.length === 0) {
         const row = document.createElement('div'); row.className = 'li';
-        const label = document.createElement('span'); label.style.color = 'var(--muted)'; label.textContent = t.mcpEmpty;
+        const label = document.createElement('span'); label.style.color = 'var(--dim)'; label.textContent = t.mcpEmpty;
         row.appendChild(label); grp.appendChild(row);
       }
       for (const s of manual) {
@@ -1423,7 +1434,7 @@
         };
         const name = document.createElement('span'); name.className = 'mono'; name.style.fontSize = '12.5px'; name.textContent = s.name;
         const summary = document.createElement('span');
-        summary.style.color = 'var(--muted)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
+        summary.style.color = 'var(--dim)'; summary.style.fontSize = '11.5px'; summary.style.marginLeft = 'auto';
         summary.style.overflow = 'hidden'; summary.style.textOverflow = 'ellipsis'; summary.style.whiteSpace = 'nowrap'; summary.style.maxWidth = '260px';
         summary.textContent = mcpSummary(s);
         row.append(minus, name, summary); grp.appendChild(row);
