@@ -12,6 +12,17 @@ it('engram 번호목록은 클릭 대상이 아니라 그냥 텍스트다(선택
 
 const msg = (authorId: string, id = '1') => ({ id, authorId, text: 'hi', ts: new Date(0).toISOString() });
 
+// 최종 리뷰 픽스(방어): question과 actions가 동시에 실린 메시지(현재 프로듀서 없음)도 카드만 그린다.
+it('question+actions 동시 메시지는 카드만 렌더, 액션 버튼은 숨김(방어)', () => {
+  const q = { questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] };
+  const acts = [{ label: '승인', send: '승인' }];
+  const { container } = render(
+    <Message m={{ id: '1', authorId: 'engram', ts: new Date(0).toISOString(), text: '', question: q, actions: acts } as any} onSend={() => {}} />,
+  );
+  expect(container.querySelector('.actions')).toBeNull();
+  expect(container.textContent).toContain('어느 쪽?');
+});
+
 describe('Message 작성자 렌더', () => {
   it('team(myName): 내 이름은 me, 남은 이름 + other 스타일', () => {
     const mine = render(<Message m={msg('alice')} myName="alice" />);

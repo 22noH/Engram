@@ -15,6 +15,10 @@ export interface MentionEvent {
   mode?: 'chat' | 'code'; // Phase 10: 어댑터가 채널 모드를 실어줌(Discord는 미설정=chat).
   repoPath?: string;      // Phase 10: Code 채널 바인딩 경로.
   brain?: string;         // 채널별 두뇌(스펙 §3.2): 어댑터가 채널의 brain 이름을 실어줌. 미첨부=기본(Discord는 비범위).
+  // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answersId 답장의 재트리거일 때, 어댑터가 원본 카드의
+  // 질문(questionFallbackText 렌더링)을 실어준다. 카드가 없거나(펜스텍스트 경로처럼 대화이력에서
+  // 자연히 보임) 일반 send면 미첨부 — 기존 이벤트와 바이트 동일(회귀 0).
+  answeredQuestion?: string;
 }
 
 export interface MessengerPort {

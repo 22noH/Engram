@@ -34,9 +34,16 @@ function cleanQuestion(q: unknown): QuestionItem | null {
   if (r.multiSelect !== undefined && typeof r.multiSelect !== 'boolean') return null;
   if (!Array.isArray(r.options) || r.options.length < 2 || r.options.length > 4) return null;
   const options: QuestionOption[] = [];
+  let sawRecommended = false;
   for (const raw of r.options) {
     const opt = cleanOption(raw);
     if (!opt) return null;
+    // 최종 리뷰 픽스: 질문당 recommended는 최대 1개만 허용 — 페이로드를 거부하지 않고 첫 번째만
+    // 남기고 이후 것들은 플래그만 벗겨 통과시킨다(두뇌가 여러 개 추천해도 카드 UI가 "추천"을 단일 강조로).
+    if (opt.recommended) {
+      if (sawRecommended) delete opt.recommended;
+      else sawRecommended = true;
+    }
     options.push(opt);
   }
   const clean: QuestionItem = { q: r.q as string, options };

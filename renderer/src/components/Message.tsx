@@ -34,7 +34,10 @@ export function Message({ m, onSend, myName, answeredText, onAnswer }: {
       ) : (
         <div className="body" ref={bodyRef} />
       )}
-      {m.actions && m.actions.length > 0 && onSend && <ActionButtons actions={m.actions} onSend={onSend} />}
+      {/* 최종 리뷰 픽스(방어): 카드가 있으면 액션 버튼은 안 그린다 — 현재 프로듀서는 question과 actions를
+          동시에 안 보내지만(위 주석), 이 게이트가 없으면 미래에 둘 다 실린 메시지가 카드+버튼을 같이
+          그려 사용자가 어디에 답해야 할지 헷갈린다. */}
+      {!m.question && m.actions && m.actions.length > 0 && onSend && <ActionButtons actions={m.actions} onSend={onSend} />}
     </div>
   );
 }

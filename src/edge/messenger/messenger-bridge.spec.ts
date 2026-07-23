@@ -103,6 +103,24 @@ it('mode가 없는 mention은 mode 필드를 포함하지 않는다(후방호환
   expect('repoPath' in calls[0]).toBe(false);
 });
 
+it('answeredQuestion이 실린 mention은 text 앞에 질문 문맥을 붙여 handleMention에 넘긴다(최종 리뷰 픽스)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'A로 할게요', channelId: 'c1', authorId: 'u', target: {}, answeredQuestion: '어느 쪽?\n1. A\n2. B' } as any);
+  expect(calls[0].text).toBe('[사용자가 다음 질문에 답함]\n어느 쪽?\n1. A\n2. B\n[답]\nA로 할게요');
+});
+
+it('answeredQuestion 없는 mention은 text가 원문 그대로다(회귀 0)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: '안녕', channelId: 'c1', authorId: 'u', target: {} });
+  expect(calls[0].text).toBe('안녕');
+});
+
 it('mention 이벤트의 brain을 handleMention에 넘긴다(Task 2, 스펙 §3.2)', async () => {
   const calls: any[] = [];
   const orch = { handleMention: async (m: any) => { calls.push(m); } };

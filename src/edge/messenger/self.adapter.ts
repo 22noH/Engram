@@ -23,6 +23,10 @@ import type { McpDeps } from '../mcp/engram-mcp';
 import { buildMcpServer } from '../mcp/engram-mcp';
 import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
 import { makeMcpProposals } from '../mcp/mcp-proposals';
+// 최종 리뷰 픽스(ask-user 답↔질문 상관관계): messenger-bridge.ts가 이미 agent-layer(channel-policy·i18n)를
+// 끌어오는 선례가 있다 — edge/messenger는 agent-layer 순수 유틸 import가 허용되는 층. questionFallbackText는
+// 이 파일과 agent-layer 양쪽이 쓰는 단일 소스라 여기서도 그대로 재사용(포맷터 중복 구현 금지).
+import { questionFallbackText } from '../../agent-layer/ask-user-block';
 
 interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
 
@@ -648,9 +652,16 @@ export class SelfMessenger implements MessengerPort {
     // 저장된 메시지가 있으면 조용히 return(기록 0·브로드캐스트 0·두뇌 트리거 0). 일반 send는 answersId가
     // 없어 이 스캔을 아예 타지 않는다(비용 0). O(n) 전체 스캔은 chat-store.history의 기존 관례(개인 규모).
     const answersId = typeof f.answersId === 'string' && f.answersId ? f.answersId : undefined;
+    // 최종 리뷰 픽스: 중복 차단 스캔을 재사용해 "이 답이 어느 질문에 답하는지"도 한 번에 찾는다(도구
+    // ask_user 경로 상관관계 — 펜스텍스트 경로는 대화이력에 질문이 남아 필요 없지만, 도구 경로는 카드
+    // 텍스트가 fallback 렌더링뿐이라 여기서 원본 questions를 찾아 이벤트에 실어야 브레인이 문맥을 안다).
+    let answeredQuestion: string | undefined;
     if (answersId) {
       const existing = this.store.history(channelId, { limit: Number.MAX_SAFE_INTEGER });
-      if (existing.some((m) => m.answersId === answersId)) return;
+      for (const m of existing) {
+        if (m.answersId === answersId) return; // 이미 답변된 카드 — 중복 차단(조용히 무시)
+        if (m.id === answersId && m.question) answeredQuestion = questionFallbackText(m.question);
+      }
     }
     // 작성자는 서버가 세션에서 찍는다(Phase 16a) — 클라 authorId 주장은 무시(Phase 14 자가선언 폐기).
     const me = this.users.get(ws);
@@ -677,6 +688,7 @@ export class SelfMessenger implements MessengerPort {
       target: { channelId, anchorId: anchor } satisfies SelfTarget as ReplyTarget,
       ...(ch.mode === 'code' ? { mode: 'code' as const, repoPath: ch.repoPath } : {}),
       ...(ch.brain ? { brain: ch.brain } : {}), // 스펙 §3.2: 채널의 brain을 이벤트에 실어나름(미설정 채널=회귀 0)
+      ...(answeredQuestion ? { answeredQuestion } : {}), // 최종 리뷰 픽스: 답이 답한 질문(있을 때만)
     };
     if (isMention) {
       if (this.handler) await this.handler(e);

@@ -29,9 +29,14 @@ export function bindMessenger(
       port.reply(e.target, text, actions, question);
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
     try {
+      // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answeredQuestion이 있으면(=answersId 답장 재트리거,
+      // ask_user 도구 경로) 브레인 프롬프트가 될 text 앞에 원본 질문 문맥을 붙인다. 없으면 e.text 그대로
+      // (기존과 바이트 동일 — 회귀 0). mode/repoPath/brain과 같은 결로 여기가 MentionEvent→CoreMessage
+      // 유일 변환점이라 프롬프트 조립 전 이 한 곳에서만 손대면 된다.
+      const text = e.answeredQuestion ? `[사용자가 다음 질문에 답함]\n${e.answeredQuestion}\n[답]\n${e.text}` : e.text;
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).
       await orchestrator.handleMention(
-        { text: e.text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}), ...(e.brain ? { brain: e.brain } : {}) },
+        { text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}), ...(e.brain ? { brain: e.brain } : {}) },
         post,
         threadKey,
       );

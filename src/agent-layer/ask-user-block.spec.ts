@@ -183,6 +183,30 @@ describe('validateAskUserPayload', () => {
     expect(validateAskUserPayload('그냥 문자열')).toBeNull();
     expect(validateAskUserPayload(null)).toBeNull();
   });
+
+  // 최종 리뷰 픽스: 한 질문에 recommended:true가 여러 개면 거부하지 않고 첫 번째만 남긴다.
+  it('한 질문에 recommended:true 3개 → 첫 번째만 살아남고 나머지는 플래그 제거', () => {
+    const r = validateAskUserPayload({
+      questions: [
+        {
+          q: 'q?',
+          options: [
+            { label: 'a', recommended: true },
+            { label: 'b', recommended: true },
+            { label: 'c', recommended: true },
+          ],
+        },
+      ],
+    });
+    expect(r).toEqual({
+      questions: [
+        {
+          q: 'q?',
+          options: [{ label: 'a', recommended: true }, { label: 'b' }, { label: 'c' }],
+        },
+      ],
+    });
+  });
 });
 
 describe('questionFallbackText', () => {

@@ -20,6 +20,7 @@ import { AdminHttp } from '../admin/admin-http';
 import type { AdminDeps } from './self.adapter';
 import { GroupStore } from '../auth/group-store';
 import { PathResolver } from '../../pal/path-resolver';
+import { questionFallbackText } from '../../agent-layer/ask-user-block';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -139,6 +140,28 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general')).toHaveLength(before + 1); // 중복 제외, 다음 메시지만 +1
     expect(store.history('general').some((m) => m.text === '중복 답변')).toBe(false);
     expect(events).toHaveLength(2); // 첫 답변 + 다음 메시지(중복은 트리거되지 않음)
+  });
+
+  it('answersId가 카드 id를 가리키면 MentionEvent에 원본 질문 렌더링(answeredQuestion)이 실린다(최종 리뷰 픽스)', async () => {
+    const question = { questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] };
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '질문입니다', undefined, question);
+    await nextFrame(client); // 카드 msg 프레임 소비
+    const card = store.history('general').at(-1)!;
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: 'A로 할게요', answersId: card.id }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect(events[0].answeredQuestion).toBe(questionFallbackText(question));
+  });
+
+  it('answersId 없는 일반 send는 answeredQuestion 필드를 안 싣는다(회귀 0)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '그냥 안녕' }));
+    await nextFrame(client);
+    expect(events).toHaveLength(1);
+    expect('answeredQuestion' in events[0]).toBe(false);
   });
 
   it('postToChannel → 본류(threadId 없음) 게시, 클라이언트 0명이어도 영속', async () => {
