@@ -599,6 +599,11 @@ export default function App() {
                 <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />
               ) : (
                 <>
+              {/* R2-1(Quiet Library 라운드2) — Claude 스타일 중앙 고정폭 칼럼(760px). 순수 표현용
+                  래퍼(핸들러·기존 셀렉터 무영향) — #msgs/#palette/#mention/#inputbar를 감싸 폭을 통일하고,
+                  절대배치되는 #palette/#mention/#clearToast의 기준 컨테이너가 되어(position:relative)
+                  좁아진 입력창 폭에 맞춰 함께 정렬되게 한다. */}
+              <div className="chatCol">
               <div id="msgs" ref={msgsRef}>
                 {(() => {
                   const byAnchor = new Map<string, Msg[]>();
@@ -674,6 +679,7 @@ export default function App() {
                   onManage={() => setShowManage(true)}
                 />
                 <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; setInputText(''); }}>{T.send}</button>
+              </div>
               </div>
                 </>
               )}

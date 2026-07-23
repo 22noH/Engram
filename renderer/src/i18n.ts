@@ -16,9 +16,10 @@ export const T = {
   modeMention: ko ? '@Engram 멘션에만 반응' : 'Respond to @Engram only',
   engram: 'Engram', me: ko ? '나' : 'me',
   thinking: ko ? 'Engram이 생각하는 중' : 'Engram is thinking',
-  tabAsk: ko ? '챗봇' : 'Ask',
-  tabTeam: ko ? '채팅' : 'Team',
-  tabCode: ko ? '코드' : 'Code',
+  // R2-1(Quiet Library 라운드2) — 고유명 탭 이름은 로케일 불문 동일(번역 안 함): Chat/Team/Code.
+  tabAsk: 'Chat',
+  tabTeam: 'Team',
+  tabCode: 'Code',
   tabWiki: ko ? '위키' : 'Wiki',
   // Task 2(Quiet Library) — 사이드바 섹션 눈썹 라벨(순수 프레젠테이션, 신규 문구 2개).
   sideChannels: ko ? '채널' : 'Channels',

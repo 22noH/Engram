@@ -14,9 +14,9 @@ it('PRESET 없음(스탠드얼론) → team 탭 미렌더', async () => {
   vi.doMock('../config', () => ({ TEAM_CHAT: false, ko: false }));
   const { Channels: StandaloneChannels } = await import('./Channels');
   render(<StandaloneChannels {...base} mode="chat" />);
-  expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
+  expect(screen.getByText('Chat')).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
-  expect(screen.queryByText(/^(Team|채팅)$/)).toBeNull();
+  expect(screen.queryByText('Team')).toBeNull();
   vi.doUnmock('../config');
   vi.resetModules();
 });
@@ -26,9 +26,9 @@ it('PRESET 있음 → team 탭 렌더', async () => {
   vi.doMock('../config', () => ({ TEAM_CHAT: true, ko: false }));
   const { Channels: PresetChannels } = await import('./Channels');
   render(<PresetChannels {...base} mode="chat" />);
-  expect(screen.getByText(/Ask|챗봇/)).toBeInTheDocument();
+  expect(screen.getByText('Chat')).toBeInTheDocument();
   expect(screen.getByText(/Code|코드/)).toBeInTheDocument();
-  expect(screen.getByText(/^(Team|채팅)$/)).toBeInTheDocument();
+  expect(screen.getByText('Team')).toBeInTheDocument();
   vi.doUnmock('../config');
   vi.resetModules();
 });
