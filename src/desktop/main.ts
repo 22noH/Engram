@@ -26,6 +26,7 @@ import { loadLocalBrains, addLocalBrain } from './local-brains';
 import { readSetupCode } from '../edge/auth/setup-code';
 import { focusOrRestore } from './window-focus';
 import { PtyManager } from './pty-manager';
+import { diffStatus, diffFile } from './git-diff';
 import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
@@ -335,6 +336,9 @@ function registerIpc(): void {
   ipcMain.handle('engram:pty-resize', (_e, sid: string, cols: number, rows: number) => { ptyManager.resize(sid, cols, rows); });
   ipcMain.handle('engram:pty-kill', (_e, sid: string) => { ptyManager.kill(sid); });
   ipcMain.handle('engram:pty-replay', (_e, sid: string) => ptyManager.replay(sid));
+  // 코드 패널 diff 뷰: 읽기 전용(git-diff.ts, never-throw 결과형).
+  ipcMain.handle('engram:git-diff-status', (_e, repoPath: string) => diffStatus(repoPath));
+  ipcMain.handle('engram:git-diff-file', (_e, repoPath: string, file: string) => diffFile(repoPath, file));
 }
 
 // ---- 부팅 ----

@@ -26,4 +26,8 @@ contextBridge.exposeInMainWorld('engramDesktop', {
     ipcRenderer.on('engram:pty-exit', listener);
     return () => ipcRenderer.removeListener('engram:pty-exit', listener);
   },
+
+  // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).
+  gitDiffStatus: (repoPath: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-status', repoPath),
+  gitDiffFile: (repoPath: string, file: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-file', repoPath, file),
 });

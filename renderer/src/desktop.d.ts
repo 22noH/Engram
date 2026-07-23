@@ -13,6 +13,14 @@ declare global {
       ptyReplay?: (sid: string) => Promise<string>;
       onPtyData?: (cb: (sid: string, data: string) => void) => () => void;
       onPtyExit?: (cb: (sid: string, code: number) => void) => () => void;
+      // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).
+      gitDiffStatus?: (repoPath: string) => Promise<
+        | { ok: true; files: Array<{ path: string; status: 'A' | 'M' | 'D' | 'R' | '?' }> }
+        | { ok: false; reason: 'not-repo' | 'git-missing' | 'error' }
+      >;
+      gitDiffFile?: (repoPath: string, file: string) => Promise<
+        { ok: true; diff: string } | { ok: false; reason: string }
+      >;
     };
   }
 }
