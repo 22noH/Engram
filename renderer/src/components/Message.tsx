@@ -31,11 +31,17 @@ function triggerDownload(url: string, filename: string): void {
 function Attachment({ a, ctx }: { a: AttachmentMeta; ctx?: AttachmentCtx }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const revokeRef = useRef<string | null>(null);
+  // T4 리뷰 C1: deps는 반드시 원시값이어야 한다 — ctx는 App이 매 렌더 새 객체 리터럴로 내려주므로
+  // (attachmentCtxFor가 렌더마다 새로 만듦) ctx 자체를 deps에 넣으면 값이 같아도 매 렌더 재fetch+revoke가
+  // 돈다(타자마다 이미 보이는 첨부까지 재요청하는 처닝). endpoint/channelId/token/id 4개 원시값만 비교.
   useEffect(() => {
     if (!ctx) return;
     let alive = true;
     void fetchAttachmentBlobUrl(ctx.endpoint, ctx.channelId, a.id, ctx.token).then((url) => {
-      if (!alive || !url) return;
+      if (!url) return;
+      // T4 리뷰 I3: 언마운트 후 도착한 fetch도 blob은 이미 만들어졌으니 URL을 그대로 흘리면 누수다 —
+      // alive가 꺼졌으면 state에 반영하지 않고 즉시 revoke한다.
+      if (!alive) { URL.revokeObjectURL(url); return; }
       revokeRef.current = url;
       setBlobUrl(url);
     });
@@ -43,7 +49,8 @@ function Attachment({ a, ctx }: { a: AttachmentMeta; ctx?: AttachmentCtx }) {
       alive = false;
       if (revokeRef.current) { URL.revokeObjectURL(revokeRef.current); revokeRef.current = null; }
     };
-  }, [ctx, a.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx?.endpoint, ctx?.channelId, ctx?.token, a.id]);
 
   const isImage = IMAGE_MIMES.has(a.mime);
   if (isImage) {

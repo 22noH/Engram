@@ -151,4 +151,8 @@ export const T = {
   attachTooLarge: (name: string) => (ko ? `'${name}'은(는) 20MB를 넘어 첨부할 수 없어요` : `'${name}' is over 20MB and can't be attached`),
   attachRemove: ko ? '제거' : 'Remove',
   attachRetry: ko ? '업로드 실패 — 클릭해서 재시도' : 'Upload failed — click to retry',
+  // T4 리뷰 C2 — 첨부 시점과 전송 대상(채널/기본 연결)이 달라지면 칩을 비우며 보여주는 안내.
+  attachChannelChanged: ko ? '채널이 바뀌어 첨부가 취소됐어요 — 다시 첨부해 주세요' : 'Attachments were discarded — the channel changed. Please attach again.',
+  // T4 리뷰 I4 — 실패한 칩이 남아있는 동안 전송을 막는 안내.
+  attachHasError: ko ? '첨부 실패 — 제거하거나 다시 시도한 뒤 보내세요' : 'An attachment failed — remove it or retry before sending',
 };

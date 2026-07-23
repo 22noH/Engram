@@ -34,9 +34,14 @@ const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 // 전송 전 칩 1개의 클라 로컬 상태. id는 업로드 성공 후 서버가 발급한 첨부 id(send 프레임에 실림).
+// T4 리뷰 C2: connId·channelId는 "첨부 시점"의 업로드 대상(서버의 AttachmentStore가 실제로 그 첨부를
+// 들고 있는 곳)을 고정한다 — 채널/기본 연결을 바꾼 뒤 보내면 이 바인딩과 전송 대상이 달라져 서버가
+// 조용히 무시(파일 유실)하므로, 바인딩이 바뀌면 칩을 통째로 비우고(아래 이펙트) doneAttachmentIds도
+// 현재 바인딩과 일치하는 것만 골라 보낸다(벨트).
 interface PendingAttachment {
   localId: string; file: File; name: string; mime: string; size: number;
   status: 'uploading' | 'done' | 'error'; id?: string;
+  connId: string; channelId: string;
 }
 
 export default function App() {
@@ -61,6 +66,10 @@ export default function App() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachNotice, setAttachNotice] = useState<string | null>(null); // 상한 초과 안내(칩 단계 차단)
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // T4 리뷰 미너 ⑤ — addFiles의 상한(room) 계산은 이 ref(최신값)로 한다. 렌더 본문에서 매번 최신
+  // pendingAttachments로 동기화하고(다른 ref 미러들과 같은 패턴), addFiles 안에서 칩을 추가한 직후에도
+  // 즉시 갱신해 같은 tick에 addFiles가 연속 호출돼도(드롭+붙여넣기 연타 등) 상한을 정확히 지킨다.
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>([]); pendingAttachmentsRef.current = pendingAttachments;
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
@@ -427,18 +436,17 @@ export default function App() {
   const resolveDefaultChanId = (name: string): string | undefined =>
     channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode)?.id;
 
-  // Task 4(chat-attachments) — 업로드 대상은 항상 기본 연결의 실제 채널(sendText의 attachmentIds
-  // 라우팅 고정과 짝을 이룬다). 채널이 아직 지연 생성 중(resolveDefaultChanId 미해결)이면 업로드
-  // 불가 — 파일이 조용히 사라지는 것보단 그냥 추가를 막는다(드문 edge case, 채널 첫 메시지 전).
+  // Task 4(chat-attachments) — 업로드 대상은 pa.connId/pa.channelId(첨부 시점에 addFiles가 고정, T4
+  // 리뷰 C2). 재시도도 항상 같은 바인딩을 쓴다 — 바인딩이 바뀌면 아래 이펙트가 칩을 통째로 비우므로
+  // "바뀐 뒤 재시도"라는 상황 자체가 없다(연결/엔드포인트가 그 사이 삭제됐을 때만 에러로 남는다).
   const uploadOne = (pa: PendingAttachment) => {
-    const channelId = currentName ? resolveDefaultChanId(currentName) : undefined;
-    const endpoint = connState.connections.find((c) => c.id === connState.defaultConnId)?.endpoint;
-    if (!channelId || !endpoint) {
+    const endpoint = connState.connections.find((c) => c.id === pa.connId)?.endpoint;
+    if (!endpoint) {
       setPendingAttachments((prev) => prev.map((p) => (p.localId === pa.localId ? { ...p, status: 'error' } : p)));
       return;
     }
-    const token = sessions[connState.defaultConnId];
-    void uploadAttachment(endpoint, channelId, pa.file, token).then((r) => {
+    const token = sessions[pa.connId];
+    void uploadAttachment(endpoint, pa.channelId, pa.file, token).then((r) => {
       setPendingAttachments((prev) => prev.map((p) => {
         if (p.localId !== pa.localId) return p;
         return 'error' in r ? { ...p, status: 'error' as const } : { ...p, status: 'done' as const, id: r.id };
@@ -447,12 +455,21 @@ export default function App() {
   };
 
   // 파일 선택(클립 버튼)·붙여넣기(Ctrl+V 스크린샷)·드롭 공용 진입점. 상한 초과분은 업로드하지 않고
-  // 안내만 남긴다(브리프: "초과 시 칩 단계에서 안내(전송 차단)"). 통과한 파일만 즉시 칩+업로드 시작.
+  // 안내만 남긴다(브리프: "초과 시 칩 단계에서 안내(전송 차단)"). 통과한 파일만 즉시 칩+업로드 시작 —
+  // connId/channelId를 이 시점에 고정해 pa에 싣는다(T4 리뷰 C2: 전송 시점에 다시 계산하면 그 사이
+  // 채널/기본 연결이 바뀌었을 때 엉뚱한 곳으로 간다). 채널 자체가 아직 지연 생성 중(resolveDefaultChanId
+  // 미해결)이면 조용히 거절 — 에러 칩보다 첨부를 아예 안 받는 편이 덜 헷갈린다(드문 edge case).
   const addFiles = (files: FileList | File[] | null | undefined) => {
     if (!files) return;
     const list = Array.from(files);
     if (!list.length) return;
-    let room = MAX_ATTACHMENTS_PER_MESSAGE - pendingAttachments.length;
+    const connId = connState.defaultConnId;
+    const channelId = currentName ? resolveDefaultChanId(currentName) : undefined;
+    if (!channelId) return;
+    // T4 리뷰 미너 ⑤ — room은 ref(최신 커밋+같은 tick 갱신분)로 계산한다. pendingAttachments 클로저값
+    // 대신 이걸 쓰면 같은 tick에 addFiles가 연속 호출돼도(드롭+붙여넣기 연타 등) 상한을 정확히 지킨다.
+    const prevList = pendingAttachmentsRef.current;
+    let room = MAX_ATTACHMENTS_PER_MESSAGE - prevList.length;
     let notice: string | null = null;
     const accepted: PendingAttachment[] = [];
     for (const file of list) {
@@ -460,13 +477,16 @@ export default function App() {
       if (file.size > MAX_ATTACHMENT_BYTES) { notice = T.attachTooLarge(file.name); continue; }
       room--;
       accepted.push({
-        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}-${accepted.length}`,
         file, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, status: 'uploading',
+        connId, channelId,
       });
     }
     setAttachNotice(notice);
     if (!accepted.length) return;
-    setPendingAttachments((prev) => [...prev, ...accepted]);
+    const next = [...prevList, ...accepted];
+    pendingAttachmentsRef.current = next; // 같은 tick의 다음 addFiles 호출이 이 배치를 바로 보게(벨트)
+    setPendingAttachments(next);
     for (const pa of accepted) uploadOne(pa);
   };
   const removeAttachment = (localId: string) => setPendingAttachments((prev) => prev.filter((p) => p.localId !== localId));
@@ -477,8 +497,31 @@ export default function App() {
     uploadOne(pa);
   };
   const attachmentsUploading = pendingAttachments.some((p) => p.status === 'uploading');
-  const doneAttachmentIds = pendingAttachments.filter((p) => p.status === 'done' && p.id).map((p) => p.id as string);
-  const clearComposerAttachments = () => { setPendingAttachments([]); setAttachNotice(null); };
+  const hasErrorAttachment = pendingAttachments.some((p) => p.status === 'error'); // T4 리뷰 I4
+  // T4 리뷰 C2(벨트) — 지금 컴포저 바인딩(기본 연결+그 채널)과 정확히 일치하는 칩의 id만 보낸다.
+  // 아래 바인딩 변경 이펙트가 보통 이미 칩을 비우지만, 이펙트가 아직 못 돈 찰나(같은 tick)까지 방어.
+  const composerChannelId = currentName ? resolveDefaultChanId(currentName) : undefined;
+  const doneAttachmentIds = pendingAttachments
+    .filter((p) => p.status === 'done' && p.id && p.connId === connState.defaultConnId && p.channelId === composerChannelId)
+    .map((p) => p.id as string);
+  const clearComposerAttachments = () => { pendingAttachmentsRef.current = []; setPendingAttachments([]); setAttachNotice(null); };
+
+  // T4 리뷰 C2 — 컴포저의 현재 바인딩(기본 연결::채널id). 채널 전환·기본 연결 변경으로 이 값이
+  // 바뀌면(칩이 하나라도 있을 때) 첨부 시점 바인딩과 어긋나 서버가 조용히 무시하므로, 칩을 통째로
+  // 비우고 안내한다 — 파일 자체는 이미 이전 채널의 AttachmentStore에 남지만(고아, 스펙상 무해) 그
+  // 메시지에 실을 방법이 없어져 재첨부를 유도하는 편이 유실보다 낫다.
+  const composerBindingKey = `${connState.defaultConnId}::${composerChannelId ?? ''}`;
+  const composerBindingRef = useRef(composerBindingKey);
+  useEffect(() => {
+    if (composerBindingRef.current === composerBindingKey) return;
+    composerBindingRef.current = composerBindingKey;
+    if (pendingAttachmentsRef.current.length > 0) {
+      pendingAttachmentsRef.current = [];
+      setPendingAttachments([]);
+      setAttachNotice(T.attachChannelChanged);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerBindingKey]);
 
   // 토스트를 끈다. drop=true면 서버에 dropClearBackup을 보내 백업을 확정 삭제(만료·다음 clear).
   // drop=false는 undoClear/historyRestored처럼 이미 되돌려졌거나 되돌리는 중이라 백업을 지우면 안 될 때.
@@ -745,7 +788,9 @@ export default function App() {
                       <span className="x" title={T.attachRemove} onClick={(e) => { e.stopPropagation(); removeAttachment(pa.localId); }}>×</span>
                     </span>
                   ))}
-                  {attachNotice && <span className="attachNotice">{attachNotice}</span>}
+                  {attachNotice
+                    ? <span className="attachNotice">{attachNotice}</span>
+                    : hasErrorAttachment && <span className="attachNotice">{T.attachHasError}</span>}
                 </div>
               )}
               <div id="inputbar" style={currentName ? undefined : { display: 'none' }}
@@ -782,7 +827,10 @@ export default function App() {
                       if (e.key === 'Enter' && items.length) { e.preventDefault(); pickMention(items[Math.min(mentionIdx, items.length - 1)]); return; }
                     }
                     if (e.key === 'Enter') {
-                      if (attachmentsUploading) return; // 업로드 완료 전엔 전송 보류(id 확정 전)
+                      // T4 리뷰 I4 — 업로드 완료 전(id 미확정)이거나 실패 칩이 남아있으면 전송 보류
+                      // (실패 칩을 조용히 빼고 보내면 사용자가 "첨부됐다"고 착각한다 — 안내(attachHasError)로
+                      // 제거/재시도를 유도한다).
+                      if (attachmentsUploading || hasErrorAttachment) return;
                       const i = e.target as HTMLInputElement;
                       if (!i.value.trim() && pendingAttachments.length === 0) return; // 텍스트도 첨부도 없음
                       const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
@@ -798,7 +846,7 @@ export default function App() {
                   onManage={() => setShowManage(true)}
                 />
                 <button
-                  disabled={attachmentsUploading || (!inputText.trim() && pendingAttachments.length === 0)}
+                  disabled={attachmentsUploading || hasErrorAttachment || (!inputText.trim() && pendingAttachments.length === 0)}
                   onClick={() => {
                     const i = document.getElementById('input') as HTMLInputElement;
                     const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
