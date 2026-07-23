@@ -70,7 +70,7 @@ body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,-a
 .nitem .nbadge { margin-left:auto; background:var(--warn); color:#fff; border-radius:8px; min-width:16px;
                  text-align:center; font-size:10.5px; line-height:16px; padding:0 4px; }
 .tile { width:20px; height:20px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center;
-        color:#fff; font-size:11px; flex:none; }
+        color:var(--accent-text); font-size:11px; flex:none; }
 .nav .foot { margin-top:auto; padding:10px; font-size:11.5px; color:var(--dim); display:flex; align-items:center; gap:7px; }
 .dotok { width:7px; height:7px; border-radius:50%; background:var(--ok); display:inline-block; }
 

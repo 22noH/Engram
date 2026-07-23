@@ -60,7 +60,9 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .msg { margin-bottom:10px; max-width:80%; }
 /* Task 2 — 타임스탬프는 라벨 톤(--faint), 채팅 본문 스케일은 13px/1.55(스펙 타이포)로 .msg .body에만
    스코프(전역 body font-size는 그대로 14px 유지 — 버튼·입력 등 다른 요소로 번지는 회귀를 피한다). */
-.msg .who { font-size:11px; color:var(--faint); margin-bottom:2px; }
+/* 실측 픽스(Task 5) — --faint(a0a69d/666c63)는 11px 텍스트에서 대비 2.3:1(라이트)·3.2:1(다크)로
+   WCAG AA(4.5:1) 미달(눈으로도 거의 안 보임). #wikiArea .card .who가 이미 쓰는 --dim으로 통일. */
+.msg .who { font-size:11px; color:var(--dim); margin-bottom:2px; }
 .msg .body { background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
              padding:8px 12px; font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .body code { background:var(--code-bg); border:1px solid var(--line); border-radius:4px;
