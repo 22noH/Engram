@@ -1,4 +1,5 @@
 import { Orchestrator } from './orchestrator';
+import { questionFallbackText } from './ask-user-block';
 
 const logger = { warn() {}, error() {}, log() {} } as any;
 
@@ -164,4 +165,31 @@ it('ask_user 블록만 있고 본문 없으면 폴백 텍스트가 게시된다'
   });
   expect(calls[0].text).toBe('진행할까요?\n1. 예\n2. 아니오');
   expect(calls[0].question).toBeDefined();
+});
+
+// ask_user 도구 경로(Task 4, 리뷰 minor): reader.handle에 주입되는 askUser 클로저(orchestrator.ts의
+// askUserFor)가 실제로 post를 (fallbackText, undefined, question)으로 부르는지 handleMention() 경유로
+// 확인한다 — route()·postReply를 오버라이드하지 않고 실제 배선을 그대로 태운다(reader만 스텁: 두뇌
+// 도구호출이 CompleteOpts.askUser를 부르는 상황을 흉내).
+it('askUserFor 클로저: brain이 주입된 askUser를 부르면 post가 (fallbackText, undefined, question)으로 불린다', async () => {
+  const question = { questions: [{ q: '어느 브랜치?', options: [{ label: 'main' }, { label: 'staging' }] }] };
+  const reader = {
+    handle: async (_msg: any, _onChunk: any, _onSources: any, askUser: any) => {
+      await askUser(question); // anthropic-api/openai-api의 ask_user 도구 실행이 여기서 이 클로저를 부른다
+      return '요약';
+    },
+  } as any;
+  const brain = { complete: async () => ({ text: '{"kind":"chat","team":[]}', costUsd: 0, isError: false }) } as any;
+  const conversations = { append: async () => {} } as any;
+  const o = new Orchestrator(
+    reader, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    null as any, null as any, null as any, null as any, null as any,
+    brain, null as any, null as any, null as any,
+  );
+  const calls: Array<{ text: string; actions?: any; question?: any }> = [];
+  await o.handleMention({ text: '결정해줘', userId: 'c1' }, async (text, actions, q) => {
+    calls.push({ text, actions, question: q });
+  });
+  expect(calls[0]).toEqual({ text: questionFallbackText(question), actions: undefined, question });
 });
