@@ -19,6 +19,9 @@
 * { box-sizing: border-box; margin: 0; }
 body { display:flex; flex-direction:column; height:100vh; background:var(--bg); color:var(--text);
        font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif; font-size:14px; }
+/* Task 2(Quiet Library) — 재사용 눈썹(eyebrow) 마이크로타이포. 카테고리·섹션 라벨 전역 공용
+   (10px 대문자 letter-spacing 1.2px accent — 스펙 타이포 스케일). 순수 프레젠테이션 유틸 클래스. */
+.eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:1.2px; color:var(--accent); }
 /* React 진입 래퍼(#root)는 chat.html엔 없던 것 — body↔#app 높이 체인이 여기서 끊기지 않게 채운다. */
 #root { flex:1; display:flex; flex-direction:column; min-height:0; }
 /* 커스텀 타이틀바 — 드래그 영역(창 버튼은 OS 오버레이가 우측에 얹힘) */
@@ -55,9 +58,11 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 #palette .item.new::after { content:'NEW'; position:absolute; right:8px; top:8px; font-size:9px; font-weight:700; color:var(--accent); letter-spacing:.5px; }
 #msgs { flex:1; overflow-y:auto; padding:16px; }
 .msg { margin-bottom:10px; max-width:80%; }
-.msg .who { font-size:11px; color:var(--dim); margin-bottom:2px; }
-.msg .body { background:var(--panel); border:1px solid var(--line); border-radius:8px;
-             padding:8px 12px; white-space:pre-wrap; word-break:break-word; }
+/* Task 2 — 타임스탬프는 라벨 톤(--faint), 채팅 본문 스케일은 13px/1.55(스펙 타이포)로 .msg .body에만
+   스코프(전역 body font-size는 그대로 14px 유지 — 버튼·입력 등 다른 요소로 번지는 회귀를 피한다). */
+.msg .who { font-size:11px; color:var(--faint); margin-bottom:2px; }
+.msg .body { background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
+             padding:8px 12px; font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .body code { background:var(--code-bg); border:1px solid var(--line); border-radius:4px;
              padding:1px 5px; font-family:Consolas,'Courier New',monospace; font-size:12.5px; }
 .body pre { background:var(--pre-bg); border:1px solid var(--line); border-radius:8px;
@@ -88,7 +93,7 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .body table.cmp th, .body table.cmp td { border:1px solid var(--line); padding:5px 9px; text-align:left; }
 .body table.cmp th { background:var(--pre-bg); color:var(--dim); font-weight:600; }
 .msg.me { margin-left:auto; }
-.msg.me .body { background:var(--accent-soft); border-color:var(--accent-line); }
+.msg.me .body { background:var(--me-bg); border-color:var(--me-line); }
 /* 팀채팅: 남의 메시지(내 것 .me와 구분). 왼쪽 정렬(기본 .msg) 유지, 중립 톤만 살짝 강조. */
 .msg.other .body { background:var(--code-bg); }
 .msg.other .who { opacity:.8; }
@@ -104,21 +109,22 @@ details.thread .msg { max-width:100%; }
 .actions button { padding:6px 14px; font-size:13px; }
 .actions button:disabled { opacity:.5; cursor:default; }
 /* Task 5 — 질문 카드(ask-user, 목업 v4). .msg 골격 안에서 body 자리를 대신한다. */
-.qcard { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+.qcard { background:var(--panel); border:1px solid var(--line); border-radius:10px;
          padding:10px 12px; display:flex; flex-direction:column; gap:6px; outline:none; }
 /* T5 리뷰 미너 #3 — outline만 없애면 키보드 포커스가 안 보인다. 대신 테두리로 표시. */
 .qcard:focus-visible { border-color:var(--accent-line); }
 .qcard .qhead { display:flex; align-items:baseline; gap:6px; margin-bottom:2px; }
 .qcard .qhead .qtext { font-weight:600; flex:1; }
 .qcard .qhead .qcount { color:var(--dim); font-size:11.5px; flex:none; }
+/* Task 2 — 칩 토큰 재적용: 선택=accent 계열(기존 유지), 비선택=--line 톤(투명 대신 명시적 헤어라인). */
 .qcard .qopt { display:flex; align-items:flex-start; gap:8px; padding:6px 8px; border-radius:6px;
-               border:1px solid transparent; cursor:pointer; }
+               border:1px solid var(--line); cursor:pointer; }
 .qcard .qopt:hover { background:var(--hover); }
 .qcard .qopt.sel { border-color:var(--accent-line); background:var(--accent-soft); }
-.qcard .qnum { flex:none; width:20px; height:20px; margin-top:1px; border-radius:5px;
-               background:var(--code-bg); color:var(--dim); font-size:11px; font-weight:700;
+.qcard .qnum { flex:none; width:20px; height:20px; margin-top:1px; border-radius:4px;
+               background:transparent; border:1px solid var(--line); color:var(--dim); font-size:11px; font-weight:700;
                display:flex; align-items:center; justify-content:center; }
-.qcard .qnum.acc { background:var(--accent); color:var(--accent-text); }
+.qcard .qnum.acc { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
 .qcard .qbody { flex:1; min-width:0; }
 .qcard .qlabel { font-weight:500; }
 .qcard .qcheck { color:var(--accent); font-weight:700; }
@@ -136,7 +142,7 @@ details.thread .msg { max-width:100%; }
            min-width:200px; padding:4px; z-index:10; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 #popmenu div { padding:8px 12px; border-radius:6px; cursor:pointer; color:var(--text); font-size:13px; }
 #popmenu div:hover { background:var(--hover); }
-#popmenu div.danger { color:#f26d6d; }
+#popmenu div.danger { color:var(--danger); }
 #popmenu div.sel { color:var(--accent); font-weight:600; }
 #popmenu .popLabel { padding:8px 12px 2px; font-size:11px; color:var(--dim); cursor:default; }
 #popmenu .popLabel:hover { background:none; }
@@ -150,6 +156,10 @@ details.thread .msg { max-width:100%; }
                   font-size:12.5px; font-weight:600; border-bottom:2px solid transparent; }
 #modetabs .mtab:hover { background:var(--hover); }
 #modetabs .mtab.sel { color:var(--accent); border-bottom-color:var(--accent); }
+/* Task 2(Quiet Library 시그니처) — Wiki 진입 탭만 세리프 이탤릭(지식 표면 예고). */
+#modetabs .mtab.wikiTab { font-family:var(--font-serif); font-style:italic; }
+/* Task 2 — 사이드바 섹션 눈썹(Channels/Knowledge). #channels·#wikiSideSlot 앞의 순수 라벨. */
+.sideEyebrow { padding:12px 16px 4px; }
 #empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
          gap:14px; color:var(--dim); padding:24px; text-align:center; }
 #empty button { padding:10px 18px; }
@@ -196,7 +206,8 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #manageModal h2 { font-size:15px; margin-bottom:10px; }
 /* 섹션 라벨(Connected / Connect a remote Engram / Advanced) — engramListHead와 같은 이디엄,
    다만 각 섹션 상단에 여백을 둬 3영역을 시각적으로 분리한다. */
-.sectionLabel { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px;
+/* Task 2 — 눈썹 스타일(10px 대문자 ls1.2px accent) 재적용, 위치/여백은 기존 그대로. */
+.sectionLabel { font-size:10px; color:var(--accent); text-transform:uppercase; letter-spacing:1.2px;
                 margin:14px 0 6px; }
 .sectionLabel:first-of-type { margin-top:0; }
 .engramListHead { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px;
@@ -207,7 +218,7 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .engramRow .default { color:var(--accent); font-size:12px; font-weight:600; }
 .engramRow button { font-size:12px; padding:0 10px; height:28px; }
-.engramRow button.danger { background:transparent; border:1px solid var(--line); color:#f26d6d; }
+.engramRow button.danger { background:transparent; border:1px solid var(--line); color:var(--danger); }
 #addEngram { display:flex; gap:8px; margin-top:2px; }
 #addEngram input { flex:1; min-width:0; }
 /* Advanced — create a separate local Engram: 기본 접힘(details/summary), 실수 방지를 위해
@@ -219,7 +230,7 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #advancedLocal .hint { font-size:12px; color:var(--dim); margin:8px 0; line-height:1.5; }
 #advancedLocal .localCreateRow { display:flex; gap:8px; }
 #advancedLocal .localCreateRow input { flex:1; min-width:0; }
-#advancedLocal .localCreateRow button { background:transparent; border:1px solid #f26d6d; color:#f26d6d; white-space:nowrap; }
+#advancedLocal .localCreateRow button { background:transparent; border:1px solid var(--danger); color:var(--danger); white-space:nowrap; }
 #manageClose { margin-top:14px; background:transparent; border:1px solid var(--line); color:var(--text); }
 
 /* '@' 자동완성 팝오버(팔레트와 같은 이디엄) */
@@ -240,7 +251,7 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #loginCard button { height:34px; }
 #loginCard button.sso { background:transparent; border:1px solid var(--line); color:var(--text); }
 #loginCard a { color:var(--accent); font-size:12.5px; cursor:pointer; text-align:center; }
-#loginCard .err { color:#f26d6d; font-size:12.5px; }
+#loginCard .err { color:var(--danger); font-size:12.5px; }
 
 /* Phase 16c — 비공개 채널 멤버 관리 모달 */
 #membersOverlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex;
@@ -248,7 +259,7 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #membersPanel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
                 padding:18px; width:340px; max-width:92vw; }
 .visRow { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-.visBadge { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; }
+.visBadge { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.2px; }
 .visBadge.private { color:var(--accent); }
 .rosterList { display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow-y:auto;
               margin-bottom:12px; }
@@ -261,10 +272,8 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
    danger/ok만 이 스코프에 신규 추가(전역 팔레트에 아직 없던 값). */
 #wikiArea { flex:1; display:flex; min-height:0; }
 
-:root { --wiki-danger:#e5534b; --wiki-ok:#2ea043; }
-@media (prefers-color-scheme: dark) {
-  :root { --wiki-danger:#f26d6d; --wiki-ok:#56d364; }
-}
+/* Task 2 — --wiki-danger/--wiki-ok(로컬 스코프 페어)는 폐기, 전역 --danger로 통합(값·의미 정확히 겹침).
+   --wiki-ok는 애초에 어디서도 쓰이지 않던 죽은 토큰이라 같이 제거. */
 
 /* 사이드바: 세그먼트 + 검색 + 목록.
    2026-07-19 레이아웃 픽스: WikiArea가 #side(모드탭 아래)의 #wikiSideSlot으로 포털하므로,
@@ -306,15 +315,22 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #wikiArea .dochdr { padding:18px 26px 14px; border-bottom:1px solid var(--line);
                     display:flex; align-items:flex-start; gap:12px; }
 #wikiArea .dochdr .titles { flex:1; min-width:0; }
-#wikiArea .dochdr h2 { margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.01em; text-wrap:balance; }
+/* Task 2(Quiet Library 시그니처) — 눈썹(카테고리·갱신일, 순수 프레젠테이션·데이터는 이미 있던
+   category/updated 재사용)→세리프 제목. .eyebrow는 theme.css 상단 공용 유틸(10px 대문자 ls1.2px accent). */
+#wikiArea .dochdr .eyebrow { margin-bottom:4px; }
+#wikiArea .dochdr h2 { margin:0 0 6px; font-family:var(--font-serif); font-size:21px; font-weight:600;
+                       letter-spacing:-.01em; text-wrap:balance; }
 #wikiArea .dochdr .meta { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); }
 #wikiArea .acts { display:flex; gap:6px; flex:none; padding-top:2px; }
 #wikiArea .acts button { border:1px solid var(--line); background:transparent; color:var(--text);
                          font:inherit; font-size:12.5px; padding:6px 12px; border-radius:7px; }
 #wikiArea .acts button:hover { background:var(--hover); }
-#wikiArea .acts button.danger { color:var(--wiki-danger); border-color:var(--wiki-danger); }
-#wikiArea .docBody { flex:1; overflow-y:auto; padding:20px 26px 30px; line-height:1.65; }
-#wikiArea .docBody > * { max-width:640px; }
+/* Unpublish/Delete = 파괴적 액션 → 전역 --danger(구 --wiki-danger 폐기, 값 동일 계열로 통합). */
+#wikiArea .acts button.danger { color:var(--danger); border-color:var(--danger); }
+/* 세리프 본문(지식 표면 전용) — 14.5px/1.75, 62ch 제한(책 같은 읽기 흐름). 코드 블록/인라인 코드는
+   브라우저 UA 기본(mono) + 아래 명시적 code 규칙이 상속을 끊어 그대로 모노 유지. */
+#wikiArea .docBody { flex:1; overflow-y:auto; padding:20px 26px 30px;
+                     font-family:var(--font-serif); font-size:14.5px; line-height:1.75; max-width:62ch; }
 #wikiArea .docBody .mdh { font-size:15px; font-weight:700; margin:22px 0 8px; padding-bottom:5px;
                           border-bottom:1px solid var(--line); }
 #wikiArea .docBody ul, #wikiArea .docBody ol { margin:8px 0 8px 4px; padding-left:18px; }

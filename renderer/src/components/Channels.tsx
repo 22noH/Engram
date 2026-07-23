@@ -77,7 +77,8 @@ export function Channels(props: {
     <div id="side">
       <div id="modetabs">
         {tabs.map((t) => (
-          <div key={t} className={'mtab' + (t === mode ? ' sel' : '')} onClick={() => props.onSetMode(t)}>
+          // Task 2 — Wiki 탭만 세리프 이탤릭(지식 표면 시그니처). 순수 스타일 클래스 추가, 핸들러·라벨 무변경.
+          <div key={t} className={'mtab' + (t === mode ? ' sel' : '') + (t === 'wiki' ? ' wikiTab' : '')} onClick={() => props.onSetMode(t)}>
             {label[t]}
           </div>
         ))}
@@ -85,19 +86,26 @@ export function Channels(props: {
       {mode === 'wiki' && (
         // 목업(2026-07-19) 레이아웃 픽스: 위키 사이드바(세그먼트+검색+목록)는 WikiArea가 여기로
         // 포털해 넣는다(#side=모드탭 아래 단일 컬럼) — WikiArea.tsx의 sideSlot 참고.
-        <div id="wikiSideSlot" />
+        // Task 2 — 눈썹 라벨(순수 프레젠테이션, 포털 대상 앞 형제 요소라 포털된 DOM 구조엔 영향 없음).
+        <>
+          <div className="eyebrow sideEyebrow">{T.sideKnowledge}</div>
+          <div id="wikiSideSlot" />
+        </>
       )}
       {mode !== 'wiki' && mode !== 'admin' && (
-        <div id="channels">
-          {visible.map((c) => (
-            <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
-              <span>{'# ' + c.name}</span>
-              {c.visibility === 'private' && <span className="lock" title={T.channelPrivate} aria-label={T.channelPrivate}>🔒</span>}
-              {c.brain && <span className="brainBadge" title={T.brain}>{c.brain}</span>}
-              {canManage(c) && <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="eyebrow sideEyebrow">{T.sideChannels}</div>
+          <div id="channels">
+            {visible.map((c) => (
+              <div key={c.id} className={'ch' + (c.id === current ? ' sel' : '')} onClick={() => props.onSelect(c.id)}>
+                <span>{'# ' + c.name}</span>
+                {c.visibility === 'private' && <span className="lock" title={T.channelPrivate} aria-label={T.channelPrivate}>🔒</span>}
+                {c.brain && <span className="brainBadge" title={T.brain}>{c.brain}</span>}
+                {canManage(c) && <span className="menu" onClick={(e) => { e.stopPropagation(); openMenu(c.id, e.currentTarget); }}>⋯</span>}
+              </div>
+            ))}
+          </div>
+        </>
       )}
       {menu && (() => {
         const c = channels.find((x) => x.id === menu.id);

@@ -20,6 +20,9 @@ export const T = {
   tabTeam: ko ? '채팅' : 'Team',
   tabCode: ko ? '코드' : 'Code',
   tabWiki: ko ? '위키' : 'Wiki',
+  // Task 2(Quiet Library) — 사이드바 섹션 눈썹 라벨(순수 프레젠테이션, 신규 문구 2개).
+  sideChannels: ko ? '채널' : 'Channels',
+  sideKnowledge: ko ? '지식' : 'Knowledge',
   pickFolder: ko ? '먼저 작업할 폴더를 선택하세요 📁' : 'First choose a folder to work in 📁',
   pickFolderBtn: ko ? '폴더 선택' : 'Choose folder',
   pickFolderPath: ko ? '폴더 경로 입력…' : 'Folder path…',

@@ -134,6 +134,10 @@ export function WikiArea(props: {
             {open && (
               <div className="dochdr">
                 <div className="titles">
+                  {/* Task 2(Quiet Library 시그니처) — 눈썹 줄: category/updated는 WikiPageDto가 항상 갖고
+                      있는 필드(shared/protocol.ts)라 무조건 렌더(스킵 조건 없음). 순수 프레젠테이션, 아래
+                      .meta의 기존 상태필/카테고리/날짜는 그대로 유지(기능 DOM 무변경). */}
+                  <div className="eyebrow">{open.category} · {formatDate(open.updated)}</div>
                   <h2>{open.title}</h2>
                   <div className="meta">
                     <StatusPill status={open.status} />
@@ -144,7 +148,7 @@ export function WikiArea(props: {
                 {canAct && !editing && (
                   <div className="acts">
                     {props.canEdit && <button type="button" onClick={() => { setDraft(open.body); setEditing(true); }}>{T.wikiEdit}</button>}
-                    {props.canUnpublish && <button type="button" onClick={() => props.onUnpublish(open.slug)}>{T.wikiUnpublish}</button>}
+                    {props.canUnpublish && <button type="button" className="danger" onClick={() => props.onUnpublish(open.slug)}>{T.wikiUnpublish}</button>}
                     {props.canDelete && <button type="button" className="danger" onClick={() => { if (window.confirm(T.wikiDeleteConfirm)) props.onDelete(open.slug); }}>{T.wikiDelete}</button>}
                   </div>
                 )}
