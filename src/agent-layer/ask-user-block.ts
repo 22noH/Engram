@@ -45,8 +45,11 @@ function cleanQuestion(q: unknown): QuestionItem | null {
   return clean;
 }
 
-// 전체 페이로드 검증+정제. questions 1~4개, 각 항목도 cleanQuestion 통과해야.
-function cleanPayload(raw: unknown): AskUserPayload | null {
+// 전체 페이로드 검증+정제(공개 API — T3 리뷰: Task 4가 펜스 텍스트가 아닌 원시 도구호출 input(unknown)을
+// 검증해야 해서 extractAskUser를 못 거친다. 검증 로직의 단일 소스로 여기 export해 공유·중복 구현 금지).
+// questions 1~4개·각 q 비어있지 않은 string·options 2~4개·label 비어있지 않은 string·desc/header는
+// string(있다면)·multiSelect/recommended는 boolean(있다면). 규칙 위반이면 null(정제된 부분 반환 없음).
+export function validateAskUserPayload(raw: unknown): AskUserPayload | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (!Array.isArray(r.questions) || r.questions.length < 1 || r.questions.length > 4) return null;
@@ -59,10 +62,9 @@ function cleanPayload(raw: unknown): AskUserPayload | null {
   return { questions };
 }
 
-// 텍스트에서 ```ask_user\n{JSON}\n``` 블록을 찾아 검증·분리한다. 검증 규칙(전부 통과해야 추출):
-// questions 1~4개·각 q 비어있지 않은 string·options 2~4개·label 비어있지 않은 string·
-// desc/header는 string(있다면)·multiSelect/recommended는 boolean(있다면). JSON 파싱 실패나 규칙 위반이면
-// 원문을 그대로 돌려준다(question 없음) — 두뇌가 형식을 틀려도 응답 자체는 유실되지 않는다.
+// 텍스트에서 ```ask_user\n{JSON}\n``` 블록을 찾아 검증·분리한다. 검증은 validateAskUserPayload
+// 하나로(단일 소스) — JSON 파싱 실패나 검증 실패면 원문을 그대로 돌려준다(question 없음) — 두뇌가
+// 형식을 틀려도 응답 자체는 유실되지 않는다.
 export function extractAskUser(text: string): { text: string; question?: AskUserPayload } {
   const m = ASK_USER_BLOCK.exec(text);
   if (!m) return { text };
@@ -72,7 +74,7 @@ export function extractAskUser(text: string): { text: string; question?: AskUser
   } catch {
     return { text };
   }
-  const question = cleanPayload(parsed);
+  const question = validateAskUserPayload(parsed);
   if (!question) return { text };
   const stripped = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
   return { text: stripped, question };

@@ -361,6 +361,8 @@ export class Orchestrator {
       try {
         await this.conversations.append(msg.userId, { ts: new Date().toISOString(), question: msg.text, answer: reply, sources: [] });
       } catch { /* 적재 실패는 답변에 영향 없음 */ }
+      // ask-user Task 3: 이 코드채팅 응답은 의도적으로 postReply(extractAskUser) 미배선 — [구현 시작]
+      // 액션 버튼과 자리를 다투기 때문(질문 카드가 뜨면 postReply가 actions를 지워버려 버튼이 사라진다).
       if (goal && this.fence && this.projects) {
         this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
         await post(reply, [{ label: t('startImplementationLabel'), send: '구현 시작' }]);
@@ -410,6 +412,8 @@ export class Orchestrator {
           .append(userId, { ts: new Date().toISOString(), question, answer: result, sources: [] })
           .catch(() => {});
         this.tracker.finish(threadKey, tracked.id, 'done');
+        // ask-user Task 3: 이 결과도 의도적으로 postReply(extractAskUser) 미배선 — 여러 페르소나가
+        // 합성한 결과라 "두뇌 한 명이 사용자에게 되묻는다"는 질문 카드 모델과 안 맞아서(브리프 범위 밖).
         await post(result);
       } catch (err) {
         this.tracker.finish(threadKey, tracked.id, 'failed');

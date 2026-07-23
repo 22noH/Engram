@@ -1,4 +1,4 @@
-import { extractAskUser, questionFallbackText } from './ask-user-block';
+import { extractAskUser, questionFallbackText, validateAskUserPayload } from './ask-user-block';
 
 describe('extractAskUser', () => {
   it('유효 블록 — 본문 분리 + question 파싱', () => {
@@ -117,6 +117,71 @@ describe('extractAskUser', () => {
     expect(r.text).toContain('남는 글');
     expect(r.text).toContain('```ask_user');
     expect(r.text).toContain('두번째?');
+  });
+
+  // T3 리뷰 minor 1: CRLF(\r\n) 줄바꿈으로 온 블록도 추출되고 주변 본문은 무사해야.
+  it('CRLF(\\r\\n) 줄바꿈 블록도 추출되고 주변 본문은 그대로', () => {
+    const json = JSON.stringify({ questions: [{ q: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] });
+    const text = ['앞 문장입니다.', '', '```ask_user', json, '```', '뒷 문장입니다.'].join('\r\n');
+    const r = extractAskUser(text);
+    expect(r.question?.questions[0].q).toBe('q?');
+    expect(r.text).toContain('앞 문장입니다.');
+    expect(r.text).toContain('뒷 문장입니다.');
+    expect(r.text).not.toContain('ask_user');
+  });
+
+  // T3 리뷰 minor 2: 상한 경계(질문 4개·옵션 4개)는 거부가 아니라 통과해야.
+  it('질문 정확히 4개 → 유효(상한 경계 통과)', () => {
+    const q = { q: 'q?', options: [{ label: 'a' }, { label: 'b' }] };
+    const text = ['```ask_user', JSON.stringify({ questions: [q, q, q, q] }), '```'].join('\n');
+    const r = extractAskUser(text);
+    expect(r.question?.questions).toHaveLength(4);
+  });
+
+  it('옵션 정확히 4개 → 유효(상한 경계 통과)', () => {
+    const text = [
+      '```ask_user',
+      JSON.stringify({ questions: [{ q: 'q?', options: [{ label: 'a' }, { label: 'b' }, { label: 'c' }, { label: 'd' }] }] }),
+      '```',
+    ].join('\n');
+    const r = extractAskUser(text);
+    expect(r.question?.questions[0].options).toHaveLength(4);
+  });
+});
+
+// T3 리뷰 Important: validateAskUserPayload를 공개 API로 직접 검증(Task 4가 펜스 텍스트 없이
+// 원시 도구호출 input:unknown을 이 함수 하나로 검증할 수 있어야 한다 — extractAskUser 내부도 같은 함수 재사용).
+describe('validateAskUserPayload', () => {
+  it('유효 원시 객체 → 정제된 payload(여분 키는 버림)', () => {
+    const raw = {
+      questions: [
+        { q: '진행할까요?', extra: 'junk', options: [{ label: '예', bogus: 1 }, { label: '아니오' }] },
+      ],
+      topLevelJunk: true,
+    };
+    expect(validateAskUserPayload(raw)).toEqual({
+      questions: [{ q: '진행할까요?', options: [{ label: '예' }, { label: '아니오' }] }],
+    });
+  });
+
+  it('질문 5개(상한 초과) → null', () => {
+    const q = { q: 'q?', options: [{ label: 'a' }, { label: 'b' }] };
+    expect(validateAskUserPayload({ questions: [q, q, q, q, q] })).toBeNull();
+  });
+
+  it('옵션 1개(하한 미달) → null', () => {
+    expect(validateAskUserPayload({ questions: [{ q: 'q?', options: [{ label: '단일' }] }] })).toBeNull();
+  });
+
+  it('label이 string이 아니면 → null', () => {
+    expect(
+      validateAskUserPayload({ questions: [{ q: 'q?', options: [{ label: 123 }, { label: 'b' }] }] }),
+    ).toBeNull();
+  });
+
+  it('최상위가 객체가 아니면 → null', () => {
+    expect(validateAskUserPayload('그냥 문자열')).toBeNull();
+    expect(validateAskUserPayload(null)).toBeNull();
   });
 });
 
