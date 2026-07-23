@@ -21,6 +21,9 @@ import type { AdminDeps } from './self.adapter';
 import { GroupStore } from '../auth/group-store';
 import { PathResolver } from '../../pal/path-resolver';
 import { questionFallbackText } from '../../agent-layer/ask-user-block';
+import { AttachmentStore } from './attachment-store';
+import { AttachmentsHttp } from './attachments-http';
+import type { AttachmentsDeps } from './self.adapter';
 
 function makeAuthDeps(dir: string): AuthDeps {
   const accounts = new AccountStore(dir);
@@ -2214,6 +2217,75 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
     expect(r.status).toBe(200);
     const body = await r.json() as { members: number };
     expect(body.members).toBe(1);
+  });
+});
+
+describe('/attachments HTTP 라우팅 배선(Task 2, chat-attachments)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let attachments: AttachmentStore;
+  let sm: SelfMessenger | undefined;
+
+  function makeAttachmentsDeps(authDeps: AuthDeps): AttachmentsDeps {
+    return { http: new AttachmentsHttp({ accounts: authDeps.accounts, sessions: authDeps.sessions, groups: authDeps.groups, chat: store, attachments }) };
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-attach-route-'));
+    store = new ChatStore(path.join(dir, 'chat'));
+    store.listChannels();
+    attachments = new AttachmentStore(path.join(dir, 'data'));
+  });
+  afterEach(async () => {
+    if (sm) await sm.stop();
+    sm = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('attachmentsDeps 미주입 → /attachments/* 기존 404(회귀 0)', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/attachments/general`, { method: 'POST', body: 'x' });
+    expect(r.status).toBe(404);
+  });
+
+  it('attachmentsDeps 주입: 실 SelfMessenger 왕복으로 업로드→다운로드 바이트 동일', async () => {
+    const authDeps = makeAuthDeps(dir);
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, authDeps, undefined, undefined, makeAttachmentsDeps(authDeps),
+    );
+    await sm.start();
+    const data = Buffer.from('round-trip via self.adapter route chain');
+    const up = await fetch(`http://127.0.0.1:${sm.addressPort()}/attachments/general`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', 'x-attachment-name': 'note.txt' },
+      body: data,
+    });
+    expect(up.status).toBe(200);
+    const meta = await up.json() as { id: string };
+    const down = await fetch(`http://127.0.0.1:${sm.addressPort()}/attachments/general/${meta.id}`);
+    expect(down.status).toBe(200);
+    expect(Buffer.from(await down.arrayBuffer())).toEqual(data);
+  });
+
+  it('비공개 채널 비멤버는 실 라우트 체인에서도 403', async () => {
+    const authDeps = makeAuthDeps(dir);
+    const owner = authDeps.accounts.createPassword('boss', 'pw', 'Boss', { role: 'owner', status: 'active' });
+    const outsider = authDeps.accounts.createPassword('out', 'pw', 'Out', { status: 'active' });
+    const ch = store.createChannel('secret', 'chat', owner.id, 'private')!;
+    sm = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog },
+      undefined, authDeps, undefined, undefined, makeAttachmentsDeps(authDeps),
+    );
+    await sm.start();
+    const token = authDeps.sessions.issue(outsider.id).token;
+    const r = await fetch(`http://127.0.0.1:${sm.addressPort()}/attachments/${ch.id}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain', 'x-attachment-name': 'x.txt' },
+      body: 'x',
+    });
+    expect(r.status).toBe(403);
   });
 });
 

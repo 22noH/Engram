@@ -35,8 +35,10 @@ import { SessionStore } from './edge/auth/session-store';
 import { AuthHttp } from './edge/auth/auth-http';
 import { loadAuthSettings, saveAuthSettings } from './edge/auth/auth.config';
 import { ensureSetupCode } from './edge/auth/setup-code';
-import type { AuthDeps, AdminDeps } from './edge/messenger/self.adapter';
+import type { AuthDeps, AdminDeps, AttachmentsDeps } from './edge/messenger/self.adapter';
 import { AdminHttp } from './edge/admin/admin-http';
+import { AttachmentStore } from './edge/messenger/attachment-store';
+import { AttachmentsHttp } from './edge/messenger/attachments-http';
 import type { McpDeps } from './edge/mcp/engram-mcp';
 import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import * as fs from 'fs';
@@ -112,10 +114,16 @@ async function bootstrap(): Promise<void> {
     const isServer = chatCfg.role !== 'brain'; // brain=계정·team·위키승인 미탑재, 127.0.0.1 고정(Phase 16a)
     // 서버 콘솔 S4 Task 1/2: 대화 자동 보존 정책은 chat.json에 저장(chat.config.ts)되고 부팅 시
     // 여기서 ChatStore에 주입된다 — 미설정이면 생성자가 손대지 않아 기본(unlimited)을 유지(회귀 0).
-    chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'), chatCfg.retention);
+    // Task 2(chat-attachments): 첨부 실파일 저장소. dataDir=stateDir 최상위(채팅 jsonl과 형제 —
+    // attachments/<channelId>/<id>). isServer 여부와 무관하게 항상 만든다 — ChatStore 삭제 훅
+    // (프루닝·자동compact·clear 확정)은 브레인 모드에서도 동작해 운명 공유가 필요하기 때문(HTTP
+    // 업로드/다운로드만 isServer 전용 — 아래 attachmentsDeps는 그 블록 안에서만 채워진다).
+    const attachmentStore = new AttachmentStore(paths.getStateDir());
+    chatStore = new ChatStore(path.join(paths.getStateDir(), 'chat'), chatCfg.retention, { attachmentStore });
     let authDeps: AuthDeps | undefined;
     let mcpDeps: McpDeps | undefined;
     let adminDeps: AdminDeps | undefined;
+    let attachmentsDeps: AttachmentsDeps | undefined;
     // clear-compact Task 3b: /compact ws 훅. wiki 배선(메인 서버=isServer)이 있을 때만 채워진다 —
     // brain 모드/미배선이면 undefined인 채로 SelfMessenger에 넘어가 self.adapter의 compact 케이스가
     // 조용한 no-op으로 흡수한다(Task 3이 이미 만들어둔 안전망).
@@ -132,6 +140,11 @@ async function bootstrap(): Promise<void> {
       };
       const authHttp = new AuthHttp({ accounts, sessions, stateDir: paths.getStateDir(), settings });
       authDeps = { accounts, sessions, http: authHttp, settings, groups };
+
+      // Task 2(chat-attachments): /attachments/* http. 같은 accounts/sessions/groups 인스턴스를
+      // 재사용(authDeps·adminDeps와 동일 결 — 세션/그룹 판정이 갈라지지 않도록).
+      const attachmentsHttp = new AttachmentsHttp({ accounts, sessions, groups, chat: chatStore, attachments: attachmentStore });
+      attachmentsDeps = { http: attachmentsHttp };
       if (accounts.count() === 0) {
         logger.log(`서버 미설정 — 초기 설정 코드: ${ensureSetupCode(paths.getStateDir())}`, 'Auth');
       }
@@ -211,7 +224,7 @@ async function bootstrap(): Promise<void> {
       compactHandler,
     },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
-      authDeps, mcpDeps, adminDeps);
+      authDeps, mcpDeps, adminDeps, attachmentsDeps);
   }
 
   // Discord(Phase 6a): messenger.json에 있으면 병행.

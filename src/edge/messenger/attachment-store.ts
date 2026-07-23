@@ -17,7 +17,8 @@ import { safeId } from './chat-store';
 // deleteFor(messages)는 channelId를 받지 않는다(브리프 인터페이스 그대로) — 첨부 id는 randomUUID+
 // 확장자라 사실상 전역 고유이므로, attachments/ 아래 채널 디렉터리들을 훑어 일치하는 파일만 지운다.
 
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20MB(스펙 상한, 코드 상수)
+// Task 2(AttachmentsHttp)도 업로드 스트림 누적 상한으로 동일 값이 필요해 export(중복 상수 회피).
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20MB(스펙 상한, 코드 상수)
 
 // 저장 시 발급한 id(uuid[+확장자]) 형태만 인정 — path()/meta()로 위조 id가 들어와도 실재 파일 존재
 // 여부와 별개로 구조부터 걸러 불필요한 fs 접근을 줄인다. uuid 뒤에 .ext(영숫자 1~10자)까지만 허용.

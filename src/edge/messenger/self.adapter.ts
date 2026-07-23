@@ -17,12 +17,14 @@ import type { AuthHttp } from '../auth/auth-http';
 import type { AuthSettings } from '../auth/auth.config';
 import { can, type Permission } from '../auth/permissions';
 import type { GroupStore } from '../auth/group-store';
-import { effectivePermissions, groupChannelIdsFor } from '../auth/effective-access';
+import { effectivePermissions } from '../auth/effective-access';
 import type { AdminHttp } from '../admin/admin-http';
 import type { McpDeps } from '../mcp/engram-mcp';
 import { buildMcpServer } from '../mcp/engram-mcp';
 import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
 import { makeMcpProposals } from '../mcp/mcp-proposals';
+import type { AttachmentsHttp } from './attachments-http';
+import { accountCanAccessChannel } from './channel-access';
 // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): messenger-bridge.ts가 이미 agent-layer(channel-policy·i18n)를
 // 끌어오는 선례가 있다 — edge/messenger는 agent-layer 순수 유틸 import가 허용되는 층. questionFallbackText는
 // 이 파일과 agent-layer 양쪽이 쓰는 단일 소스라 여기서도 그대로 재사용(포맷터 중복 구현 금지).
@@ -43,6 +45,11 @@ export interface AuthDeps {
 // 서빙+owner 게이트 api. authDeps와 세트로만 라우팅(콘솔=서버 에디션 물건 — brain 모드·authDeps
 // 미주입은 기존 404 폴스루 유지, adminDeps만 단독 주입돼도 라우팅 안 함).
 export interface AdminDeps { http: AdminHttp }
+
+// Task 2(chat-attachments): 업로드/다운로드 http 창구. mcpDeps와 같은 결(독립 self-contained deps —
+// authDeps에 얹지 않는다. 첨부는 서버·데스크톱 양쪽에서 다 쓰는 채팅 기능이라 adminDeps의
+// ENGRAM_DESKTOP 방어선과 무관하다). 미주입이면 /attachments/*는 기존 404로 폴스루(회귀 0).
+export interface AttachmentsDeps { http: AttachmentsHttp }
 
 function toPageMeta(p: WikiPage): WikiPageMeta {
   return { slug: p.slug, title: p.frontmatter.title, category: p.frontmatter.category, status: p.frontmatter.status, updated: p.frontmatter.updated };
@@ -107,6 +114,9 @@ export class SelfMessenger implements MessengerPort {
     private readonly mcpDeps?: McpDeps,
     // Task 2(서버 콘솔 S1): 메인 서버(isServer)에만 주입. authDeps와 함께여야 /admin이 라우팅된다.
     private readonly adminDeps?: AdminDeps,
+    // Task 2(chat-attachments): 업로드/다운로드 http. 미주입(브레인 모드·미배선)이면 /attachments/*는
+    // 기존 404로 폴스루 — mcpDeps와 같은 결(자체 게이트 내장, authDeps 존재를 전제하지 않는다).
+    private readonly attachmentsDeps?: AttachmentsDeps,
   ) {}
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
@@ -138,6 +148,15 @@ export class SelfMessenger implements MessengerPort {
       // 나더라도 여기서 한 번 더 막는다 — 콘솔은 서버 에디션 전용, 데스크톱은 항상 404.
       if (this.authDeps && this.adminDeps && process.env.ENGRAM_DESKTOP !== '1' && (req.url ?? '').startsWith('/admin')) {
         void this.adminDeps.http.handle(req, res).catch(() => {
+          try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
+        });
+        return;
+      }
+      // Task 2(chat-attachments): /attachments/*는 attachmentsDeps 주입 시에만(메인 서버·데스크톱 상주
+      // 둘 다 — mcpDeps처럼 자체 세션 게이트를 내장하고 있어 authDeps 존재를 전제하지 않는다). 미주입이면
+      // 이 블록을 건너뛰어 기존 404로 떨어진다(브레인 모드·미배선 회귀 0).
+      if (this.attachmentsDeps && (req.url ?? '').startsWith('/attachments/')) {
+        void this.attachmentsDeps.http.handle(req, res).catch(() => {
           try { res.writeHead(500); res.end(); } catch { /* 격리 */ }
         });
         return;
@@ -296,16 +315,12 @@ export class SelfMessenger implements MessengerPort {
   // Phase 16c: 채널 목록 가시성 게이트. authDeps 미주입(무인증) 또는 free 소켓(Task 1)이면 전부
   // 접근(회귀 금지). 공개는 전원. 비공개는 만든 사람 본인 또는 초대된 멤버만 — owner·channels.manage
   // 예외 없음(감시 방지: 관리 권한이 비공개 채널을 "볼" 권리를 주지 않는다).
+  // Task 2(chat-attachments): "계정 있을 때" 판정(공개/비공개+creatorId/memberIds/그룹)은
+  // accountCanAccessChannel(channel-access.ts)로 추출 — attachments-http HTTP 게이트와 공유하는
+  // 단일 소스(중복 구현 금지, 브리프 지시). bypassAuth(무인증/free 소켓)만 여기서 먼저 처리한다.
   private canAccessChannel(ws: WebSocket, ch: ChatChannel): boolean {
     if (this.bypassAuth(ws)) return true;
-    if ((ch.visibility ?? 'public') !== 'private') return true;
-    const me = this.users.get(ws);
-    if (!me) return false;
-    if (ch.creatorId === me.id || (ch.memberIds ?? []).includes(me.id)) return true;
-    // 서버 콘솔 S2(Task 1): 채널 접근 = memberIds ∪ (그 채널을 접근 목록에 넣은 그룹의 멤버, 더하기).
-    // groups 미주입이면 groupChannelIdsFor(.., [])=[]라 기존 판정과 동일(회귀 0).
-    const groups = this.authDeps?.groups?.list() ?? [];
-    return groupChannelIdsFor(me.id, groups).includes(ch.id);
+    return accountCanAccessChannel(this.users.get(ws)?.id, ch, this.authDeps?.groups);
   }
   // Task 3: 등록 두뇌 이름 목록(요청 시점 재조회 — 캐시 금지, 두뇌 추가 직후 반영).
   private brainNames(): string[] {
