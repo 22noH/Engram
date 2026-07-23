@@ -1,0 +1,118 @@
+import { render, screen, fireEvent } from '@testing-library/react';
+import { QuestionCard } from './QuestionCard';
+import { T } from '../i18n';
+import type { QuestionItem } from '../../../shared/protocol';
+
+const single: QuestionItem[] = [
+  { q: '어느 접근을 쓸까요?', header: '접근', options: [
+    { label: 'A안', desc: '빠름', recommended: true },
+    { label: 'B안', desc: '안전함' },
+  ] },
+];
+
+it('렌더: 번호칩 순서·추천 배지·옵션이 다 보인다(단일 질문이면 1/N은 안 보임)', () => {
+  const { container } = render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={() => {}} />);
+  const nums = Array.from(container.querySelectorAll('.qnum')).map((n) => n.textContent);
+  expect(nums).toEqual(['1', '2', '3']); // 옵션 2개 + 기타 1개
+  expect(screen.getByText(T.qRecommended)).toBeInTheDocument();
+  expect(screen.queryByText(/^\d\/\d$/)).not.toBeInTheDocument(); // 묶음 아니므로 1/N 없음
+});
+
+it('묶음이면 1/N 카운터가 보인다', () => {
+  const q2: QuestionItem[] = [...single, { q: '두번째 질문', options: [{ label: 'X' }, { label: 'Y' }] }];
+  render(<QuestionCard msgId="m1" question={{ questions: q2 }} onAnswer={() => {}} />);
+  expect(screen.getByText('1/2')).toBeInTheDocument();
+});
+
+it('옵션 클릭만으로는 전송되지 않는다', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText('A안'));
+  expect(onAnswer).not.toHaveBeenCalled();
+});
+
+it('Send를 눌러야 onAnswer(text, msgId)가 1회 호출된다', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText('A안'));
+  fireEvent.click(screen.getByText(T.send));
+  expect(onAnswer).toHaveBeenCalledTimes(1);
+  expect(onAnswer).toHaveBeenCalledWith('접근: A안', 'm1');
+});
+
+it('기타 입력에 타이핑하면 기타가 선택되고, Send로 그 텍스트가 전송된다', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={onAnswer} />);
+  fireEvent.change(screen.getByPlaceholderText(T.qOtherPh), { target: { value: 'C안으로 해줘' } });
+  fireEvent.click(screen.getByText(T.send));
+  expect(onAnswer).toHaveBeenCalledWith('접근: C안으로 해줘', 'm1');
+});
+
+it('multiSelect: 여러 옵션을 골라 Send하면 콤마로 합쳐 전송된다', () => {
+  const multi: QuestionItem[] = [{ q: '뭘 넣을까요?', header: '토핑', multiSelect: true, options: [
+    { label: '치즈' }, { label: '올리브' }, { label: '버섯' },
+  ] }];
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: multi }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText('치즈'));
+  fireEvent.click(screen.getByText('버섯'));
+  fireEvent.click(screen.getByText(T.send));
+  expect(onAnswer).toHaveBeenCalledWith('토핑: 치즈, 버섯', 'm1');
+});
+
+it('묶음 2문항: 각 질문을 Send로 넘기면 마지막에 header: 답 을 / 로 합쳐 한 번만 전송된다', () => {
+  const q2: QuestionItem[] = [
+    { q: '첫번째', header: 'Q1', options: [{ label: 'A' }, { label: 'B' }] },
+    { q: '두번째', header: 'Q2', options: [{ label: 'X' }, { label: 'Y' }] },
+  ];
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: q2 }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText('A'));
+  fireEvent.click(screen.getByText(T.send)); // 다음 질문으로 진행, 아직 전송 안 됨
+  expect(onAnswer).not.toHaveBeenCalled();
+  expect(screen.getByText('두번째')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('Y'));
+  fireEvent.click(screen.getByText(T.send));
+  expect(onAnswer).toHaveBeenCalledTimes(1);
+  expect(onAnswer).toHaveBeenCalledWith('Q1: A / Q2: Y', 'm1');
+});
+
+it('answeredText가 있으면 컨트롤이 무동작(클릭해도 onAnswer 미호출, Send/Skip 버튼 없음)', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} answeredText="접근: A안" onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText('B안'));
+  expect(onAnswer).not.toHaveBeenCalled();
+  expect(screen.queryByText(T.send)).not.toBeInTheDocument();
+  expect(screen.queryByText(T.qSkip)).not.toBeInTheDocument();
+  const container = screen.getByLabelText(single[0].q);
+  expect(container.className).toContain('answered');
+});
+
+it('전부 Skip이면 리터럴 (skipped)가 전송된다(단일 질문)', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText(T.qSkip));
+  expect(onAnswer).toHaveBeenCalledWith(T.qSkipped, 'm1');
+});
+
+it('묶음에서 전부 Skip하면 (skipped)가 전송된다', () => {
+  const q2: QuestionItem[] = [
+    { q: '첫번째', options: [{ label: 'A' }, { label: 'B' }] },
+    { q: '두번째', options: [{ label: 'X' }, { label: 'Y' }] },
+  ];
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: q2 }} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByText(T.qSkip));
+  fireEvent.click(screen.getByText(T.qSkip));
+  expect(onAnswer).toHaveBeenCalledWith(T.qSkipped, 'm1');
+});
+
+it('키보드: 카드에 포커스된 뒤 숫자키로 선택하고 Enter로 전송한다', () => {
+  const onAnswer = vi.fn();
+  render(<QuestionCard msgId="m1" question={{ questions: single }} onAnswer={onAnswer} />);
+  const card = screen.getByLabelText(single[0].q);
+  card.focus();
+  fireEvent.keyDown(card, { key: '2' }); // 두번째 옵션(B안) 선택
+  fireEvent.keyDown(card, { key: 'Enter' });
+  expect(onAnswer).toHaveBeenCalledWith('접근: B안', 'm1');
+});

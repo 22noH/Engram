@@ -288,6 +288,14 @@ export default function App() {
     return mergeThreads(parts);
   }, [currentName, mode, viewConns, chanIdByConnName, msgsByConnCh]);
 
+  // Task 5 — 질문 카드(m.question)당 그 카드를 참조(answersId===카드.id)하는 답 메시지의 text.
+  // 있으면 그 카드는 answered로 렌더된다(QuestionCard로 answeredText prop 전달, Thread가 중개).
+  const answeredById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of mergedMsgs) if (x.answersId) m.set(x.answersId, x.text);
+    return m;
+  }, [mergedMsgs]);
+
   // anchor(및 답)의 소유 연결 — 스레드 답글을 그 스레드를 연 Engram으로 라우팅하는 데 쓰인다.
   const anchorConn = useMemo(() => {
     const m = new Map<string, string>();
@@ -348,7 +356,10 @@ export default function App() {
   // 전송 라우팅: threadId 있으면 그 앵커를 연 Engram으로, 없으면 @이름 또는 기본 Engram으로.
   // 대상 연결에 그 이름 채널이 아직 없으면(지연 생성) createChannel 먼저 보내고 1건 버퍼링,
   // 그 연결의 channels 프레임이 그 이름으로 돌아오면 onFrame이 flush한다.
-  const sendText = (text: string, threadId?: string) => {
+  // Task 5(answersId): 질문 카드 답도 이 경로를 그대로 탄다 — answersId 있으면 send 프레임에 실려
+  // 서버가 그 카드를 참조한 답으로 dedup/트리거한다(카드 없는 일반 전송은 기존과 동일, undefined는
+  // JSON.stringify가 자동으로 생략).
+  const sendText = (text: string, threadId?: string, answersId?: string) => {
     // wiki·admin엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
     // (mode 가드는 타입 좁히기 겸 방어용).
     if (!text.trim() || !currentName || mode === 'wiki' || mode === 'admin') return;
@@ -368,7 +379,7 @@ export default function App() {
     // authorId는 더 이상 클라가 첨부하지 않는다 — 서버가 인증된 소켓 기준으로 스탬프한다.
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
-      send(targetConnId, { t: 'send', channelId, text, threadId });
+      send(targetConnId, { t: 'send', channelId, text, threadId, answersId });
     } else if (!threadId) {
       pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
@@ -605,7 +616,9 @@ export default function App() {
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
-                      onSend={(text) => sendText(text)} />
+                      onSend={(text) => sendText(text)}
+                      getAnsweredText={(id) => answeredById.get(id)}
+                      onAnswer={(text, answersId) => sendText(text, undefined, answersId)} />
                   ));
                 })()}
                 {currentName && awaiting.has(currentName) && (

@@ -129,4 +129,9 @@ export const T = {
   clearMenu: ko ? '🗑 대화 기록 삭제' : '🗑 Delete history',
   clearedToast: ko ? '🗑 대화 기록을 비웠어요' : '🗑 Cleared this conversation',
   undo: ko ? '실행취소' : 'Undo',
+  // Task 5 — 질문 카드(ask-user)
+  qRecommended: ko ? '추천' : 'Recommended',
+  qOtherPh: ko ? '기타 — 직접 입력' : 'Other — type your own answer',
+  qSkip: ko ? '건너뛰기' : 'Skip',
+  qSkipped: '(skipped)', // 전송 텍스트는 로케일 무관 고정(라벨은 qSkip)
 };

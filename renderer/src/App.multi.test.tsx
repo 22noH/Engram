@@ -1,4 +1,4 @@
-import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent, within } from '@testing-library/react';
 import App from './App';
 import { saveConnections } from './connections';
 import { T } from './i18n';
@@ -415,4 +415,39 @@ it('스탠드얼론 배포에서 team 탭(채팅)은 문서에 없다', async ()
 
   // team 탭이 없어야 한다.
   expect(screen.queryByText(T.tabTeam)).not.toBeInTheDocument();
+});
+
+// Task 5 — 질문 카드 배선: m.question 수신 → 카드 렌더, Send → send 프레임에 answersId가 실린다.
+it('question 필드가 있는 메시지는 카드로 렌더되고, Send하면 answersId가 실린 send 프레임이 나간다', async () => {
+  seedTwoConnections();
+  render(<App />);
+  const [homeWS] = FakeWS.instances;
+  act(() => { homeWS.open(); });
+  act(() => {
+    homeWS.msg({ t: 'channels', list: [{ id: 'h1', name: '일반', respondMode: 'all', mode: 'chat' }] });
+  });
+  await waitFor(() => expect(screen.getByText('# 일반')).toBeInTheDocument());
+
+  act(() => {
+    homeWS.msg({
+      t: 'history', channelId: 'h1',
+      messages: [{
+        id: 'q1', authorId: 'engram', text: '카드 폴백 텍스트', ts: '2026-01-01T00:00:00Z',
+        question: { questions: [{ q: '어느 쪽으로 할까요?', header: '방향', options: [{ label: '왼쪽' }, { label: '오른쪽' }] }] },
+      }],
+    });
+  });
+
+  // 카드로 렌더됐다(폴백 텍스트가 아니라 옵션 라벨이 보여야 한다).
+  await waitFor(() => expect(screen.getByText('어느 쪽으로 할까요?')).toBeInTheDocument());
+  expect(screen.getByText('왼쪽')).toBeInTheDocument();
+  expect(screen.queryByText('카드 폴백 텍스트')).not.toBeInTheDocument();
+
+  const card = screen.getByLabelText('어느 쪽으로 할까요?');
+  fireEvent.click(within(card).getByText('왼쪽'));
+  fireEvent.click(within(card).getByText(T.send));
+
+  await waitFor(() => {
+    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"answersId":"q1"') && s.includes('방향: 왼쪽'))).toBe(true);
+  });
 });
