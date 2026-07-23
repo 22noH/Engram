@@ -102,6 +102,8 @@ details.thread .msg { max-width:100%; }
 /* Task 5 — 질문 카드(ask-user, 목업 v4). .msg 골격 안에서 body 자리를 대신한다. */
 .qcard { background:var(--panel); border:1px solid var(--line); border-radius:8px;
          padding:10px 12px; display:flex; flex-direction:column; gap:6px; outline:none; }
+/* T5 리뷰 미너 #3 — outline만 없애면 키보드 포커스가 안 보인다. 대신 테두리로 표시. */
+.qcard:focus-visible { border-color:var(--accent-line); }
 .qcard .qhead { display:flex; align-items:baseline; gap:6px; margin-bottom:2px; }
 .qcard .qhead .qtext { font-weight:600; flex:1; }
 .qcard .qhead .qcount { color:var(--dim); font-size:11.5px; flex:none; }
@@ -123,6 +125,7 @@ details.thread .msg { max-width:100%; }
 .qcard .qother input { flex:1; min-width:0; padding:5px 8px; }
 .qcard .qfoot { display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
 .qcard .qfoot .qskip { background:transparent; color:var(--dim); }
+.qcard .qfoot button:disabled { opacity:.5; cursor:default; }
 .qcard.answered { background:var(--code-bg); }
 .qcard.answered .qopt:not(.sel) { opacity:.55; }
 #popmenu { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:8px;

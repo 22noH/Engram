@@ -448,6 +448,8 @@ it('question 필드가 있는 메시지는 카드로 렌더되고, Send하면 an
   fireEvent.click(within(card).getByText(T.send));
 
   await waitFor(() => {
-    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"answersId":"q1"') && s.includes('방향: 왼쪽'))).toBe(true);
+    // D1(T5 리뷰) — 단일 질문은 접두어 없이 답 그 자체("방향: 왼쪽"이 아니라 "왼쪽").
+    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('"answersId":"q1"') && s.includes('"왼쪽"'))).toBe(true);
+    expect(homeWS.sent.some((s) => s.includes('"send"') && s.includes('방향: 왼쪽'))).toBe(false);
   });
 });
