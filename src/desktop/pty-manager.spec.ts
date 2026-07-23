@@ -1,4 +1,9 @@
+import * as path from 'path';
 import { PtyManager, PtyLike, SpawnFactory, pickShell } from './pty-manager';
+
+// 실존해야 하는 cwd 검증(리뷰 T1 minor 2) 테스트용 — 이 스펙 파일 자신의 디렉터리는 항상 존재.
+const VALID_CWD = __dirname;
+const VALID_CWD_2 = path.dirname(__dirname); // 다른 실존 경로(재사용 테스트에서 "무시됨"을 보여주는 용도)
 
 // 가짜 pty 프로세스: onData/onExit 콜백을 캡처해 테스트에서 직접 발화시킨다.
 class FakePty implements PtyLike {
@@ -68,19 +73,19 @@ describe('PtyManager', () => {
   it('start()로 새 세션 생성 — sid·shell 반환, spawnFactory 1회 호출', () => {
     const { factory, calls } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const r = mgr.start('ch1', 'C:/repo');
+    const r = mgr.start('ch1', VALID_CWD);
     expect('error' in r).toBe(false);
     const ok = r as { sid: string; shell: string };
     expect(ok.shell).toBe('powershell.exe');
     expect(typeof ok.sid).toBe('string');
-    expect(calls).toEqual([{ shell: 'powershell.exe', cwd: 'C:/repo' }]);
+    expect(calls).toEqual([{ shell: 'powershell.exe', cwd: VALID_CWD }]);
   });
 
-  it('같은 채널로 다시 start() — 기존 세션 재사용(spawnFactory 재호출 없음)', () => {
+  it('같은 채널로 다시 start() — 기존 세션 재사용(spawnFactory 재호출 없음, cwd 변경 무시)', () => {
     const { factory, calls } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const r1 = mgr.start('ch1', 'C:/repo') as { sid: string };
-    const r2 = mgr.start('ch1', 'C:/repo-different-cwd') as { sid: string };
+    const r1 = mgr.start('ch1', VALID_CWD) as { sid: string };
+    const r2 = mgr.start('ch1', VALID_CWD_2) as { sid: string };
     expect(r2.sid).toBe(r1.sid);
     expect(calls.length).toBe(1);
   });
@@ -88,8 +93,8 @@ describe('PtyManager', () => {
   it('다른 채널은 별도 세션(별도 sid)', () => {
     const { factory } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const r1 = mgr.start('ch1', 'C:/repo') as { sid: string };
-    const r2 = mgr.start('ch2', 'C:/repo') as { sid: string };
+    const r1 = mgr.start('ch1', VALID_CWD) as { sid: string };
+    const r2 = mgr.start('ch2', VALID_CWD) as { sid: string };
     expect(r1.sid).not.toBe(r2.sid);
   });
 
@@ -98,15 +103,31 @@ describe('PtyManager', () => {
       throw new Error('spawn boom');
     };
     const mgr = new PtyManager(factory, 'win32');
-    const r = mgr.start('ch1', 'C:/repo');
+    const r = mgr.start('ch1', VALID_CWD);
     expect('error' in r).toBe(true);
     expect((r as { error: string }).error).toContain('spawn boom');
+  });
+
+  it('cwd가 문자열이 아니면 스폰 전에 {error: "invalid cwd"}(spawnFactory 미호출)', () => {
+    const { factory, calls } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    const r = mgr.start('ch1', undefined as unknown as string);
+    expect(r).toEqual({ error: 'invalid cwd' });
+    expect(calls.length).toBe(0);
+  });
+
+  it('cwd가 실존하지 않으면 스폰 전에 {error: "invalid cwd"}(spawnFactory 미호출)', () => {
+    const { factory, calls } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    const r = mgr.start('ch1', 'C:/definitely-does-not-exist-engram-pty-test');
+    expect(r).toEqual({ error: 'invalid cwd' });
+    expect(calls.length).toBe(0);
   });
 
   it('write()는 해당 세션의 proc.write로 위임', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     mgr.write(sid, 'ls\r');
     expect(procs[0].writes).toEqual(['ls\r']);
   });
@@ -120,7 +141,7 @@ describe('PtyManager', () => {
   it('write()는 proc.write가 throw해도 삼킨다(never-throw)', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     procs[0].writeThrows = true;
     expect(() => mgr.write(sid, 'x')).not.toThrow();
   });
@@ -128,7 +149,7 @@ describe('PtyManager', () => {
   it('resize()는 해당 세션의 proc.resize로 위임', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     mgr.resize(sid, 120, 40);
     expect(procs[0].resizes).toEqual([{ cols: 120, rows: 40 }]);
   });
@@ -142,10 +163,10 @@ describe('PtyManager', () => {
   it('kill()은 proc.kill() 호출 + 세션 제거(같은 채널 재start시 새 세션)', () => {
     const { factory, procs, calls } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     mgr.kill(sid);
     expect(procs[0].killed).toBe(true);
-    const r2 = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const r2 = mgr.start('ch1', VALID_CWD) as { sid: string };
     expect(r2.sid).not.toBe(sid);
     expect(calls.length).toBe(2);
   });
@@ -154,7 +175,7 @@ describe('PtyManager', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
     expect(() => mgr.kill('nope')).not.toThrow();
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     procs[0].killThrows = true;
     expect(() => mgr.kill(sid)).not.toThrow();
   });
@@ -162,8 +183,8 @@ describe('PtyManager', () => {
   it('killAll()은 살아있는 모든 세션을 kill', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    mgr.start('ch1', 'C:/repo');
-    mgr.start('ch2', 'C:/repo');
+    mgr.start('ch1', VALID_CWD);
+    mgr.start('ch2', VALID_CWD);
     mgr.killAll();
     expect(procs.every((p) => p.killed)).toBe(true);
   });
@@ -171,7 +192,7 @@ describe('PtyManager', () => {
   it('onData 구독자는 (sid, data)로 팬아웃 수신', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     const received: Array<[string, string]> = [];
     mgr.onData((s, d) => received.push([s, d]));
     procs[0].fireData('hello');
@@ -181,7 +202,7 @@ describe('PtyManager', () => {
   it('onData 구독자가 throw해도 다른 구독자·매니저는 영향 없음(never-throw)', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    mgr.start('ch1', 'C:/repo') as { sid: string };
+    mgr.start('ch1', VALID_CWD) as { sid: string };
     const received: string[] = [];
     mgr.onData(() => {
       throw new Error('subscriber boom');
@@ -194,12 +215,12 @@ describe('PtyManager', () => {
   it('onExit 구독자는 (sid, code) 수신 + 세션 정리(재start시 새 세션)', () => {
     const { factory, procs, calls } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     const received: Array<[string, number]> = [];
     mgr.onExit((s, c) => received.push([s, c]));
     procs[0].fireExit(1);
     expect(received).toEqual([[sid, 1]]);
-    const r2 = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const r2 = mgr.start('ch1', VALID_CWD) as { sid: string };
     expect(r2.sid).not.toBe(sid);
     expect(calls.length).toBe(2);
   });
@@ -207,7 +228,7 @@ describe('PtyManager', () => {
   it('replay()는 지금까지의 출력을 버퍼로 반환', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
     procs[0].fireData('foo');
     procs[0].fireData('bar');
     expect(mgr.replay(sid)).toBe('foobar');
@@ -219,14 +240,26 @@ describe('PtyManager', () => {
     expect(mgr.replay('nope')).toBe('');
   });
 
-  it('replay 버퍼는 ~200KB로 캡(앞부분을 잘라 최신 데이터 유지)', () => {
+  it('replay 버퍼는 ~200KB(바이트)로 캡(앞부분을 잘라 최신 데이터 유지)', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
-    const { sid } = mgr.start('ch1', 'C:/repo') as { sid: string };
-    const chunk = 'x'.repeat(50 * 1024); // 50KB
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
+    const chunk = 'x'.repeat(50 * 1024); // 50KB(ASCII라 바이트=문자수)
     for (let i = 0; i < 6; i++) procs[0].fireData(chunk); // 300KB 유입
     const buf = mgr.replay(sid);
-    expect(buf.length).toBeLessThanOrEqual(200 * 1024);
+    expect(Buffer.byteLength(buf, 'utf8')).toBeLessThanOrEqual(200 * 1024);
     expect(buf.endsWith('x')).toBe(true); // 최신 데이터가 남아있음
+  });
+
+  it('replay 버퍼 캡은 UTF-16 코드유닛이 아니라 UTF-8 바이트 기준(리뷰 T1 minor 1 — 한글 등 멀티바이트 출력)', () => {
+    const { factory, procs } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    const { sid } = mgr.start('ch1', VALID_CWD) as { sid: string };
+    // 한글 한 글자는 UTF-8로 3바이트지만 UTF-16 코드유닛(string.length)으로는 1 — 문자수 기준
+    // cap이었다면 실제 바이트가 캡의 최대 3배까지 쌓일 수 있었다.
+    const koreanChunk = '가'.repeat(10 * 1024); // 10*1024 문자 = 30KB(UTF-8)
+    for (let i = 0; i < 20; i++) procs[0].fireData(koreanChunk); // 문자수 기준 200KB, 바이트 기준 600KB 유입
+    const buf = mgr.replay(sid);
+    expect(Buffer.byteLength(buf, 'utf8')).toBeLessThanOrEqual(200 * 1024);
   });
 });
