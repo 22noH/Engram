@@ -132,7 +132,12 @@ export class SelfMessenger implements MessengerPort {
       // Phase 11: 클라(renderer/)가 페이지를 소유 — 두뇌 http는 헬스 프로브 + ws 업그레이드만.
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        // 포트 피기백 가드(플랜 2026-07-24): ENGRAM_INSTANCE_ID가 설정돼 있으면(데스크톱 자식으로
+        // fork됐을 때) 헬스 응답에 그대로 에코 — 데스크톱이 헬스 폴링에서 "내가 띄운 자식인지" 대조하는
+        // 재료다. 미설정(수동 실행·도커·서버 에디션·brain 모드)이면 필드를 아예 넣지 않아 기존 응답과
+        // 바이트 동일(additive only, 회귀 0).
+        const instanceId = process.env.ENGRAM_INSTANCE_ID;
+        res.end(JSON.stringify(instanceId ? { ok: true, instanceId } : { ok: true }));
         return;
       }
       // Phase 16a: /auth/*는 AuthHttp로 위임(계정·세션 창구). authDeps 미주입=위임 없음(brain 모드).

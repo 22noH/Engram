@@ -27,7 +27,9 @@ import { readSetupCode } from '../edge/auth/setup-code';
 import { focusOrRestore } from './window-focus';
 import { PtyManager } from './pty-manager';
 import { diffStatus, diffFile } from './git-diff';
+import { classifyHealth } from './health-identity';
 import * as nodeHttp from 'http';
+import { randomUUID } from 'crypto';
 
 // T4(실측 검증) dev/test 격리: 설치판(트레이 상주, %APPDATA%/Engram 단일 인스턴스 락 보유)을
 // 건드리지 않고 `electron .`을 별도 데이터로 띄우기 위한 훅. getPath('userData')·
@@ -37,6 +39,10 @@ if (process.env.ENGRAM_USERDATA_DIR) app.setPath('userData', process.env.ENGRAM_
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
 const configDir = path.join(dataDir, 'config');
+// 포트 피기백 가드(플랜 2026-07-24): 부팅마다 랜덤 id 1개 — 자식 헬스 응답과 대조해 "내가 방금 띄운
+// 자식"인지 확인하는 재료. 자식이 죽어도 재시작(startChild)마다 새로 만들지 않고 이 프로세스 수명
+// 동안 고정(같은 데스크톱 인스턴스가 재시작한 자식은 계속 같은 id를 쓰는 게 맞다).
+const instanceId = randomUUID();
 const childEnv = {
   ...process.env,
   ENGRAM_DATA_DIR: dataDir,
@@ -46,6 +52,11 @@ const childEnv = {
   // — 로컬 두뇌엔 무해(brain 모드는 애초에 adminDeps 미배선). main.ts가 isServer && 이 값 !== '1'
   // 일 때만 adminDeps를 배선(src/main.ts), self.adapter.ts가 라우팅에서도 한 번 더 확인(방어 이중화).
   ENGRAM_DESKTOP: '1',
+  // 포트 피기백 가드: 상주 child(startChild)만 폴링 대조 대상이라 실질적으로 쓰이는 건 그쪽뿐이지만,
+  // ENGRAM_DESKTOP과 같은 결로 childEnv에 얹는다 — 로컬 두뇌(startLocalBrain)도 물려받아 헬스에
+  // 에코하게 되지만 브레인은 애초에 main.ts에 헬스 폴링 루프가 없어(별도 감독 없음, ponytail) 아무도
+  // 이 필드를 대조하지 않는다. 즉 additive·무해(회귀 0) — 브레인 부팅·감독 로직은 손대지 않았다.
+  ENGRAM_INSTANCE_ID: instanceId,
 };
 
 let tray: Tray | null = null;
@@ -221,12 +232,32 @@ function openChat(): void {
   let preset = '';
   const p = readPresetFile(configDir);
   if (p) preset = `&presetName=${encodeURIComponent(p.name)}&presetEndpoint=${encodeURIComponent(p.endpoint)}`;
+  // 포트 피기백 가드(플랜 2026-07-24): 헬스 응답 본문을 모아 classifyHealth로 대조한다.
+  // 'ok'=우리 자식 → 로드. 'foreign'=다른 인스턴스가 이 포트에 이미 응답 중 → 폴링 즉시 중단하고
+  // 명확한 실패(에러 다이얼로그+종료) — 조용히 남의 서버에 붙는 사고 방지. 'pending'=아직 못 믿을
+  // 응답(파싱 실패·자식 미기동) → 기존과 동일하게 계속 폴링(타이밍 불변).
+  const onForeignInstance = (): void => {
+    dialog.showErrorBox(
+      'Engram is already running',
+      `Another instance of Engram is already using port ${cfg.port}. ` +
+        'Close the other instance first, then start Engram again.',
+    );
+    app.quit();
+  };
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     nodeHttp.get(healthUrl, (res) => {
-      res.resume();
-      const lang = resolveLanguage(cfg.language, app.getLocale());
-      if (chatWin) void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 200 → 클라 로드(포트·언어·프리셋 주입)
+      let body = '';
+      res.on('data', (chunk: Buffer) => { body += chunk; });
+      res.on('end', () => {
+        if (!chatWin) return; // 응답 도착 사이 창이 닫혔으면 무시
+        const status = classifyHealth(body, instanceId);
+        if (status === 'foreign') { onForeignInstance(); return; }
+        if (status === 'pending') { setTimeout(probe, 2000); return; }
+        const lang = resolveLanguage(cfg.language, app.getLocale());
+        void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 ok → 클라 로드(포트·언어·프리셋 주입)
+      });
+      res.on('error', () => { setTimeout(probe, 2000); });
     }).on('error', () => { setTimeout(probe, 2000); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.

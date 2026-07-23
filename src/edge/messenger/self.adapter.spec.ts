@@ -203,6 +203,34 @@ describe('SelfMessenger 코어', () => {
     const res2 = await fetch(`http://127.0.0.1:${sm.addressPort()}/nope`);
     expect(res2.status).toBe(404);
   });
+
+  // 포트 피기백 가드(플랜 2026-07-24): ENGRAM_INSTANCE_ID 조건부 에코 — 미설정=필드 생략(바이트
+  // 동일), 설정=그대로 에코. 프로세스 env를 직접 건드리므로 원상복구 필수(다른 테스트 오염 방지).
+  it('헬스 응답: ENGRAM_INSTANCE_ID 미설정이면 필드 생략(기존과 바이트 동일)', async () => {
+    const prev = process.env.ENGRAM_INSTANCE_ID;
+    delete process.env.ENGRAM_INSTANCE_ID;
+    try {
+      const res = await fetch(`http://127.0.0.1:${sm.addressPort()}/`);
+      const body = await res.json();
+      expect(body).toEqual({ ok: true });
+      expect(Object.keys(body)).toEqual(['ok']); // instanceId 키 자체가 없어야 한다
+    } finally {
+      if (prev === undefined) delete process.env.ENGRAM_INSTANCE_ID;
+      else process.env.ENGRAM_INSTANCE_ID = prev;
+    }
+  });
+
+  it('헬스 응답: ENGRAM_INSTANCE_ID 설정이면 그대로 에코', async () => {
+    const prev = process.env.ENGRAM_INSTANCE_ID;
+    process.env.ENGRAM_INSTANCE_ID = 'test-instance-abc123';
+    try {
+      const res = await fetch(`http://127.0.0.1:${sm.addressPort()}/`);
+      expect(await res.json()).toEqual({ ok: true, instanceId: 'test-instance-abc123' });
+    } finally {
+      if (prev === undefined) delete process.env.ENGRAM_INSTANCE_ID;
+      else process.env.ENGRAM_INSTANCE_ID = prev;
+    }
+  });
 });
 
 it('포트가 이미 점유돼도 상주를 죽이지 않는다(두 번째 start는 reject만)', async () => {
