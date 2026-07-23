@@ -1,7 +1,7 @@
 {
   "name": "engram",
   "description": "Engram wiki as your AI's long-term memory: semantic search, propose-and-approve knowledge flow (human gate), works with or without the Engram desktop app",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "homepage": "https://www.npmjs.com/package/engram-wiki-mcp",
   "repository": "https://github.com/22noH/Engram",
   "keywords": ["mcp", "memory", "wiki", "knowledge-base", "semantic-search"]
