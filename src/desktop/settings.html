@@ -69,7 +69,7 @@
        --accent-text로 override(다크에서 밝은 --accent 위 흰색 아이콘은 대비가 약함). 모델 목록의
        provider 뱃지 타일(#nav-items 밖, JS로 생성)은 api/local 구분이라는 실질 정보를 담고 있어
        이 픽스 범위에서 제외. */
-    #nav-items .tile svg [stroke] { stroke: var(--accent-text); }
+    #nav-items .tile svg { stroke: var(--accent-text); }
     #nav-items .tile svg [fill="#fff"] { fill: var(--accent-text); }
     .side-foot { margin-top: auto; padding: 8px 10px 0; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--dim); }
     .side-foot .pulse { width: 8px; height: 8px; }

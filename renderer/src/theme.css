@@ -1,6 +1,7 @@
 /* Phase 11a */
 /* Task 1(Quiet Library) — "지식 서재": 차분한 종이톤 라이트 / 따뜻한 흑연 다크, 깊은 청록 잉크 액센트.
    전환은 기존 prefers-color-scheme 그대로. 값은 docs/superpowers/specs/2026-07-23-quiet-library-design.md 토큰 표 verbatim. */
+/* --faint는 T5에서 실사용처(.msg .who)가 --dim으로 대체되며 현재 미참조 — 스펙 표 파리티로 토큰 자체는 유지, 예약. */
 :root {
   --bg:#f5f6f4; --panel:#fdfdfc; --panel-2:#ffffff; --line:#e4e6e2; --text:#24292e; --dim:#6b7268; --faint:#a0a69d;
   --accent:#2e6e63; --accent-text:#ffffff; --accent-soft:#eef2ee; --accent-line:#cfe0d6;
