@@ -11,6 +11,7 @@ import { Thread } from './components/Thread';
 import type { AttachmentCtx } from './components/Message';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
+import { CodePanel, CodePanelIcons, loadCodeTab, saveCodeTab, type CodeTab } from './components/CodePanel';
 import { EngramSelector } from './components/EngramSelector';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
@@ -387,6 +388,23 @@ export default function App() {
     ? channelsByConn[connState.defaultConnId]?.find((c) => c.name === currentName && (c.mode ?? 'chat') === mode)
     : undefined;
 
+  // Task 3(code-panel) — 채널별 열림 탭은 localStorage 퍼시스트(CodePanel.tsx 헬퍼). 채널이 바뀌면
+  // 그 채널의 저장된 탭으로, code 모드를 벗어나면 닫힌 것으로 취급한다.
+  const [codeTab, setCodeTab] = useState<CodeTab | null>(null);
+  useEffect(() => {
+    setCodeTab(mode === 'code' && defaultChan?.id ? loadCodeTab(defaultChan.id) : null);
+  }, [mode, defaultChan?.id]);
+  const openCodeTab = (t: CodeTab) => {
+    if (!defaultChan) return;
+    setCodeTab(t);
+    saveCodeTab(defaultChan.id, t);
+  };
+  const closeCodePanel = () => {
+    if (defaultChan) saveCodeTab(defaultChan.id, null);
+    setCodeTab(null);
+  };
+  const codePanelGate = mode === 'code' && !!defaultChan?.repoPath && !!window.engramDesktop?.ptyStart;
+
   // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
   // team 모드는 스코프된 연결(viewConns=기본 연결 하나)에만 보낸다 — 안 그러면 동명 팀채널이
   // 다른 브레인에도 있을 때 그쪽까지 삭제/변경되어 Phase14가 금지한 교차 연결 오염이 재발한다.
@@ -750,8 +768,9 @@ export default function App() {
           ) : (
             <>
               {currentName && mode === 'code' && defaultChan?.repoPath && (
-                <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
-                  {'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}
+                <div id="chhdr" style={{ display: 'flex' }} title={defaultChan.repoPath}>
+                  <span>{'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}</span>
+                  {codePanelGate && <CodePanelIcons activeTab={codeTab} onSelect={openCodeTab} />}
                 </div>
               )}
               {currentName && mode === 'code' && !defaultChan?.repoPath ? (
@@ -762,7 +781,9 @@ export default function App() {
                   래퍼(핸들러·기존 셀렉터 무영향) — #msgs/#palette/#mention/#inputbar를 감싸 폭을 통일하고,
                   절대배치되는 #palette/#mention/#clearToast의 기준 컨테이너가 되어(position:relative)
                   좁아진 입력창 폭에 맞춰 함께 정렬되게 한다. */}
-              <div className="chatCol">
+              {(() => {
+                const codeChildren = (
+                <>
               <div id="msgs" ref={msgsRef}>
                 {(() => {
                   const byAnchor = new Map<string, Msg[]>();
@@ -884,7 +905,18 @@ export default function App() {
                     if (sent) clearComposerAttachments();
                   }}>{T.send}</button>
               </div>
-              </div>
+                </>
+                );
+                return codePanelGate && codeTab && defaultChan ? (
+                  <div className="codeMainRow">
+                    <div className="chatCol">{codeChildren}</div>
+                    <CodePanel channelId={defaultChan.id} repoPath={defaultChan.repoPath as string} tab={codeTab}
+                      onChangeTab={openCodeTab} onClose={closeCodePanel} />
+                  </div>
+                ) : (
+                  <div className="chatCol">{codeChildren}</div>
+                );
+              })()}
                 </>
               )}
             </>

@@ -180,7 +180,9 @@ details.thread .msg { max-width:100%; }
          gap:14px; color:var(--dim); padding:24px; text-align:center; }
 #empty button { padding:10px 18px; }
 #chhdr { flex:none; padding:6px 16px; font-size:12px; color:var(--dim);
-         border-bottom:1px solid var(--line); display:none; }
+         border-bottom:1px solid var(--line); display:none;
+         align-items:center; justify-content:space-between; gap:12px; }
+#chhdr > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* Task 4(clear-compact) — /clear 실행취소 토스트(목업 ③: 하단중앙 오버레이, #main은 이미 position:relative) */
 #clearToast { position:absolute; left:50%; bottom:64px; transform:translateX(-50%); z-index:9;
               display:flex; align-items:center; gap:12px; background:var(--text); color:var(--bg);
@@ -446,3 +448,74 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
 .memberRow .rowMenuBtn:hover { color:var(--text); }
 /* 눈썹 섹션(SERVER SETTINGS) — 큰 제목 없이 눈썹만(목업 지정), 입력폼은 기존 그대로. */
 #adminSettings { display:flex; flex-direction:column; gap:8px; margin-top:6px; max-width:420px; }
+
+/* Task 3(code-panel, 목업 B+라이트 터미널 수정본) — 코드 채널 우측 터미널·프리뷰·Diff 패널.
+   전 표면이 QL 토큰만 사용(터미널 배경도 --panel-2 — 검정 고정 절대 금지, 사용자 확정 규칙). */
+.chhdrIcons { flex:none; display:flex; gap:6px; }
+.codeIconBtn { width:26px; height:24px; padding:0; border-radius:7px; font-size:13px; line-height:1;
+               background:transparent; border:1px solid transparent; color:var(--dim); cursor:pointer;
+               display:flex; align-items:center; justify-content:center; }
+.codeIconBtn:hover { background:var(--hover); color:var(--text); }
+.codeIconBtn.active { background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent); }
+
+/* 레포 첫 row 배치 — code 모드+패널 열림에서만 #main 안에 나타난다(다른 모드/닫힘 상태엔 미영향). */
+.codeMainRow { flex:1; display:flex; min-height:0; }
+.codeMainRow .chatCol { flex:1; min-width:0; }
+
+/* 레포 첫 스플리터 — 패널 좌측 모서리, 드래그로 폭 조절(마우스업 시 localStorage 퍼시스트). */
+.codePanel { position:relative; flex:none; display:flex; flex-direction:column; min-height:0;
+             background:var(--panel); border-left:1px solid var(--line); }
+.codeSplitter { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2; }
+.codeSplitter:hover { background:var(--accent-line); opacity:.5; }
+
+.codeTabRow { flex:none; display:flex; align-items:center; gap:2px; padding:0 8px;
+              border-bottom:1px solid var(--line); background:var(--panel-2); }
+.codeTabBtn { padding:8px 10px; font-size:12px; color:var(--dim); cursor:pointer; border-bottom:2px solid transparent; }
+.codeTabBtn:hover { color:var(--text); }
+.codeTabBtn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+.codeTabClose { margin-left:auto; background:transparent; color:var(--dim); font-size:16px; line-height:1;
+                padding:2px 6px; border-radius:6px; }
+.codeTabClose:hover { background:var(--hover); color:var(--text); }
+.codeTabBody { flex:1; min-height:0; display:flex; flex-direction:column; }
+.codeEmptyNotice { flex:1; display:flex; align-items:center; justify-content:center; text-align:center;
+                    padding:20px; color:var(--dim); font-size:12.5px; }
+
+/* 터미널 탭 — 배경은 --panel-2(라이트=종이톤 카드/다크=흑연), xterm 자체 theme도 CodePanel.tsx가
+   같은 토큰에서 구성한다. */
+.codeTerm { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--panel-2); }
+.codeTermSurface { flex:1; min-height:0; padding:6px 8px; }
+.codeTermSurface .xterm { height:100%; }
+.codeSessionBar { flex:none; display:flex; align-items:center; justify-content:space-between; gap:10px;
+                   padding:8px 12px; font-size:12px; color:var(--dim); border-top:1px solid var(--line); }
+.codeSessionBar button { padding:5px 12px; font-size:12px; }
+
+/* 프리뷰 탭 — URL 바+iframe(sandbox 속성은 CodePanel.tsx). */
+.codePreview { flex:1; min-height:0; display:flex; flex-direction:column; }
+.codePreviewBar { flex:none; display:flex; align-items:center; gap:6px; padding:8px; border-bottom:1px solid var(--line); }
+.codePreviewBar input { flex:1; min-width:0; padding:6px 8px; font-size:12px; }
+.codePreviewBar button, .codePreviewBar a { flex:none; padding:5px 9px; font-size:12px; text-align:center;
+                                             color:var(--dim); text-decoration:none; border:1px solid var(--line); border-radius:6px; }
+.codePreviewBar a:hover, .codePreviewBar button:hover:not(:disabled) { color:var(--text); background:var(--hover); }
+.codePreviewError { flex:none; padding:6px 12px; font-size:12px; color:var(--danger); }
+.codePreview iframe { flex:1; min-height:0; border:none; background:#fff; }
+
+/* Diff 탭 — 좌측 파일 목록+우측 unified diff(추가/삭제행은 --accent/--danger 파생색, AdminArea 관례). */
+.codeDiff { flex:1; min-height:0; display:flex; }
+.codeDiffList { flex:none; width:180px; overflow-y:auto; border-right:1px solid var(--line); padding:6px; }
+.codeDiffRefresh { width:100%; margin-bottom:4px; padding:5px; font-size:12px; background:transparent;
+                    border:1px solid var(--line); color:var(--dim); border-radius:6px; }
+.codeDiffRefresh:hover { color:var(--text); background:var(--hover); }
+.codeDiffFile { display:flex; align-items:center; gap:6px; padding:5px 6px; border-radius:6px; cursor:pointer; font-size:12px; }
+.codeDiffFile:hover { background:var(--hover); }
+.codeDiffFile.sel { background:var(--accent-soft); }
+.codeDiffStatus { flex:none; width:14px; text-align:center; font-weight:700; color:var(--dim); }
+.codeDiffStatus.sA { color:var(--ok); }
+.codeDiffStatus.sM { color:var(--accent); }
+.codeDiffStatus.sD { color:var(--danger); }
+.codeDiffPath { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.codeDiffView { flex:1; min-width:0; overflow:auto; }
+.codeDiffPre { margin:0; padding:8px 12px; font-family:Consolas,'Courier New',monospace; font-size:12px;
+               line-height:1.5; white-space:pre; }
+.codeDiffPre .dAdd { background:color-mix(in srgb, var(--ok) 14%, transparent); }
+.codeDiffPre .dDel { background:color-mix(in srgb, var(--danger) 14%, transparent); }
+.codeDiffPre .dHunk { color:var(--dim); }

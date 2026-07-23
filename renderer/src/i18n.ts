@@ -155,4 +155,22 @@ export const T = {
   attachChannelChanged: ko ? '채널이 바뀌어 첨부가 취소됐어요 — 다시 첨부해 주세요' : 'Attachments were discarded — the channel changed. Please attach again.',
   // T4 리뷰 I4 — 실패한 칩이 남아있는 동안 전송을 막는 안내.
   attachHasError: ko ? '첨부 실패 — 제거하거나 다시 시도한 뒤 보내세요' : 'An attachment failed — remove it or retry before sending',
+  // Task 3(code-panel) — 코드 채널 우측 패널(터미널·프리뷰·Diff). Diff는 고유명으로 로케일 불문 동일.
+  codeTerminalTab: ko ? '터미널' : 'Terminal',
+  codePreviewTab: ko ? '미리보기' : 'Preview',
+  codeDiffTab: 'Diff',
+  codePanelClose: ko ? '패널 닫기' : 'Close panel',
+  codeRefresh: ko ? '새로고침' : 'Refresh',
+  codeSessionEnded: ko ? '[세션 종료됨]' : '[session ended]',
+  codeRestart: ko ? '재시작' : 'Restart',
+  codePreviewGo: ko ? '이동' : 'Go',
+  codePreviewOpenExternal: ko ? '브라우저에서 열기' : 'Open in browser',
+  codePreviewEmpty: ko ? '미리볼 URL을 입력하세요' : 'Enter a URL to preview',
+  codePreviewInvalidUrl: ko ? '유효한 http(s) URL을 입력하세요' : 'Enter a valid http(s) URL',
+  codeDiffNone: ko ? '변경 사항 없음' : 'No changes',
+  codeDiffSelectFile: ko ? '파일을 선택하면 diff를 볼 수 있어요' : 'Select a file to view its diff',
+  codeDiffError: ko ? 'diff를 불러올 수 없어요' : 'Could not load diff',
+  codeDiffNotRepo: ko ? 'git 저장소가 아니에요' : 'Not a git repository',
+  codeDiffGitMissing: ko ? 'git이 설치되어 있지 않아요' : 'git is not installed',
+  codeDiffLoadError: ko ? '변경 사항을 불러올 수 없어요' : 'Could not load changes',
 };
