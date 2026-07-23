@@ -29,6 +29,12 @@ import { PtyManager } from './pty-manager';
 import { diffStatus, diffFile } from './git-diff';
 import * as nodeHttp from 'http';
 
+// T4(실측 검증) dev/test 격리: 설치판(트레이 상주, %APPDATA%/Engram 단일 인스턴스 락 보유)을
+// 건드리지 않고 `electron .`을 별도 데이터로 띄우기 위한 훅. getPath('userData')·
+// requestSingleInstanceLock보다 반드시 먼저 와야 한다. 운영 배포는 이 환경변수를 절대 설정하지
+// 않으므로 회귀 없음.
+if (process.env.ENGRAM_USERDATA_DIR) app.setPath('userData', process.env.ENGRAM_USERDATA_DIR);
+
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
 const configDir = path.join(dataDir, 'config');
 const childEnv = {
@@ -377,6 +383,8 @@ if (!gotLock) {
     createTray();
     // dev 스모크 편의: 트레이 조작 없이 설정창 바로 열기 (ENGRAM_OPEN_SETTINGS=1 electron .)
     if (process.env.ENGRAM_OPEN_SETTINGS === '1') openSettings();
+    // dev 스모크 편의(T4 실측 검증): 트레이 더블클릭 없이 채팅창 바로 열기 (ENGRAM_OPEN_CHAT=1 electron .)
+    if (process.env.ENGRAM_OPEN_CHAT === '1') openChat();
     startChild();
     for (const b of loadLocalBrains(configDir)) startLocalBrain(b); // + 로컬 두뇌 재기동(재시작 감독 없음 — ponytail)
   });
