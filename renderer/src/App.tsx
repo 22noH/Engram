@@ -400,12 +400,18 @@ export default function App() {
   // 기본 연결의 채널로 보내지므로(아래 addFiles), @멘션 등으로 다른 연결에 보내면 그 연결의
   // AttachmentStore엔 그 id가 없어 서버가 조용히 무시한다(resolveAttachments). 업로드 대상=전송 대상을
   // 항상 일치시켜 이 교차 연결 불일치를 원천 차단한다.
-  const sendText = (text: string, threadId?: string, answersId?: string, attachmentIds?: string[]) => {
+  // 최종 리뷰 지적(Minor): 실패 전송 시 첨부 칩이 조용히 사라지는 문제 — 호출부(Enter/Send)가
+  // "프레임이 실제로 나갔는가"를 알아야 성공했을 때만 clearComposerAttachments()를 부를 수 있다.
+  // 반환값: 아래 조기 return 경로(텍스트·첨부 둘 다 없음/채널 없음/모드 불가, 미인증 team, 대상
+  // 소켓 끊김)는 false — 프레임을 하나도 못 보냈으니 칩을 지우면 업로드가 그냥 유실된다. 그 외
+  // (send 프레임 직접 전송, 또는 채널 미생성 시 createChannel 프레임을 보내고 버퍼링)는 true —
+  // 기존 호출부(반환값을 무시하던 곳들)는 동작 그대로다.
+  const sendText = (text: string, threadId?: string, answersId?: string, attachmentIds?: string[]): boolean => {
     // wiki·admin엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
     // (mode 가드는 타입 좁히기 겸 방어용).
     const hasAttachments = !!(attachmentIds && attachmentIds.length);
-    if ((!text.trim() && !hasAttachments) || !currentName || mode === 'wiki' || mode === 'admin') return;
-    if (mode === 'team' && !meByConn[connState.defaultConnId]) return; // 미인증 team 전송 차단
+    if ((!text.trim() && !hasAttachments) || !currentName || mode === 'wiki' || mode === 'admin') return false;
+    if (mode === 'team' && !meByConn[connState.defaultConnId]) return false; // 미인증 team 전송 차단
     const targetConnId = hasAttachments
       ? connState.defaultConnId
       : threadId
@@ -418,7 +424,7 @@ export default function App() {
     if (!statusById[targetConnId]) {
       const targetName = connState.connections.find((c) => c.id === targetConnId)?.name ?? targetConnId;
       setErrText((prev) => ({ ...prev, [targetConnId]: T.notConnected(targetName) }));
-      return;
+      return false;
     }
     // authorId는 더 이상 클라가 첨부하지 않는다 — 서버가 인증된 소켓 기준으로 스탬프한다.
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
@@ -429,6 +435,7 @@ export default function App() {
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
     }
     expectReply(currentName, text, targetConnId);
+    return true;
   };
 
   // Task 4(clear-compact) — 논리 채널 이름 → 기본 연결(그 서버) 기준 실제 채널 id. clear/compact는
@@ -834,8 +841,10 @@ export default function App() {
                       const i = e.target as HTMLInputElement;
                       if (!i.value.trim() && pendingAttachments.length === 0) return; // 텍스트도 첨부도 없음
                       const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
-                      sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
-                      clearComposerAttachments();
+                      const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                      // Minor 픽스: 프레임이 실제로 나갔을 때만 첨부 칩을 지운다 — 실패(소켓 끊김 등)면
+                      // 칩을 남겨 사용자가 재전송/제거를 선택할 수 있게 한다(에러 안내는 sendText가 이미 남김).
+                      if (sent) clearComposerAttachments();
                     }
                   }} />
                 <EngramSelector
@@ -850,8 +859,8 @@ export default function App() {
                   onClick={() => {
                     const i = document.getElementById('input') as HTMLInputElement;
                     const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
-                    sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
-                    clearComposerAttachments();
+                    const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                    if (sent) clearComposerAttachments();
                   }}>{T.send}</button>
               </div>
               </div>

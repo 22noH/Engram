@@ -36,6 +36,15 @@ function fenceFor(content: string): string {
   return '`'.repeat(Math.max(3, longest + 1));
 }
 
+// 최종 리뷰 지적(prompt injection): 첨부 파일명(a.name)은 attachments-http의 decodeURIComponent를
+// 거쳐 스토어에 그대로 저장되므로 개행을 포함할 수 있다 — `## ${a.name} — file at ${a.path}` 같은
+// 구조 라인에 그대로 삽입하면 개행으로 헤딩/펜스 줄을 새로 열어 프롬프트 구조(펜스 격리)를 깨고
+// 삽입된 마크다운/지시문이 진짜 콘텐츠처럼 보이게 된다. 이름이 프롬프트에 들어가는 모든 지점
+// (성공 마커·용량초과 마커·헤딩·폴백 마커)에서 공통으로 거쳐가도록 소비 지점에 둔다.
+function safeAttachmentName(name: string): string {
+  return name.replace(/[\x00-\x1f\x7f]+/g, ' ').slice(0, 200);
+}
+
 // prompts/conductor.md 없을 때의 내장 기본값(지휘자 지침 — out-of-box 동작 보장).
 export const CONDUCTOR_DEFAULT = [
   'You can delegate subtasks to other registered brains using the ask_brain tool.',
@@ -172,7 +181,7 @@ export class ReaderAgent {
   // Task 3(chat-attachments): 존재만 알리는 폴백 마커 — 읽기 실패·화이트리스트 밖 파일 공용.
   // 경로는 항상 포함(CLI 하네스가 프롬프트 텍스트만으로 파일을 직접 읽을 수 있어야 하므로).
   private fallbackAttachmentMarker(a: { name: string; mime: string; size: number; path: string }): string {
-    return `[Attachment: ${a.name} (${a.mime}, ${a.size} bytes) — file at ${a.path}]`;
+    return `[Attachment: ${safeAttachmentName(a.name)} (${a.mime}, ${a.size} bytes) — file at ${a.path}]`;
   }
 
   // 첨부(MentionEvent→CoreMessage 관통)를 이미지 vision 블록 + 프롬프트 `# Attachments` 블록으로
@@ -190,13 +199,13 @@ export class ReaderAgent {
         // T3 리뷰 지적: vision 제공자 상한(~5MB/장)을 넘는 이미지는 base64화하지 않는다 — 저장 상한
         // (20MB)과 vision 상한 사이 구간이 그대로 API에 갔다가 범용 에러로 실패하는 것을 막는다.
         if (a.size > VISION_IMAGE_CAP) {
-          lines.push(`[Image attached: ${a.name} — too large for vision (${a.size} bytes), file at ${a.path}]`);
+          lines.push(`[Image attached: ${safeAttachmentName(a.name)} — too large for vision (${a.size} bytes), file at ${a.path}]`);
           continue;
         }
         try {
           const data = await fs.promises.readFile(a.path);
           images.push({ mime: a.mime, dataBase64: data.toString('base64') });
-          lines.push(`[Image attached: ${a.name} — file at ${a.path}]`);
+          lines.push(`[Image attached: ${safeAttachmentName(a.name)} — file at ${a.path}]`);
         } catch {
           lines.push(this.fallbackAttachmentMarker(a)); // 읽기 실패 — 존재만 알림(never-throw)
         }
@@ -212,7 +221,7 @@ export class ReaderAgent {
           // 절단 표시는 펜스 안쪽(닫는 펜스 전)에 남긴다.
           const fence = fenceFor(content);
           const body = `${fence}\n${content}${truncated ? '\n…[truncated — attachment exceeds 256KB]' : ''}\n${fence}`;
-          lines.push(`## ${a.name} — file at ${a.path}\n${body}`);
+          lines.push(`## ${safeAttachmentName(a.name)} — file at ${a.path}\n${body}`);
         } catch {
           lines.push(this.fallbackAttachmentMarker(a)); // 읽기 실패 — 존재만 알림(never-throw)
         }

@@ -30,6 +30,15 @@ function isValidAttachmentId(id: unknown): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
 }
 
+// 최종 리뷰 지적(prompt injection, defense-in-depth): 사용자 파일명은 attachments-http의
+// decodeURIComponent를 거쳐 여기까지 그대로 들어와 개행/제어문자를 담을 수 있다 — 실제 소비 지점은
+// reader-agent.ts(프롬프트 조립)이라 거기서도 막지만, 사이드카 메타에 저장하는 이 시점에도 정규화해
+// 두면 렌더러 표시(칩·목록)에도 이득이고 향후 다른 소비자가 생겨도 원본이 이미 안전하다.
+// 확장자 로직(rawExt/ext, 파일 경로용)은 건드리지 않는다 — 이건 표시용 name 필드만 대상.
+function sanitizeAttachmentName(name: string): string {
+  return name.replace(/[\x00-\x1f\x7f]+/g, ' ').slice(0, 200);
+}
+
 export class AttachmentStore {
   constructor(private readonly dataDir: string) {}
 
@@ -63,7 +72,7 @@ export class AttachmentStore {
       fs.writeFileSync(this.filePath(channelId, id), data);
       const meta: AttachmentMeta = {
         id,
-        name: typeof name === 'string' && name.trim() ? name : id,
+        name: typeof name === 'string' && name.trim() ? sanitizeAttachmentName(name) : id,
         mime: typeof mime === 'string' && mime.trim() ? mime : 'application/octet-stream',
         size: data.length,
       };
