@@ -35,6 +35,20 @@ const IMAGE_MIME_WHITELIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'i
 // 브라우저가 임의 mime을 신뢰해 실행/렌더하지 않도록 원본 mime을 무조건 반영하지 않는다.
 const MIME_WHITELIST = new Set<string>([...IMAGE_MIME_WHITELIST, 'text/plain']);
 
+// T2 리뷰 minor: filename*=UTF-8''(RFC 5987)만 실으면 그걸 모르는 옛/단순 클라이언트가 다운로드
+// 이름을 못 얻는다 — plain ASCII filename="..." 폴백을 먼저 얹는다(RFC 6266 권장 순서: ASCII
+// 폴백 먼저, 확장 필드 나중 — 최신 클라는 뒤엣것을 쓰고 옛 클라는 앞엣것으로 폴백). 따옴표/CR/LF/
+// 비ASCII는 헤더 인젝션·깨짐 방지로 전부 '_'(확장자를 포함한 전체 문자열에 동일 규칙 — "확장자
+// 유지"는 문자 자체를 보존한다는 뜻이지 별도 취급한다는 뜻이 아니다. 확장자가 ASCII면 그대로 남는다).
+function asciiFilenameFallback(name: string): string {
+  let out = '';
+  for (const ch of name) {
+    const code = ch.codePointAt(0) ?? 0;
+    out += code >= 0x20 && code <= 0x7e && ch !== '"' && ch !== '\\' ? ch : '_';
+  }
+  return out || 'file';
+}
+
 function bearer(req: http.IncomingMessage): string | null {
   const h = req.headers.authorization;
   if (typeof h !== 'string') return null;
@@ -147,7 +161,7 @@ export class AttachmentsHttp {
 
   // 다운로드: 저장된 mime이 화이트리스트 밖이면 application/octet-stream(브라우저 신뢰 금지).
   // 이미지만 inline(그 외=attachment) — Content-Disposition에 서버 내부 경로는 절대 노출하지 않는다
-  // (파일명만, RFC5987 filename*=UTF-8'' 인코딩).
+  // (파일명만: ASCII filename="..." 폴백 + RFC5987 filename*=UTF-8'' 확장 필드, T2 리뷰 minor).
   private download(res: http.ServerResponse, channelId: string, id: string): void {
     const p = this.deps.attachments.path(channelId, id);
     if (!p) { this.fail(res, 404, 'not found'); return; }
@@ -160,7 +174,7 @@ export class AttachmentsHttp {
     // (never-throw는 handle() 레벨에서 한 곳으로 모은다 — 여기서 개별 방어하지 않는다).
     res.writeHead(200, {
       'content-type': outMime,
-      'content-disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'content-disposition': `${disposition}; filename="${asciiFilenameFallback(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`,
     });
     const stream = fs.createReadStream(p);
     stream.on('error', () => { try { res.destroy(); } catch { /* 격리 */ } });

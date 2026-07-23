@@ -62,6 +62,7 @@ describe('AttachmentsHttp(업로드/다운로드, Task 2)', () => {
     expect(down.status).toBe(200);
     expect(down.headers.get('content-type')).toBe('image/png');
     expect(down.headers.get('content-disposition')).toContain('inline');
+    expect(down.headers.get('content-disposition')).toContain('filename="photo.png"'); // ASCII 폴백(T2 리뷰 minor)
     expect(down.headers.get('content-disposition')).toContain("filename*=UTF-8''photo.png");
     const bytes = Buffer.from(await down.arrayBuffer());
     expect(bytes).toEqual(data); // 업로드→다운로드 바이트 동일
@@ -209,6 +210,22 @@ describe('AttachmentsHttp(업로드/다운로드, Task 2)', () => {
     const down = await fetch(`${base}/attachments/general/${meta.id}`);
     expect(down.headers.get('content-type')).toBe('text/plain');
     expect(down.headers.get('content-disposition')).toContain('attachment');
+  });
+
+  it('비ASCII/따옴표 파일명 → ASCII 폴백은 언더스코어로 치환, RFC5987 필드는 원본 보존(T2 리뷰 minor)', async () => {
+    const rawName = '사진"이름.png';
+    const up = await fetch(base + '/attachments/general', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png', 'x-attachment-name': encodeURIComponent(rawName) },
+      body: Buffer.from('x'),
+    });
+    const meta = await up.json() as { id: string; name: string };
+    expect(meta.name).toBe(rawName);
+    const down = await fetch(`${base}/attachments/general/${meta.id}`);
+    const cd = down.headers.get('content-disposition') ?? '';
+    expect(cd).toContain(`filename*=UTF-8''${encodeURIComponent(rawName)}`); // 원본 보존(최신 클라)
+    expect(cd).toMatch(/filename="[\x20-\x7e]*"/); // ASCII 폴백은 순수 printable ASCII만
+    expect(cd).not.toMatch(/filename="[^"]*[가-힣][^"]*"/); // 비ASCII는 폴백에 남지 않음
   });
 
   it('OPTIONS 프리플라이트 → 204 + CORS 헤더', async () => {
