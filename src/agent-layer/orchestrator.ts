@@ -36,9 +36,12 @@ import { outputDirective, configuredLang } from './language';
 import { t } from './i18n';
 import { ChannelBrainResolver } from './channel-brain-resolver';
 import type { ChatMessage } from '../edge/messenger/chat-store';
+import { extractAskUser, questionFallbackText, AskUserPayload } from './ask-user-block';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
-type PostFn = (text: string, actions?: Action[]) => Promise<void>;
+// question(ask-user Task 3): 범용 경로가 뽑아낸 질문 카드 페이로드 — 기존 (text, actions) 호출부는
+// 3번째 인자를 안 넘기니 무영향(TS 함수 타입은 뒤쪽 파라미터를 덜 받는 쪽이 항상 대입 가능).
+type PostFn = (text: string, actions?: Action[], question?: AskUserPayload) => Promise<void>;
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 export const DECOMPOSE_DEFAULT = [
@@ -117,6 +120,20 @@ export class Orchestrator {
     // 채널별 두뇌 해소(스펙 §3.2). 미주입(구식 DI·기존 테스트)이면 resolveMsgBrain이 기존 codeBrain 그대로 돌려준다(회귀 0).
     @Optional() private readonly channelBrain?: ChannelBrainResolver,
   ) {}
+
+  // ask-user 범용 경로(Task 3): 두뇌의 최종 자유텍스트 응답을 게시하기 직전 여기를 거친다.
+  // ```ask_user 블록이 있으면(도구 없이 텍스트만 내는 CLI 하네스·비도구 로컬 LLM까지 커버) 본문(또는
+  // 없으면 폴백 텍스트)+question을 게시 — actions는 question과 함께 안 보낸다(질문 카드 자체가 응답 UI라
+  // 별도 액션 버튼과 동시 노출하면 사용자가 어느 쪽에 답해야 할지 헷갈린다). 블록이 없으면 기존 그대로
+  // (text, actions)만 게시(회귀 0).
+  private async postReply(reply: string, post: PostFn, actions?: Action[]): Promise<void> {
+    const { text, question } = extractAskUser(reply);
+    if (question) {
+      await post(text || questionFallbackText(question), undefined, question);
+      return;
+    }
+    await post(text, actions);
+  }
 
   // 이 메시지가 쓸 두뇌를 요청 한정으로 해소(스펙 §3.2) — 결과는 지역 변수로만 쓴다(싱글턴 필드 오염 금지).
   // channelBrain 미주입 시 기존 codeBrain 그대로(회귀 0). msg.brain 미지정이면 resolve가 기본(=codeBrain)을 돌려준다.
@@ -328,7 +345,7 @@ export class Orchestrator {
       return;
     }
     if (trimmed.startsWith('ask ')) {
-      await post(await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }));
+      await this.postReply(await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }), post);
       return;
     }
 
@@ -371,7 +388,7 @@ export class Orchestrator {
       this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
       return;
     }
-    await post(await this.route(msg));
+    await this.postReply(await this.route(msg), post);
   }
 
   // collaborate를 백그라운드로 detach. 끝나면 결과 게시 + 대화로그 적재 + 트래커 종료.

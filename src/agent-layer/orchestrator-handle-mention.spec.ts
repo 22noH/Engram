@@ -117,3 +117,51 @@ it('상태 — 실패한 작업은 (실패)로 표시', async () => {
   await o.handleMention({ text: '상태', userId: 'c1' }, async (t) => { posts.push(t); });
   expect(posts[0]).toContain('(failed)');
 });
+
+// ask-user 범용 경로(Task 3): 두뇌 최종 응답(route 경유)에 ```ask_user 블록이 있으면 post가
+// question 인자와 함께 호출되고, 블록은 게시 text에서 빠진다.
+it('chat 응답에 ask_user 블록 있으면 post가 question 인자와 함께 호출된다', async () => {
+  const o = orc('{"kind":"chat","team":[]}');
+  const block = [
+    '두 방향이 있어요.',
+    '',
+    '```ask_user',
+    JSON.stringify({ questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] }),
+    '```',
+  ].join('\n');
+  (o as any).route = async () => block;
+  const calls: Array<{ text: string; actions?: any; question?: any }> = [];
+  await o.handleMention({ text: '결정해줘', userId: 'c1' }, async (text, actions, question) => {
+    calls.push({ text, actions, question });
+  });
+  expect(calls).toHaveLength(1);
+  expect(calls[0].text).toBe('두 방향이 있어요.');
+  expect(calls[0].actions).toBeUndefined();
+  expect(calls[0].question).toEqual({ questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] });
+});
+
+it('chat 응답에 ask_user 블록이 없으면 question 인자 없이 post된다(회귀 0)', async () => {
+  const o = orc('{"kind":"chat","team":[]}');
+  (o as any).route = async () => '즉답';
+  const calls: Array<{ text: string; actions?: any; question?: any }> = [];
+  await o.handleMention({ text: '엔그램이 뭐야?', userId: 'c1' }, async (text, actions, question) => {
+    calls.push({ text, actions, question });
+  });
+  expect(calls).toEqual([{ text: '즉답', actions: undefined, question: undefined }]);
+});
+
+it('ask_user 블록만 있고 본문 없으면 폴백 텍스트가 게시된다', async () => {
+  const o = orc('{"kind":"chat","team":[]}');
+  const block = [
+    '```ask_user',
+    JSON.stringify({ questions: [{ q: '진행할까요?', options: [{ label: '예' }, { label: '아니오' }] }] }),
+    '```',
+  ].join('\n');
+  (o as any).route = async () => block;
+  const calls: Array<{ text: string; question?: any }> = [];
+  await o.handleMention({ text: 'x', userId: 'c1' }, async (text, _actions, question) => {
+    calls.push({ text, question });
+  });
+  expect(calls[0].text).toBe('진행할까요?\n1. 예\n2. 아니오');
+  expect(calls[0].question).toBeDefined();
+});

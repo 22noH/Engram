@@ -2,13 +2,14 @@ import { MessengerPort } from './messenger.port';
 import { CoreMessage } from '../core-message';
 import { ChannelPolicy, allows } from '../../agent-layer/channel-policy';
 import { t } from '../../agent-layer/i18n';
-import type { Action } from '../../../shared/protocol';
+import type { Action, Message } from '../../../shared/protocol';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 import 회피·테스트 용이).
 export interface MentionHandler {
   handleMention(
     msg: CoreMessage,
-    post: (text: string, actions?: Action[]) => Promise<void>,
+    // question(ask-user Task 3): Orchestrator.PostFn과 짝(구조적 동일 — { questions: QuestionItem[] }).
+    post: (text: string, actions?: Action[], question?: Message['question']) => Promise<void>,
     threadKey?: string,
   ): Promise<void>;
   // 관찰 끼어들기(6c-1) — 옵셔널(구식 스텁 호환).
@@ -24,7 +25,8 @@ export function bindMessenger(
   policy?: ChannelPolicy,
 ): void {
   port.onMention(async (e) => {
-    const post = (text: string, actions?: Action[]): Promise<void> => port.reply(e.target, text, actions);
+    const post = (text: string, actions?: Action[], question?: Message['question']): Promise<void> =>
+      port.reply(e.target, text, actions, question);
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
     try {
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).

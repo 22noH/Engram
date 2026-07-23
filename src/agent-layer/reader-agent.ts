@@ -27,8 +27,14 @@ export const CONDUCTOR_DEFAULT = [
 // 모든 ReaderAgent 프롬프트에 무조건 포함한다. CLI 하네스(canDelegate 없음 — --allowedTools로
 // MCP 전체가 열림)도 이 문장을 받아야 자동/예약 컨텍스트에서 쓰기 도구를 남용하지 않는다.
 // 문장 자체가 자기 범위 한정("자동/예약 컨텍스트에서만…")이라 일반 채팅에 섞여도 안전.
+// ask-user 범용 경로(Task 3) 안내를 이어붙인다 — 도구가 없는 CLI 하네스·비도구 로컬 LLM도
+// 이 프롬프트 문장 하나로 질문 카드를 낼 수 있어야 한다(응답 텍스트 뒤에 펜스 블록만 붙이면 되므로
+// 도구 호출 없이도 동작). orchestrator.ts의 extractAskUser가 이 형식을 그대로 파싱한다.
 export const TOOL_USAGE_GUIDANCE =
-  'In a scheduled or automatic-execution context, only use tools that write externally (sending messages, editing documents, etc.) when the task instruction explicitly calls for it — otherwise favor read-only actions.';
+  'In a scheduled or automatic-execution context, only use tools that write externally (sending messages, editing documents, etc.) when the task instruction explicitly calls for it — otherwise favor read-only actions. ' +
+  'When you reach a point where the user genuinely needs to decide between options before you can continue, ask with a structured question card instead of asking in plain prose: append a fenced block to the end of your reply, starting with ```ask_user on its own line, then one line of JSON, then a closing ``` on its own line. ' +
+  'The JSON shape is {"questions":[{"q":"the question","header":"optional short title","multiSelect":false,"options":[{"label":"the choice","desc":"optional one-line detail","recommended":true}]}]} — 1 to 4 questions, each with 2 to 4 options, and at most one option per question marked recommended. Only the first ```ask_user block in a reply is used. ' +
+  'Do not use this in a scheduled or automatic-trigger turn — there is no user present there to answer it.';
 
 // A 읽기(설계 §7.2). 질문 → RAG 검색 → 컨텍스트 종합 → 답 + 출처.
 // 에이전트 자체는 stateless — 연속성은 ConversationStore의 직전 n턴을 프롬프트에 주입해서 얻는다.
