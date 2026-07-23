@@ -93,3 +93,26 @@
 - hex 중복 없음: 스펙 표가 단일 진실원, 플랜은 참조만.
 - 불확실(구현 중 확정·보고): @fontsource 서브패스 import 형태·renderer 빌드 스크립트명·WikiArea에 category/updated 데이터 존재 여부·콘솔 다크 모드 기존 지원 여부·채팅 내 위키 유래 메시지 식별자(없으면 스킵).
 - 함정 명시: 테스트 실패=기능 DOM 침범 신호(테스트 수정 우회 금지)·폰트 네트워크 참조 0 검증·기능성 CSS([hidden]) 유지.
+
+---
+
+## 라운드 2 (사용자 승인 목업 — 2026-07-23)
+
+### Task R2-1: 탭 명칭·순서 + 중앙 고정폭 채팅
+
+**Files:**
+- Modify: `renderer/src/i18n.ts`(tabAsk→'Chat'·tabTeam→'Team'·tabCode→'Code' — 양 로케일 공통 고유명, Wiki/Admin 유지), 탭 순서 소스(`areaTabs` — renderer 내 위치 grep)에서 **Team 최전방**(Team·Chat·Code·Wiki·Admin, 기본 선택 모드는 기존 유지), `renderer/src/theme.css`+필요시 App.tsx(채팅 칼럼 중앙 고정 — 메시지 목록+입력창을 max-width 760px·margin auto 칼럼으로, 사이드바 불변. 순수 표현용 래퍼 1개 허용).
+- 기존 테스트의 라벨/순서 의존은 의도 변경이므로 갱신 정당(의도 보존 확인 필수).
+
+- [ ] Step 1: 구현+렌더러 전체 테스트 green+빌드 clean.
+- [ ] Step 2: `git commit -m "feat(design): 탭 Team·Chat·Code 개명+Team 최전방+채팅 중앙 고정폭 칼럼(760px)"`
+
+### Task R2-2: Admin 탭 재설계(목업 ② 픽셀)
+
+**Files:**
+- Modify: `renderer/src/components/AdminArea.tsx`(+test), `renderer/src/theme.css`, `renderer/src/i18n.ts`(필요 문구 en/ko)
+
+목업 ② 요소: 눈썹(WORKSPACE · N MEMBERS)+제목 / 승인 대기=상단 앰버톤 하이라이트 카드(Approve 주버튼·Reject는 danger 텍스트) / 멤버=카드 리스트(이니셜 아바타·이름+Owner/Active 필·권한 칩[+추가 칩은 대시 보더]·행 ⋯ 메뉴로 suspend/reset-password/권한 토글 이동) / SERVER SETTINGS 눈썹 섹션(서버명 입력·SSO 상태). **기능 패리티 유지**: 기존 AdminArea의 모든 액션(approve/suspend/restore/reset/forceLogout/권한 setPermissions/설정 저장) 전부 새 UI에서 도달 가능해야 함 — 누락 금지. ws 프레임·App 배선 무변경(프레젠테이션 재구성만).
+
+- [ ] Step 1: 구현+기존 AdminArea 테스트 의도보존 갱신+전체 green+빌드.
+- [ ] Step 2: `git commit -m "feat(design): Admin 탭 재설계(승인 대기 하이라이트·멤버 카드·권한 칩·눈썹 섹션) — 목업 픽셀·기능 패리티"`
