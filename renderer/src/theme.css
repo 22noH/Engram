@@ -187,6 +187,29 @@ details.thread .msg { max-width:100%; }
               padding:9px 14px; border-radius:8px; font-size:12.5px; box-shadow:0 6px 20px rgba(0,0,0,.3);
               white-space:nowrap; }
 #clearToast .undo { color:var(--accent); font-weight:700; cursor:pointer; }
+/* Task 4(chat-attachments, 목업 A) — 클립 버튼·전송 전 칩 줄·메시지 안 썸네일/파일 칩.
+   기존 토큰(--panel-2/--line/--accent/--danger/--dim/--hover)만 사용, 신규 토큰 없음. */
+.attachBtn { flex:none; width:38px; height:38px; padding:0; border-radius:9px; font-size:15px;
+             background:transparent; border:1px solid var(--line); color:var(--dim); }
+.attachBtn:hover { background:var(--hover); color:var(--text); }
+.pendingChips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:0 16px 8px; }
+.attachChip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:5px 9px;
+              border-radius:99px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); }
+/* 전송 전 칩: 업로드 중=은은한 반투명, 실패=danger 톤+클릭 재시도(브리프). */
+.pendingChips .attachChip { cursor:default; }
+.pendingChips .attachChip.uploading { opacity:.6; }
+.pendingChips .attachChip.error { color:var(--danger); border-color:var(--danger); cursor:pointer; }
+.pendingChips .attachChip .x { cursor:pointer; font-weight:700; margin-left:2px; }
+.pendingChips .attachChip .x:hover { color:var(--danger); }
+.attachNotice { font-size:11.5px; color:var(--danger); }
+/* 메시지 안 첨부: 이미지=인라인 썸네일(radius 7px, 목업 픽셀), 그 외=칩(아이콘+이름+타입·크기). */
+.attachRow { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.attachThumb { display:block; max-height:240px; max-width:100%; border-radius:7px; cursor:pointer;
+               border:1px solid var(--line); }
+.attachChip.file { border-radius:8px; cursor:pointer; }
+.attachChip.file:hover { background:var(--hover); }
+.attachChip.file .meta { color:var(--dim); font-size:11px; }
+.attachChip.loading { opacity:.6; cursor:default; }
 #inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
 /* T2 리뷰 픽스 — 스펙 형태 스케일(입력·버튼 9px, 배지·필은 fully-rounded 유지 — '7px'는 스펙 오탈자로 정정됨). */
 input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:9px;

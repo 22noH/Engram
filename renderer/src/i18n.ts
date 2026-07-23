@@ -145,4 +145,10 @@ export const T = {
   qOtherPh: ko ? '기타 — 직접 입력' : 'Other — type your own answer',
   qSkip: ko ? '건너뛰기' : 'Skip',
   qSkipped: '(skipped)', // 전송 텍스트는 로케일 무관 고정(라벨은 qSkip)
+  // Task 4 — 채팅 첨부(클립·붙여넣기·드롭·칩·썸네일)
+  attachTitle: ko ? '파일 첨부' : 'Attach file',
+  attachTooMany: (max: number) => (ko ? `한 메시지에 최대 ${max}개까지 첨부할 수 있어요` : `You can attach up to ${max} files per message`),
+  attachTooLarge: (name: string) => (ko ? `'${name}'은(는) 20MB를 넘어 첨부할 수 없어요` : `'${name}' is over 20MB and can't be attached`),
+  attachRemove: ko ? '제거' : 'Remove',
+  attachRetry: ko ? '업로드 실패 — 클릭해서 재시도' : 'Upload failed — click to retry',
 };

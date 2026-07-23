@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Message } from './Message';
 
 it('engram 번호목록은 클릭 대상이 아니라 그냥 텍스트다(선택은 actions 버튼)', () => {
@@ -50,5 +50,51 @@ describe('Message 작성자 렌더', () => {
     const m = { id: '1', authorId: 'uid-2', authorName: 'Lee', text: 'hi', ts: new Date().toISOString() };
     render(<Message m={m} myName="uid-1" />);
     expect(screen.getByText(/Lee/)).toBeTruthy(); // 남 → 이름 표시
+  });
+});
+
+// Task 4(chat-attachments) — m.attachments 렌더(이미지=썸네일, 그 외=칩)·blob fetch 인증 헤더.
+describe('Message 첨부 렌더', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('첨부 없는 메시지는 attachRow를 렌더하지 않는다(회귀 0)', () => {
+    const { container } = render(<Message m={msg('engram', 'no-att')} />);
+    expect(container.querySelector('.attachRow')).toBeNull();
+  });
+
+  it('이미지 mime은 blob fetch 후 인라인 썸네일(<img class=attachThumb>)로 렌더된다', async () => {
+    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock-1');
+    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['x']), { status: 200 }));
+    const m = { id: 'img1', authorId: 'engram', ts: new Date(0).toISOString(), text: '',
+      attachments: [{ id: 'att-1', name: 'shot.png', mime: 'image/png', size: 10 }] };
+    const { container } = render(<Message m={m as any} attachmentCtx={{ endpoint: 'ws://h:1', channelId: 'g1' }} />);
+
+    await waitFor(() => expect(container.querySelector('img.attachThumb')).toBeInTheDocument());
+    expect(f).toHaveBeenCalledWith('http://h:1/attachments/g1/att-1', { headers: {} });
+  });
+
+  it('파일 mime(비이미지)은 이름·타입·크기 정보를 담은 칩으로 렌더된다', async () => {
+    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock-file');
+    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['x']), { status: 200 }));
+    const m = { id: 'file1', authorId: 'engram', ts: new Date(0).toISOString(), text: '',
+      attachments: [{ id: 'att-2', name: 'note.txt', mime: 'text/plain', size: 2048 }] };
+    render(<Message m={m as any} attachmentCtx={{ endpoint: 'ws://h:1', channelId: 'g1' }} />);
+    expect(screen.getByText('note.txt')).toBeInTheDocument();
+    expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+    await waitFor(() => expect(f).toHaveBeenCalled());
+  });
+
+  it('인증 연결(token 있음)은 blob fetch에 Authorization 헤더를 싣는다', async () => {
+    (globalThis as any).URL.createObjectURL = vi.fn(() => 'blob:mock-2');
+    (globalThis as any).URL.revokeObjectURL = vi.fn();
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['x']), { status: 200 }));
+    const m = { id: 'img2', authorId: 'engram', ts: new Date(0).toISOString(), text: '',
+      attachments: [{ id: 'att-3', name: 'shot2.png', mime: 'image/png', size: 10 }] };
+    render(<Message m={m as any} attachmentCtx={{ endpoint: 'ws://h:1', channelId: 'g1', token: 'tok-abc' }} />);
+
+    await waitFor(() => expect(f).toHaveBeenCalled());
+    expect(f).toHaveBeenCalledWith('http://h:1/attachments/g1/att-3', { headers: { authorization: 'Bearer tok-abc' } });
   });
 });

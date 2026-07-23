@@ -4,10 +4,11 @@ import { loadConnections, saveConnections, setDefault, addConnection, removeConn
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
-import { fetchStatus, apiLogin, apiRegister, apiOidcBegin, apiOidcPoll, type AuthStatus } from './auth-api';
+import { fetchStatus, apiLogin, apiRegister, apiOidcBegin, apiOidcPoll, uploadAttachment, type AuthStatus } from './auth-api';
 import { Channels } from './components/Channels';
 import { ChannelMembers } from './components/ChannelMembers';
 import { Thread } from './components/Thread';
+import type { AttachmentCtx } from './components/Message';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
 import { EngramSelector } from './components/EngramSelector';
@@ -25,6 +26,17 @@ import { T } from './i18n';
 // 채널은 이름+모드로 식별되는 논리 채널 — 여러 연결이 동명·동모드 채널을 가지면 하나로 합쳐 보인다.
 function chanKey(connId: string, mode: string, name: string): string {
   return `${connId}::${mode}::${name}`;
+}
+
+// Task 4(chat-attachments) — 스펙 상한(코드 상수, 서버 attachment-store.ts와 같은 값을 렌더러 쪽에도
+// 독립 보유 — renderer는 src/edge를 참조할 수 없는 별도 tsconfig 스코프라 공유 불가, 값만 맞춘다).
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+// 전송 전 칩 1개의 클라 로컬 상태. id는 업로드 성공 후 서버가 발급한 첨부 id(send 프레임에 실림).
+interface PendingAttachment {
+  localId: string; file: File; name: string; mime: string; size: number;
+  status: 'uploading' | 'done' | 'error'; id?: string;
 }
 
 export default function App() {
@@ -45,6 +57,10 @@ export default function App() {
   const [showManage, setShowManage] = useState(false);              // Manage Engrams 모달
   const [errText, setErrText] = useState<Record<string, string>>({}); // connId → 최근 에러(연결별 — 서로 안 덮어씀)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Task 4(chat-attachments) — 전송 전 칩(입력창 위, 목업 A). 스레드 답장 입력창엔 없음(브리프 스코프=#inputbar).
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachNotice, setAttachNotice] = useState<string | null>(null); // 상한 초과 안내(칩 단계 차단)
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
@@ -308,6 +324,18 @@ export default function App() {
     return m;
   }, [currentName, mode, viewConns, chanIdByConnName, msgsByConnCh]);
 
+  // Task 4(chat-attachments) — 메시지 id → 그 메시지가 실린 연결의 첨부 fetch 정보(엔드포인트·실
+  // 채널id·세션 토큰). anchorConn과 같은 이디엄으로 메시지별 소유 연결을 되짚어 계산한다(Message.tsx로
+  // Thread를 거쳐 전달). 채널id/엔드포인트를 못 구하면 undefined(Message는 로딩 상태로 남는다).
+  const attachmentCtxFor = (msgId: string): AttachmentCtx | undefined => {
+    const connId = anchorConn.get(msgId);
+    if (!connId || !currentName) return undefined;
+    const channelId = chanIdByConnName.get(chanKey(connId, mode, currentName));
+    const endpoint = connState.connections.find((c) => c.id === connId)?.endpoint;
+    if (!channelId || !endpoint) return undefined;
+    return { endpoint, channelId, token: sessions[connId] };
+  };
+
   useEffect(() => {
     const box = msgsRef.current;
     if (box) box.scrollTop = box.scrollHeight;
@@ -359,16 +387,23 @@ export default function App() {
   // Task 5(answersId): 질문 카드 답도 이 경로를 그대로 탄다 — answersId 있으면 send 프레임에 실려
   // 서버가 그 카드를 참조한 답으로 dedup/트리거한다(카드 없는 일반 전송은 기존과 동일, undefined는
   // JSON.stringify가 자동으로 생략).
-  const sendText = (text: string, threadId?: string, answersId?: string) => {
+  // Task 4(chat-attachments): attachmentIds 있으면 라우팅을 기본 연결로 고정한다 — 업로드는 항상
+  // 기본 연결의 채널로 보내지므로(아래 addFiles), @멘션 등으로 다른 연결에 보내면 그 연결의
+  // AttachmentStore엔 그 id가 없어 서버가 조용히 무시한다(resolveAttachments). 업로드 대상=전송 대상을
+  // 항상 일치시켜 이 교차 연결 불일치를 원천 차단한다.
+  const sendText = (text: string, threadId?: string, answersId?: string, attachmentIds?: string[]) => {
     // wiki·admin엔 채널 개념이 없어 currentName이 항상 null이라 이 분기는 실질적으로 도달하지 않는다
     // (mode 가드는 타입 좁히기 겸 방어용).
-    if (!text.trim() || !currentName || mode === 'wiki' || mode === 'admin') return;
+    const hasAttachments = !!(attachmentIds && attachmentIds.length);
+    if ((!text.trim() && !hasAttachments) || !currentName || mode === 'wiki' || mode === 'admin') return;
     if (mode === 'team' && !meByConn[connState.defaultConnId]) return; // 미인증 team 전송 차단
-    const targetConnId = threadId
-      ? (anchorConn.get(threadId) ?? connState.defaultConnId)
-      : mode === 'team'
-        ? connState.defaultConnId               // team: @라우팅 안 씀 → @Engram은 멘션으로 전달
-        : routeTarget(text, connState.defaultConnId, connState.connections);
+    const targetConnId = hasAttachments
+      ? connState.defaultConnId
+      : threadId
+        ? (anchorConn.get(threadId) ?? connState.defaultConnId)
+        : mode === 'team'
+          ? connState.defaultConnId               // team: @라우팅 안 씀 → @Engram은 멘션으로 전달
+          : routeTarget(text, connState.defaultConnId, connState.connections);
     // Minor #5: 대상 연결 소켓이 안 열려 있으면 조용히 버리지 말고 그 연결 에러란에 안내만 남긴다
     // (전송·생각중 타이머 시작은 하지 않는다 — spec §7).
     if (!statusById[targetConnId]) {
@@ -379,7 +414,7 @@ export default function App() {
     // authorId는 더 이상 클라가 첨부하지 않는다 — 서버가 인증된 소켓 기준으로 스탬프한다.
     const channelId = chanIdByConnName.get(chanKey(targetConnId, mode, currentName));
     if (channelId) {
-      send(targetConnId, { t: 'send', channelId, text, threadId, answersId });
+      send(targetConnId, { t: 'send', channelId, text, threadId, answersId, attachments: attachmentIds });
     } else if (!threadId) {
       pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
@@ -391,6 +426,59 @@ export default function App() {
   // 항상 기본 연결로만 보낸다(fanoutToName처럼 여러 연결에 팬아웃하지 않는다 — 스펙: send(defaultConnId,...)).
   const resolveDefaultChanId = (name: string): string | undefined =>
     channelsByConn[connState.defaultConnId]?.find((c) => c.name === name && (c.mode ?? 'chat') === mode)?.id;
+
+  // Task 4(chat-attachments) — 업로드 대상은 항상 기본 연결의 실제 채널(sendText의 attachmentIds
+  // 라우팅 고정과 짝을 이룬다). 채널이 아직 지연 생성 중(resolveDefaultChanId 미해결)이면 업로드
+  // 불가 — 파일이 조용히 사라지는 것보단 그냥 추가를 막는다(드문 edge case, 채널 첫 메시지 전).
+  const uploadOne = (pa: PendingAttachment) => {
+    const channelId = currentName ? resolveDefaultChanId(currentName) : undefined;
+    const endpoint = connState.connections.find((c) => c.id === connState.defaultConnId)?.endpoint;
+    if (!channelId || !endpoint) {
+      setPendingAttachments((prev) => prev.map((p) => (p.localId === pa.localId ? { ...p, status: 'error' } : p)));
+      return;
+    }
+    const token = sessions[connState.defaultConnId];
+    void uploadAttachment(endpoint, channelId, pa.file, token).then((r) => {
+      setPendingAttachments((prev) => prev.map((p) => {
+        if (p.localId !== pa.localId) return p;
+        return 'error' in r ? { ...p, status: 'error' as const } : { ...p, status: 'done' as const, id: r.id };
+      }));
+    });
+  };
+
+  // 파일 선택(클립 버튼)·붙여넣기(Ctrl+V 스크린샷)·드롭 공용 진입점. 상한 초과분은 업로드하지 않고
+  // 안내만 남긴다(브리프: "초과 시 칩 단계에서 안내(전송 차단)"). 통과한 파일만 즉시 칩+업로드 시작.
+  const addFiles = (files: FileList | File[] | null | undefined) => {
+    if (!files) return;
+    const list = Array.from(files);
+    if (!list.length) return;
+    let room = MAX_ATTACHMENTS_PER_MESSAGE - pendingAttachments.length;
+    let notice: string | null = null;
+    const accepted: PendingAttachment[] = [];
+    for (const file of list) {
+      if (room <= 0) { notice = T.attachTooMany(MAX_ATTACHMENTS_PER_MESSAGE); continue; }
+      if (file.size > MAX_ATTACHMENT_BYTES) { notice = T.attachTooLarge(file.name); continue; }
+      room--;
+      accepted.push({
+        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, status: 'uploading',
+      });
+    }
+    setAttachNotice(notice);
+    if (!accepted.length) return;
+    setPendingAttachments((prev) => [...prev, ...accepted]);
+    for (const pa of accepted) uploadOne(pa);
+  };
+  const removeAttachment = (localId: string) => setPendingAttachments((prev) => prev.filter((p) => p.localId !== localId));
+  const retryAttachment = (localId: string) => {
+    const pa = pendingAttachments.find((p) => p.localId === localId);
+    if (!pa) return;
+    setPendingAttachments((prev) => prev.map((p) => (p.localId === localId ? { ...p, status: 'uploading' } : p)));
+    uploadOne(pa);
+  };
+  const attachmentsUploading = pendingAttachments.some((p) => p.status === 'uploading');
+  const doneAttachmentIds = pendingAttachments.filter((p) => p.status === 'done' && p.id).map((p) => p.id as string);
+  const clearComposerAttachments = () => { setPendingAttachments([]); setAttachNotice(null); };
 
   // 토스트를 끈다. drop=true면 서버에 dropClearBackup을 보내 백업을 확정 삭제(만료·다음 clear).
   // drop=false는 undoClear/historyRestored처럼 이미 되돌려졌거나 되돌리는 중이라 백업을 지우면 안 될 때.
@@ -623,7 +711,8 @@ export default function App() {
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
                       onSend={(text) => sendText(text)}
                       getAnsweredText={(id) => answeredById.get(id)}
-                      onAnswer={(text, answersId) => sendText(text, undefined, answersId)} />
+                      onAnswer={(text, answersId) => sendText(text, undefined, answersId)}
+                      getAttachmentCtx={attachmentCtxFor} />
                   ));
                 })()}
                 {currentName && awaiting.has(currentName) && (
@@ -643,7 +732,29 @@ export default function App() {
               ) : (
                 <MentionAutocomplete text={inputText} names={mentionNames} selected={mentionIdx} onPick={pickMention} />
               )}
-              <div id="inputbar" style={currentName ? undefined : { display: 'none' }}>
+              {/* Task 4(chat-attachments, 목업 A) — 전송 전 칩 줄(입력창 위). 상한 안내는 칩이 없어도(전부
+                  거절된 배치) 보여야 하므로 chips.length || notice로 렌더 여부를 판정한다. */}
+              {currentName && (pendingAttachments.length > 0 || attachNotice) && (
+                <div className="pendingChips">
+                  {pendingAttachments.map((pa) => (
+                    <span key={pa.localId}
+                      className={'attachChip' + (pa.status === 'uploading' ? ' uploading' : pa.status === 'error' ? ' error' : '')}
+                      title={pa.status === 'error' ? T.attachRetry : undefined}
+                      onClick={() => { if (pa.status === 'error') retryAttachment(pa.localId); }}>
+                      <span className="name">{pa.name}</span>
+                      <span className="x" title={T.attachRemove} onClick={(e) => { e.stopPropagation(); removeAttachment(pa.localId); }}>×</span>
+                    </span>
+                  ))}
+                  {attachNotice && <span className="attachNotice">{attachNotice}</span>}
+                </div>
+              )}
+              <div id="inputbar" style={currentName ? undefined : { display: 'none' }}
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer?.files); }}>
+                <input ref={fileInputRef} type="file" multiple hidden
+                  onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+                <button type="button" className="attachBtn" title={T.attachTitle}
+                  onClick={() => fileInputRef.current?.click()}>📎</button>
                 <input id="input" type="text" placeholder={T.placeholder}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -652,6 +763,10 @@ export default function App() {
                     setPalFilter(open ? v.slice(1).toLowerCase() : null);
                     setPalIdx(0);
                     setMentionIdx(0);
+                  }}
+                  onPaste={(e) => {
+                    const files = e.clipboardData?.files; // Ctrl+V 스크린샷 등은 파일로 온다
+                    if (files && files.length) { e.preventDefault(); addFiles(files); }
                   }}
                   onKeyDown={(e) => {
                     if (palFilter !== null) { // 팔레트 열림: 방향키/Enter/Esc는 팔레트 조작(전송 아님)
@@ -667,8 +782,12 @@ export default function App() {
                       if (e.key === 'Enter' && items.length) { e.preventDefault(); pickMention(items[Math.min(mentionIdx, items.length - 1)]); return; }
                     }
                     if (e.key === 'Enter') {
+                      if (attachmentsUploading) return; // 업로드 완료 전엔 전송 보류(id 확정 전)
                       const i = e.target as HTMLInputElement;
-                      sendText(i.value); i.value = ''; setInputText('');
+                      if (!i.value.trim() && pendingAttachments.length === 0) return; // 텍스트도 첨부도 없음
+                      const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
+                      sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                      clearComposerAttachments();
                     }
                   }} />
                 <EngramSelector
@@ -678,7 +797,14 @@ export default function App() {
                   onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
                   onManage={() => setShowManage(true)}
                 />
-                <button onClick={() => { const i = document.getElementById('input') as HTMLInputElement; sendText(i.value); i.value = ''; setInputText(''); }}>{T.send}</button>
+                <button
+                  disabled={attachmentsUploading || (!inputText.trim() && pendingAttachments.length === 0)}
+                  onClick={() => {
+                    const i = document.getElementById('input') as HTMLInputElement;
+                    const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
+                    sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                    clearComposerAttachments();
+                  }}>{T.send}</button>
               </div>
               </div>
                 </>
