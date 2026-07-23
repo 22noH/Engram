@@ -105,6 +105,42 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general').at(-1)?.actions).toEqual(acts);
   });
 
+  it('reply(question)이 메시지에 질문 카드를 실어 broadcast+영속한다(Task 2)', async () => {
+    const question = { questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] };
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '질문입니다', undefined, question);
+    const frame = await nextFrame(client);
+    expect(frame.t).toBe('msg');
+    expect(frame.message.question).toEqual(question);
+    expect(store.history('general').at(-1)?.question).toEqual(question);
+  });
+
+  it('send에 answersId가 실리면 저장 메시지에 answersId가 붙고 onMention이 정상 트리거된다(Task 2)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '답변입니다', answersId: 'q-card-1' }));
+    const frame = await nextFrame(client);
+    expect(frame.t).toBe('msg');
+    expect(frame.message.answersId).toBe('q-card-1');
+    expect(store.history('general').at(-1)?.answersId).toBe('q-card-1');
+    expect(events).toHaveLength(1);
+  });
+
+  it('같은 answersId의 두 번째 send는 서버측에서 중복 차단(미저장·무브로드캐스트, Task 2)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '첫 답변', answersId: 'q-card-2' }));
+    await nextFrame(client);
+    const before = store.history('general').length;
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '중복 답변', answersId: 'q-card-2' }));
+    // 중복은 응답이 없다 — 뒤이어 보낸 정상 프레임만 도착함을 확인해 무브로드캐스트를 증명한다.
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '다음 메시지' }));
+    const frame = await nextFrame(client);
+    expect(frame.message.text).toBe('다음 메시지');
+    expect(store.history('general')).toHaveLength(before + 1); // 중복 제외, 다음 메시지만 +1
+    expect(store.history('general').some((m) => m.text === '중복 답변')).toBe(false);
+    expect(events).toHaveLength(2); // 첫 답변 + 다음 메시지(중복은 트리거되지 않음)
+  });
+
   it('postToChannel → 본류(threadId 없음) 게시, 클라이언트 0명이어도 영속', async () => {
     client.terminate();
     await sm.postToChannel('general', '예약 발사');

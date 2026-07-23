@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ServerFrame, Action } from '../../../shared/protocol';
+import type { ServerFrame, Action, Message } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore } from './chat-store';
 import type { ChatChannel } from './chat-store';
@@ -644,6 +644,14 @@ export class SelfMessenger implements MessengerPort {
     const ch = this.store.listChannels().find((c) => c.id === channelId);
     if (!ch) { this.sendTo(ws, { t: 'error', text: 'unknown channel' }); return; }
     if (!this.canAccessChannel(ws, ch)) return; // 비공개 비접근 → 조용히 무시(기록 안 함)
+    // Task 2(ask-user): 질문 카드에 대한 답(answersId)이면 서버측 중복 차단 — 같은 answersId로 이미
+    // 저장된 메시지가 있으면 조용히 return(기록 0·브로드캐스트 0·두뇌 트리거 0). 일반 send는 answersId가
+    // 없어 이 스캔을 아예 타지 않는다(비용 0). O(n) 전체 스캔은 chat-store.history의 기존 관례(개인 규모).
+    const answersId = typeof f.answersId === 'string' && f.answersId ? f.answersId : undefined;
+    if (answersId) {
+      const existing = this.store.history(channelId, { limit: Number.MAX_SAFE_INTEGER });
+      if (existing.some((m) => m.answersId === answersId)) return;
+    }
     // 작성자는 서버가 세션에서 찍는다(Phase 16a) — 클라 authorId 주장은 무시(Phase 14 자가선언 폐기).
     const me = this.users.get(ws);
     const msg = this.store.appendMessage(channelId, {
@@ -651,6 +659,7 @@ export class SelfMessenger implements MessengerPort {
       ...(me ? { authorName: me.displayName } : {}),
       text,
       threadId: typeof f.threadId === 'string' && f.threadId ? f.threadId : undefined,
+      ...(answersId ? { answersId } : {}),
     });
     if (!msg) return;
     this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
@@ -676,9 +685,15 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
-  async reply(target: ReplyTarget, text: string, actions?: Action[]): Promise<void> {
+  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question']): Promise<void> {
     const t = target as SelfTarget;
-    const msg = this.store.appendMessage(t.channelId, { authorId: 'engram', text, threadId: t.anchorId, ...(actions ? { actions } : {}) });
+    const msg = this.store.appendMessage(t.channelId, {
+      authorId: 'engram',
+      text,
+      threadId: t.anchorId,
+      ...(actions ? { actions } : {}),
+      ...(question ? { question } : {}),
+    });
     if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }
 
