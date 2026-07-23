@@ -329,21 +329,25 @@ export class ChatStore {
       if (kept.length === lines.length) return; // 변경 없음 — 불필요한 쓰기 생략
 
       // dropped 객체 계산(훅 브랜치·no-hook 브랜치 공용 — Task 1 chat-attachments에서 no-hook 쪽도
-      // attachmentStore.deleteFor에 쓰려고 끌어올림). kept는 lines의 부분수열(count=suffix slice·
-      // days=순서보존 filter) — 두 포인터로 그 여집합(dropped)을 정확히 복원한다(Set 기반 비교는
-      // 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
-      const droppedLines: string[] = [];
-      let ki = 0;
-      for (const l of lines) {
-        if (ki < kept.length && kept[ki] === l) { ki++; continue; }
-        droppedLines.push(l);
-      }
-      const dropped: ChatMessage[] = [];
-      for (const l of droppedLines) {
-        try {
-          const m = JSON.parse(l) as ChatMessage;
-          if (m && typeof m.id === 'string' && typeof m.text === 'string') dropped.push(m);
-        } catch { /* 손상 줄 skip — 어차피 요약/삭제할 내용을 특정할 수 없으므로 다음 기회로 보류(안전 우선) */ }
+      // attachmentStore.deleteFor에 쓰려고 끌어올림). 리뷰 지적(T1 Minor): attachmentStore도 미주입·
+      // autoCompact도 꺼진 상태(순수 raw retention만 쓰는 회귀 0 경로)에선 아무도 dropped를 쓰지 않으므로
+      // 이 파싱 자체를 건너뛴다(불필요 CPU 추가 금지 — 회귀 0 문구 그대로 복원).
+      let dropped: ChatMessage[] = [];
+      if ((this.autoCompactHook && this.autoCompactEnabled) || this.attachmentStore) {
+        // kept는 lines의 부분수열(count=suffix slice·days=순서보존 filter) — 두 포인터로 그 여집합
+        // (dropped)을 정확히 복원한다(Set 기반 비교는 완전히 동일한 줄이 중복될 때 모호할 수 있어 피한다).
+        const droppedLines: string[] = [];
+        let ki = 0;
+        for (const l of lines) {
+          if (ki < kept.length && kept[ki] === l) { ki++; continue; }
+          droppedLines.push(l);
+        }
+        for (const l of droppedLines) {
+          try {
+            const m = JSON.parse(l) as ChatMessage;
+            if (m && typeof m.id === 'string' && typeof m.text === 'string') dropped.push(m);
+          } catch { /* 손상 줄 skip — 어차피 요약/삭제할 내용을 특정할 수 없으므로 다음 기회로 보류(안전 우선) */ }
+        }
       }
 
       // Task 5(clear-compact): 자동 compact가 켜져 있고(enabled) 훅이 있으면 동기 삭제 대신 "요약 성공 후에만

@@ -115,7 +115,10 @@ export class AttachmentStore {
       const atts = m?.attachments;
       if (!Array.isArray(atts)) continue;
       for (const a of atts) {
-        if (a && typeof a.id === 'string' && a.id) ids.add(a.id);
+        // 리뷰 지적(T1): path()/meta()와 동일한 형식 가드 — 검증 없이 path.join(dir, id)로 넘기면
+        // '..\\..\\x' 같은 위조 id가 attachments/ 밖으로 이탈할 수 있다. 형식 불일치는 조용히 skip
+        // (never-throw 원칙 — 지울 대상을 특정 못 하면 안전하게 아무것도 안 지운다).
+        if (a && isValidAttachmentId(a.id)) ids.add(a.id);
       }
     }
     if (ids.size === 0) return;

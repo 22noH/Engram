@@ -96,6 +96,21 @@ describe('AttachmentStore', () => {
     expect(() => store.deleteFor([])).not.toThrow();
   });
 
+  it('deleteFor — 위조 id(경로 이탈 형태)는 무시하고 디렉터리 밖 파일은 건드리지 않는다(리뷰 지적: T1 Important)', () => {
+    store.save('general', 'x.txt', 'text/plain', Buffer.from('x')); // general 채널 디렉터리 생성
+    const sentinel = path.join(dir, 'sentinel.txt'); // attachments/ 바깥, dataDir 루트
+    fs.writeFileSync(sentinel, 'do-not-delete');
+    const msg: ChatMessage = {
+      id: 'm1',
+      authorId: 'u1',
+      text: 'hi',
+      ts: new Date().toISOString(),
+      attachments: [{ id: '../../sentinel.txt', name: 'evil', mime: 'text/plain', size: 1 }],
+    };
+    expect(() => store.deleteFor([msg])).not.toThrow();
+    expect(fs.existsSync(sentinel)).toBe(true); // 이탈 차단 — 디렉터리 밖 파일은 살아있어야 함
+  });
+
   it('deleteFor — attachments/ 디렉터리 자체가 없어도 무해', () => {
     const fresh = new AttachmentStore(fs.mkdtempSync(path.join(os.tmpdir(), 'engram-attach-empty-')));
     const msg: ChatMessage = {
