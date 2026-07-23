@@ -8,6 +8,9 @@
   --me-bg:#e4efe9; --me-line:#cfe0d6; --danger:#8a4a3a;
   --hover:rgba(36,41,46,.05); --code-bg:#eef0ec; --pre-bg:#f0f2ee;
   --font-serif:'Newsreader','Noto Serif KR','Batang',Georgia,serif;
+  /* R2-2(Admin 재설계) — 승인 대기 하이라이트 카드용 앰버 톤(스펙 표에 없는 신규 페어, 목업 지정값 그대로).
+     --ok는 "활성" 상태 필용 muted green 1개 토큰(soft/line은 color-mix로 파생 — 토큰 증식 방지). */
+  --pending-bg:#fff7ed; --pending-line:#ecd9bf; --ok:#3f7d3f;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -15,6 +18,9 @@
     --accent:#7fb5a6; --accent-text:#141614; --accent-soft:#243029; --accent-line:#3f5a52;
     --me-bg:#26332d; --me-line:#33463e; --danger:#c78a7a;
     --hover:rgba(255,255,255,.05); --code-bg:rgba(255,255,255,.06); --pre-bg:#161816;
+    /* R2-2 — 라이트 페어(#fff7ed/#ecd9bf)와 같은 결로 어둡게: 중립 패널(#1f221f/#22251f)과 뚜렷이
+       구분되는 따뜻한 갈색조. --ok는 다크에서 밝기를 올려 저채도 배경 위 대비 확보. */
+    --pending-bg:#2a2318; --pending-line:#4a3d26; --ok:#8fc28a;
   }
 }
 * { box-sizing: border-box; margin: 0; }
@@ -375,3 +381,45 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
 #wikiArea .card .cbtns button.rejectb { background:transparent; border:1px solid var(--line); color:var(--dim); }
 #wikiArea .card .cbtns button.diffb { background:transparent; border:0; color:var(--accent);
                                       margin-left:auto; font-size:12px; padding:0; }
+
+/* R2-2(Quiet Library 라운드2) — Admin 탭 재설계(목업 ②). 눈썹+제목, 승인 대기 하이라이트 카드,
+   멤버 카드 리스트(이니셜 아바타·상태 필·권한 칩), 행 ⋯/칩 팝오버는 Channels.tsx의 #popmenu와
+   동일 이디엄(고정 위치+실측 배치) 재사용 — id="popmenu"는 동시에 한쪽만 열리므로 충돌 없음. */
+#adminArea { padding:18px 24px 30px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:4px; }
+#adminArea > .eyebrow { margin-top:6px; }
+#adminArea > .eyebrow:first-child { margin-top:0; }
+#adminArea h3 { font-size:17px; font-weight:600; margin:2px 0 12px; }
+.avatar { flex:none; width:32px; height:32px; border-radius:50%; background:var(--accent-soft); color:var(--accent);
+          display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; }
+/* 승인 대기 — 앰버톤 하이라이트 카드. Approve=주버튼(전역 button 기본이 accent 필), Reject=danger 텍스트. */
+#adminPending { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+.pendingCard { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px;
+               background:var(--pending-bg); border:1px solid var(--pending-line); }
+.pendingCard .info { flex:1; min-width:0; }
+.pendingCard .name { font-weight:600; font-size:13.5px; }
+.pendingCard .sub { font-size:12px; color:var(--dim); margin-top:1px; }
+.pendingCard .rejectBtn { background:transparent; color:var(--danger); font-weight:600; padding:0 6px; }
+.pendingCard .moreBtn { background:transparent; color:var(--dim); font-weight:400; padding:0 4px; }
+/* 멤버 카드 리스트 */
+#adminUsers { display:flex; flex-direction:column; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.memberRow { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line); }
+.memberRow:last-child { border-bottom:0; }
+.memberRow .nameCol { display:flex; flex-direction:column; min-width:0; }
+.memberRow .name { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.memberRow .login { font-size:11.5px; color:var(--dim); }
+.memberRow .pill { flex:none; }
+.pill.owner { color:var(--accent); border-color:var(--accent-line); background:transparent; }
+.pill.active { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 45%, var(--panel-2));
+               background:color-mix(in srgb, var(--ok) 14%, var(--panel-2)); }
+.pill.suspended { color:var(--danger); border-color:color-mix(in srgb, var(--danger) 45%, var(--panel-2));
+                  background:color-mix(in srgb, var(--danger) 14%, var(--panel-2)); }
+.memberRow .perms { flex:1; min-width:0; font-size:11.5px; color:var(--dim); }
+.memberRow .chips { flex:1; min-width:0; display:flex; flex-wrap:wrap; gap:6px; }
+.memberRow .chip { display:inline-flex; align-items:center; font-size:11px; padding:2px 9px; border-radius:99px;
+                    border:1px solid var(--line); color:var(--dim); background:transparent; }
+.memberRow .chip.addChip { border-style:dashed; cursor:pointer; font-weight:600; color:var(--dim); }
+.memberRow .chip.addChip:hover { color:var(--accent); border-color:var(--accent-line); }
+.memberRow .rowMenuBtn { flex:none; background:transparent; color:var(--dim); font-weight:400; padding:0 6px; }
+.memberRow .rowMenuBtn:hover { color:var(--text); }
+/* 눈썹 섹션(SERVER SETTINGS) — 큰 제목 없이 눈썹만(목업 지정), 입력폼은 기존 그대로. */
+#adminSettings { display:flex; flex-direction:column; gap:8px; margin-top:6px; max-width:420px; }

@@ -108,6 +108,13 @@ export const T = {
   statusPending: ko ? '대기' : 'pending',
   statusActive: ko ? '활성' : 'active',
   statusSuspended: ko ? '정지' : 'suspended',
+  // R2-2(Quiet Library 라운드2) — Admin 탭 재설계(목업 ② 픽셀): 눈썹·승인 대기 카드·역할 필·권한 칩 라벨.
+  adminWorkspaceEyebrow: (n: number) => (ko ? `워크스페이스 · 멤버 ${n}명` : `Workspace · ${n} members`),
+  adminWaitingApproval: ko ? '승인 대기 중' : 'Waiting for approval',
+  adminReject: ko ? '거부' : 'Reject',
+  roleOwner: ko ? '소유자' : 'Owner',
+  adminAddPermission: ko ? '권한 추가' : 'Add permission',
+  adminMoreActions: ko ? '더보기' : 'More actions',
   // Phase 16b — 권한 체크박스
   permWikiApprove: ko ? '위키 승인' : 'Approve wiki',
   permChannelsManage: ko ? '채널 관리' : 'Manage channels',
