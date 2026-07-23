@@ -1,6 +1,31 @@
 import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
-import App from './App';
+import App, { matchPendingFlush } from './App';
 import { T } from './i18n';
+
+// 최종 재리뷰 minor — pendingSendRef(지연 생성 채널 버퍼) flush 판정 순수 함수 단위 테스트("stub
+// flow": App.tsx 상단 matchPendingFlush 주석 참조 — hasAttachments=true와 이 버퍼 분기가 실제 UI로
+// 동시에 일어날 수 없음을 확인했으므로, 버퍼 객체가 attachmentIds를 flush까지 정확히 실어 나르는지는
+// 이 순수 함수로 직접 검증한다).
+describe('matchPendingFlush(지연 생성 채널 버퍼 flush 판정)', () => {
+  it('이름+모드가 맞는 채널이 오면 attachmentIds를 포함해 flush 대상을 만든다', () => {
+    const pending = { name: '일반', mode: 'chat', text: 'hi', attachmentIds: ['att-1', 'att-2'] };
+    const list = [{ id: 'w-chat', name: '일반', mode: 'chat' }];
+    expect(matchPendingFlush(pending, list)).toEqual({ channelId: 'w-chat', text: 'hi', attachmentIds: ['att-1', 'att-2'] });
+  });
+  it('이름은 맞지만 모드가 다르면 아직 flush하지 않는다(null)', () => {
+    const pending = { name: '일반', mode: 'chat', text: 'hi', attachmentIds: ['att-1'] };
+    const list = [{ id: 'w-code', name: '일반', mode: 'code' }];
+    expect(matchPendingFlush(pending, list)).toBeNull();
+  });
+  it('attachmentIds 없는 pending(텍스트만)은 undefined로 통과한다(회귀 0)', () => {
+    const pending = { name: '일반', mode: 'chat', text: 'hi' };
+    const list = [{ id: 'w-chat', name: '일반', mode: 'chat' }];
+    expect(matchPendingFlush(pending, list)).toEqual({ channelId: 'w-chat', text: 'hi', attachmentIds: undefined });
+  });
+  it('pending 자체가 없으면(버퍼링 안 된 연결) null', () => {
+    expect(matchPendingFlush(undefined, [{ id: 'x', name: 'y', mode: 'chat' }])).toBeNull();
+  });
+});
 
 // App.clear-compact.test.tsx와 동일한 최소 모의 소켓(단일 연결).
 class FakeWS {

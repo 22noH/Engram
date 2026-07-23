@@ -28,6 +28,26 @@ function chanKey(connId: string, mode: string, name: string): string {
   return `${connId}::${mode}::${name}`;
 }
 
+// 최종 재리뷰 minor(T4) — pendingSendRef(지연 생성 채널 버퍼)의 "flush 대상 판정" 순수 함수로 추출.
+// 실제 UI로는 hasAttachments=true(첨부 있음)가 이 버퍼 분기(sendText의 else if (!threadId))와 동시에
+// 일어날 수 없다 — 첨부는 항상 이미 존재하는 채널에만 업로드되고(addFiles가 업로드 전 채널 존재를
+// 요구 — 서버 POST /attachments/<channelId>가 실채널id를 요구하는 HTTP 계약 자체가 그렇다),
+// hasAttachments는 항상 타깃을 defaultConnId로 고정한다(T4 리뷰 C2) — 그리고 resolveDefaultChanId가
+// 참조하는 channelsByConn[defaultConnId]와 sendText가 참조하는 chanIdByConnName은 같은 'channels'
+// 프레임에서 원자적으로 함께 채워져 항상 일치한다. 즉 "첨부 done인데 그 채널이 chanIdByConnName에
+// 없다"는 조합은 현재 렌더러 상태머신에서 구성 불가능하다(addFiles/C2가 이미 막아준다는 뜻 — 좋은
+// 일이다). 그래도 버퍼 객체 구조 자체(attachmentIds가 flush까지 살아남는지)는 정확해야 하고, 이걸
+// 컴포넌트 안에 둔 채로는 그 정확성을 직접 단위 테스트할 방법이 없어 순수 함수로 뽑았다 — App.tsx의
+// onFrame 'channels' 분기가 이 함수 하나로 판정한다(동작 변경 없음, 리팩터만).
+export function matchPendingFlush(
+  pending: { name: string; mode: string; text: string; attachmentIds?: string[] } | undefined,
+  list: { id: string; name: string; mode?: string }[],
+): { channelId: string; text: string; attachmentIds?: string[] } | null {
+  if (!pending) return null;
+  const chan = list.find((c) => c.name === pending.name && (c.mode ?? 'chat') === pending.mode);
+  return chan ? { channelId: chan.id, text: pending.text, attachmentIds: pending.attachmentIds } : null;
+}
+
 // Task 4(chat-attachments) — 스펙 상한(코드 상수, 서버 attachment-store.ts와 같은 값을 렌더러 쪽에도
 // 독립 보유 — renderer는 src/edge를 참조할 수 없는 별도 tsconfig 스코프라 공유 불가, 값만 맞춘다).
 const MAX_ATTACHMENTS_PER_MESSAGE = 5;
@@ -115,7 +135,10 @@ export default function App() {
   // 채널 생성→전송 2스텝 대기 버퍼: 연결당(target connId) 대기 전송 1건.
   // ponytail: 이름+모드 키 — 그 연결의 channels 프레임이 그 이름+모드를 갖고 돌아오면 flush
   // (모드를 안 보면 동명·타모드 채널로 잘못 flush될 수 있다 — Minor #4).
-  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string }>>(new Map());
+  // 최종 재리뷰 minor(T4) — attachmentIds도 같이 버퍼링한다. 지연 생성 채널(첫 메시지가 아직 없는
+  // 채널)에 첨부와 함께 보내면 createChannel 왕복 후 flush되는데, 여기 안 실으면 텍스트만 나가고
+  // 첨부는 조용히 유실된다(그 사이 sendText는 이미 성공 취급해 칩을 비웠으므로 사용자는 눈치 못 챈다).
+  const pendingSendRef = useRef<Map<string, { name: string; mode: string; text: string; attachmentIds?: string[] }>>(new Map());
 
   function onFrame(connId: string, f: ServerFrame) {
     if (f.t === 'channels') {
@@ -129,13 +152,10 @@ export default function App() {
         for (const c of f.list) next.set(chanKey(connId, c.mode ?? 'chat', c.name), c.id);
         return next;
       });
-      const pending = pendingSendRef.current.get(connId);
-      if (pending) {
-        const chan = f.list.find((c) => c.name === pending.name && (c.mode ?? 'chat') === pending.mode);
-        if (chan) {
-          send(connId, { t: 'send', channelId: chan.id, text: pending.text });
-          pendingSendRef.current.delete(connId);
-        }
+      const flush = matchPendingFlush(pendingSendRef.current.get(connId), f.list);
+      if (flush) {
+        send(connId, { t: 'send', channelId: flush.channelId, text: flush.text, attachments: flush.attachmentIds });
+        pendingSendRef.current.delete(connId);
       }
     } else if (f.t === 'history') {
       setMsgsByConnCh((prev) => new Map(prev).set(`${connId}::${f.channelId}`, f.messages));
@@ -431,7 +451,8 @@ export default function App() {
     if (channelId) {
       send(targetConnId, { t: 'send', channelId, text, threadId, answersId, attachments: attachmentIds });
     } else if (!threadId) {
-      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text });
+      // 최종 재리뷰 minor(T4) — attachmentIds도 같이 버퍼링(위 pendingSendRef 주석 참조).
+      pendingSendRef.current.set(targetConnId, { name: currentName, mode, text, attachmentIds });
       send(targetConnId, { t: 'createChannel', name: currentName, mode });
     }
     expectReply(currentName, text, targetConnId);
