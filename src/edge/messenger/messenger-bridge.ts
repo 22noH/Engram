@@ -33,7 +33,12 @@ export function bindMessenger(
       // ask_user 도구 경로) 브레인 프롬프트가 될 text 앞에 원본 질문 문맥을 붙인다. 없으면 e.text 그대로
       // (기존과 바이트 동일 — 회귀 0). mode/repoPath/brain과 같은 결로 여기가 MentionEvent→CoreMessage
       // 유일 변환점이라 프롬프트 조립 전 이 한 곳에서만 손대면 된다.
-      const text = e.answeredQuestion ? `[사용자가 다음 질문에 답함]\n${e.answeredQuestion}\n[답]\n${e.text}` : e.text;
+      // 재리뷰 minor: 이 두 마커는 브레인 프롬프트 안(ReaderAgent.buildPrompt의 지시문·TOOL_USAGE_GUIDANCE와
+      // 같은 자리)에 들어가는 문구지 채팅에 찍히는 사용자향 텍스트가 아니다 — t()는 ENGRAM_LANG 설정에 따라
+      // 로케일화되는 사용자향 사전이라(i18n.ts 주석), 여기 쓰면 설정이 ko일 때 이 마커만 한글이고 buildPrompt의
+      // 나머지 지시문은 전부 영어인 채로 남아 오히려 불일치가 커진다. 그래서 t()를 쓰지 않고, buildPrompt의
+      // 다른 상수 지시문들과 같은 결로 중립 영어 문구를 그대로 하드코딩한다.
+      const text = e.answeredQuestion ? `[The user answered this question]\n${e.answeredQuestion}\n[Answer]\n${e.text}` : e.text;
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).
       await orchestrator.handleMention(
         { text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}), ...(e.brain ? { brain: e.brain } : {}) },
