@@ -25,6 +25,7 @@ import { resolveLanguage } from '../agent-layer/language';
 import { loadLocalBrains, addLocalBrain } from './local-brains';
 import { readSetupCode } from '../edge/auth/setup-code';
 import { focusOrRestore } from './window-focus';
+import { PtyManager } from './pty-manager';
 import * as nodeHttp from 'http';
 
 const dataDir = app.getPath('userData'); // 예: %APPDATA%/Engram
@@ -47,6 +48,16 @@ let child: UtilityProcess | null = null;
 let quitting = false;
 let childStartedAt = 0;
 const backoff = new Backoff();
+
+// ---- 코드 패널 터미널(스펙: docs/superpowers/specs/2026-07-23-code-panel-design.md) ----
+// 레포 첫 스트리밍 IPC 채널: pty 출력/종료를 chatWin으로 push(webContents.send).
+const ptyManager = new PtyManager();
+ptyManager.onData((sid, data) => {
+  chatWin?.webContents.send('engram:pty-data', { sid, data });
+});
+ptyManager.onExit((sid, code) => {
+  chatWin?.webContents.send('engram:pty-exit', { sid, code });
+});
 
 // UI 언어: 영어 기본, 시스템 로케일이 한국어면 한국어(렌더러는 navigator.language로 동일 판정).
 const ko = (): boolean => app.getLocale().toLowerCase().startsWith('ko');
@@ -318,6 +329,12 @@ function registerIpc(): void {
     mirrorClaudeMcp(configDir, readClaudeMcpServers());
     return listMcpServersFile(configDir);
   });
+  // 코드 패널 터미널: 스폰·입출력·리사이즈·종료 전부 IPC 경유(렌더러 직접 노드 접근 금지).
+  ipcMain.handle('engram:pty-start', (_e, channelId: string, cwd: string) => ptyManager.start(channelId, cwd));
+  ipcMain.handle('engram:pty-write', (_e, sid: string, data: string) => { ptyManager.write(sid, data); });
+  ipcMain.handle('engram:pty-resize', (_e, sid: string, cols: number, rows: number) => { ptyManager.resize(sid, cols, rows); });
+  ipcMain.handle('engram:pty-kill', (_e, sid: string) => { ptyManager.kill(sid); });
+  ipcMain.handle('engram:pty-replay', (_e, sid: string) => ptyManager.replay(sid));
 }
 
 // ---- 부팅 ----
@@ -336,6 +353,7 @@ if (!gotLock) {
     quitting = true;
     child?.kill();
     brainProcs.forEach((p) => p.kill());
+    ptyManager.killAll(); // 터미널 세션 고아 방지
   });
   // 창을 다 닫아도 트레이 상주 유지(기본 quit 동작 차단).
   app.on('window-all-closed', () => {});
