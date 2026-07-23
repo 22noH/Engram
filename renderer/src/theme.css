@@ -172,10 +172,11 @@ details.thread .msg { max-width:100%; }
               white-space:nowrap; }
 #clearToast .undo { color:var(--accent); font-weight:700; cursor:pointer; }
 #inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
-input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px;
+/* T2 리뷰 픽스 — 스펙 형태 스케일(입력·버튼 9px, 배지·필은 fully-rounded 유지 — '7px'는 스펙 오탈자로 정정됨). */
+input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:9px;
                    padding:10px 12px; color:var(--text); outline:none; }
 input[type=text]:focus, input[type=password]:focus { border-color:var(--accent); }
-button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; cursor:pointer;
+button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; cursor:pointer;
          color:var(--accent-text); font-weight:600; }
 
 /* Phase 12 — Engram 선택기(입력바 오른쪽, 보내기 옆) */
@@ -321,6 +322,9 @@ button { background:var(--accent); border:0; border-radius:8px; padding:0 16px; 
 #wikiArea .dochdr h2 { margin:0 0 6px; font-family:var(--font-serif); font-size:21px; font-weight:600;
                        letter-spacing:-.01em; text-wrap:balance; }
 #wikiArea .dochdr .meta { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); }
+/* T2 리뷰 픽스 — 눈썹 줄(category · updated)이 이미 같은 정보를 보여주므로 .meta의 중복 표시만 숨긴다.
+   StatusPill(자식 없음, span이 아니라 컴포넌트가 그대로 렌더)은 그대로 보여야 해 손대지 않음. 스타일 전용, DOM 무변경. */
+#wikiArea .dochdr .meta .cat, #wikiArea .dochdr .meta .date { display:none; }
 #wikiArea .acts { display:flex; gap:6px; flex:none; padding-top:2px; }
 #wikiArea .acts button { border:1px solid var(--line); background:transparent; color:var(--text);
                          font:inherit; font-size:12.5px; padding:6px 12px; border-radius:7px; }
