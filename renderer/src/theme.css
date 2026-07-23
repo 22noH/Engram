@@ -497,7 +497,7 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
                                              color:var(--dim); text-decoration:none; border:1px solid var(--line); border-radius:6px; }
 .codePreviewBar a:hover, .codePreviewBar button:hover:not(:disabled) { color:var(--text); background:var(--hover); }
 .codePreviewError { flex:none; padding:6px 12px; font-size:12px; color:var(--danger); }
-.codePreview iframe { flex:1; min-height:0; border:none; background:#fff; }
+.codePreview iframe { flex:1; min-height:0; border:none; background:var(--panel-2); }
 
 /* Diff 탭 — 좌측 파일 목록+우측 unified diff(추가/삭제행은 --accent/--danger 파생색, AdminArea 관례). */
 .codeDiff { flex:1; min-height:0; display:flex; }

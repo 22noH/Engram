@@ -768,10 +768,18 @@ export default function App() {
           ) : (
             <>
               {currentName && mode === 'code' && defaultChan?.repoPath && (
-                <div id="chhdr" style={{ display: 'flex' }} title={defaultChan.repoPath}>
-                  <span>{'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}</span>
-                  {codePanelGate && <CodePanelIcons activeTab={codeTab} onSelect={openCodeTab} />}
-                </div>
+                codePanelGate ? (
+                  // T3 리뷰 Minor 1 — 아이콘 게이트가 열린 경우에만 flex+span 마크업(아이콘 자리 확보).
+                  // 게이트가 닫힌 코드 채널(비데스크톱 등)은 아래 else 분기로 기존 마크업 그대로(byte-identical).
+                  <div id="chhdr" style={{ display: 'flex' }} title={defaultChan.repoPath}>
+                    <span>{'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}</span>
+                    <CodePanelIcons activeTab={codeTab} onSelect={openCodeTab} />
+                  </div>
+                ) : (
+                  <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
+                    {'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}
+                  </div>
+                )
               )}
               {currentName && mode === 'code' && !defaultChan?.repoPath ? (
                 <FolderEmpty onSetRepo={(p) => { if (defaultChan) send(connState.defaultConnId, { t: 'setRepoPath', id: defaultChan.id, repoPath: p }); }} />

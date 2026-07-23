@@ -69,6 +69,14 @@ describe('코드 패널 아이콘 게이트', () => {
     expect(document.querySelector('.chhdrIcons')).toBeNull();
   });
 
+  it('T3 리뷰 Minor 1 — 게이트가 닫힌 코드 채널의 #chhdr는 기존 마크업(순수 텍스트, span 없음)과 동일하다', async () => {
+    await openCodeChannel();
+    const chhdr = document.getElementById('chhdr') as HTMLElement;
+    expect(chhdr.querySelector('span')).toBeNull();
+    expect(chhdr.style.display).toBe('block');
+    expect(chhdr.textContent).toBe('📁 proj');
+  });
+
   it('chat 모드에서는 아이콘이 안 뜬다(코드 채널이 아니어도 chhdr 자체가 없음)', async () => {
     (window as any).engramDesktop = fakePtyApi();
     render(<App />);

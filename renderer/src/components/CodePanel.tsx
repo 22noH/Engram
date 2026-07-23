@@ -124,56 +124,64 @@ function TerminalTab({ channelId, repoPath, onShellName }: {
     let onThemeChange: (() => void) | undefined;
 
     (async () => {
-      const { Terminal, FitAddon } = await loadXterm();
-      if (disposed) return;
+      try {
+        const { Terminal, FitAddon } = await loadXterm();
+        if (disposed) return;
 
-      const term = new Terminal({
-        fontFamily: 'Consolas, "Cascadia Mono", Menlo, monospace',
-        fontSize: 12,
-        theme: buildXtermTheme(),
-      });
-      const fit = new FitAddon();
-      term.loadAddon(fit);
-      termRef.current = term;
-      if (containerRef.current) term.open(containerRef.current);
-      try { fit.fit(); } catch { /* jsdom 등 레이아웃 없는 환경 */ }
-
-      dataDisp = term.onData((data: string) => {
-        if (sidRef.current) void window.engramDesktop?.ptyWrite?.(sidRef.current, data);
-      });
-
-      if (ResizeObserverCtor && containerRef.current) {
-        ro = new ResizeObserverCtor(() => {
-          try { fit.fit(); } catch { /* 무시 */ }
-          if (sidRef.current) void window.engramDesktop?.ptyResize?.(sidRef.current, term.cols, term.rows);
+        const term = new Terminal({
+          fontFamily: 'Consolas, "Cascadia Mono", Menlo, monospace',
+          fontSize: 12,
+          theme: buildXtermTheme(),
         });
-        ro.observe(containerRef.current);
-      }
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        termRef.current = term;
+        if (containerRef.current) term.open(containerRef.current);
+        try { fit.fit(); } catch { /* jsdom 등 레이아웃 없는 환경 */ }
 
-      // 앱 테마(라이트/다크) 전환 시 xterm 테마 재적용 — 검정 고정 금지 요건의 핵심 배선.
-      mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
-      onThemeChange = () => { term.options.theme = buildXtermTheme(); };
-      mq?.addEventListener?.('change', onThemeChange);
-
-      const api = window.engramDesktop;
-      if (!api?.ptyStart) return;
-      const res = await api.ptyStart(channelId, repoPath);
-      if (disposed) return;
-      if ('error' in res) { setStartError(res.error); term.writeln(`[error] ${res.error}`); return; }
-      sidRef.current = res.sid;
-      onShellName(res.shell);
-      if (api.ptyReplay) {
-        const buf = await api.ptyReplay(res.sid);
-        if (!disposed && buf) term.write(buf);
-      }
-      if (disposed) return;
-      if (api.onPtyData) {
-        unsubData = api.onPtyData((sid: string, data: string) => { if (sid === sidRef.current) term.write(data); });
-      }
-      if (api.onPtyExit) {
-        unsubExit = api.onPtyExit((sid: string) => {
-          if (sid === sidRef.current) { setEnded(true); term.writeln(`\r\n${T.codeSessionEnded}`); }
+        dataDisp = term.onData((data: string) => {
+          if (sidRef.current) void window.engramDesktop?.ptyWrite?.(sidRef.current, data);
         });
+
+        if (ResizeObserverCtor && containerRef.current) {
+          ro = new ResizeObserverCtor(() => {
+            try { fit.fit(); } catch { /* 무시 */ }
+            if (sidRef.current) void window.engramDesktop?.ptyResize?.(sidRef.current, term.cols, term.rows);
+          });
+          ro.observe(containerRef.current);
+        }
+
+        // 앱 테마(라이트/다크) 전환 시 xterm 테마 재적용 — 검정 고정 금지 요건의 핵심 배선.
+        mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+        onThemeChange = () => { term.options.theme = buildXtermTheme(); };
+        mq?.addEventListener?.('change', onThemeChange);
+
+        const api = window.engramDesktop;
+        if (!api?.ptyStart) return;
+        const res = await api.ptyStart(channelId, repoPath);
+        if (disposed) return;
+        if ('error' in res) { setStartError(res.error); term.writeln(`[error] ${res.error}`); return; }
+        sidRef.current = res.sid;
+        onShellName(res.shell);
+        if (api.ptyReplay) {
+          const buf = await api.ptyReplay(res.sid);
+          if (!disposed && buf) term.write(buf);
+        }
+        if (disposed) return;
+        if (api.onPtyData) {
+          unsubData = api.onPtyData((sid: string, data: string) => { if (sid === sidRef.current) term.write(data); });
+        }
+        if (api.onPtyExit) {
+          unsubExit = api.onPtyExit((sid: string) => {
+            if (sid === sidRef.current) { setEnded(true); term.writeln(`\r\n${T.codeSessionEnded}`); }
+          });
+        }
+      } catch {
+        // I2(리뷰) — xterm 동적 import 실패(청크 로드 오류 등)를 조용히 삼키지 않는다. 기존 종료
+        // 배너(ended+startError)를 재사용해 안내+재시작 버튼(=재시도)을 보여준다.
+        if (disposed) return;
+        setStartError(T.codeTermLoadFailed);
+        setEnded(true);
       }
     })();
 
@@ -240,7 +248,7 @@ function PreviewTab() {
       </div>
       {error && <div className="codePreviewError">{error}</div>}
       {loadedUrl ? (
-        <iframe key={iframeKey} src={loadedUrl} title="preview"
+        <iframe key={iframeKey} src={loadedUrl} title={T.codePreviewTab}
           sandbox="allow-scripts allow-same-origin allow-forms" />
       ) : (
         <div className="codeEmptyNotice">{T.codePreviewEmpty}</div>
@@ -336,17 +344,29 @@ export function CodePanel({ channelId, repoPath, tab, onChangeTab, onClose }: {
   const [width, setWidth] = useState<number>(() => clampWidth(loadWidth()));
   const [shellName, setShellName] = useState<string>(T.codeTerminalTab);
   const [diffCount, setDiffCount] = useState(0);
+  // I1(리뷰) — 드래그 중 언마운트(모드/채널 전환, 마우스업이 iframe 문서 위에서 일어난 경우 등)되면
+  // up()이 절대 안 불려 document 리스너가 낡은 클로저를 문 채 남는다. 진행 중인 드래그의 해제 함수를
+  // ref에 담아두고, 컴포넌트 언마운트 시 별도 effect에서 강제로 떼어낸다.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    return () => { dragCleanupRef.current?.(); dragCleanupRef.current = null; };
+  }, []);
 
   const onSplitterDown = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
     const move = (ev: MouseEvent) => setWidth(clampWidth(startWidth + (startX - ev.clientX)));
-    const up = () => {
+    const detach = () => {
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
+      dragCleanupRef.current = null;
+    };
+    const up = () => {
+      detach();
       setWidth((w) => { saveWidth(w); return w; });
     };
+    dragCleanupRef.current = detach;
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
   };

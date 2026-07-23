@@ -173,4 +173,6 @@ export const T = {
   codeDiffNotRepo: ko ? 'git 저장소가 아니에요' : 'Not a git repository',
   codeDiffGitMissing: ko ? 'git이 설치되어 있지 않아요' : 'git is not installed',
   codeDiffLoadError: ko ? '변경 사항을 불러올 수 없어요' : 'Could not load changes',
+  // T3 리뷰 I2 — xterm 동적 import 실패(청크 로드 오류 등) 안내. 재시작 버튼이 재시도 역할을 겸한다.
+  codeTermLoadFailed: ko ? '터미널을 불러오지 못했어요 — 재시작을 눌러 다시 시도하세요' : 'Could not load the terminal — press Restart to try again',
 };

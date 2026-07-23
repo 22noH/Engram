@@ -5,6 +5,10 @@ import { T } from '../i18n';
 // jsdom엔 canvas 컨텍스트가 없어 xterm 실인스턴스를 만들 수 없다 — 브리프 지시대로 배선(구독/해제/
 // write 호출)만 모킹으로 검증한다. dynamic import(loadXterm)도 vi.mock이 그대로 가로챈다.
 let lastTerm: FakeTerminal | undefined;
+// I2(리뷰) — "xterm 동적 import 실패" 시나리오용 스위치. import('@xterm/xterm') 결과에서
+// Terminal을 구조분해할 때 getter가 던지게 해 실제 청크 로드 실패를 흉내낸다(CodePanel.tsx의
+// loadXterm()이 그대로 reject를 전파 → try/catch로 떨어진다).
+let failXtermImport = false;
 class FakeTerminal {
   options: any;
   cols = 80; rows = 24;
@@ -19,7 +23,12 @@ class FakeTerminal {
   emit(d: string) { this.dataCb?.(d); }
   dispose() {}
 }
-vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }));
+vi.mock('@xterm/xterm', () => ({
+  get Terminal() {
+    if (failXtermImport) throw new Error('chunk load failed');
+    return FakeTerminal;
+  },
+}));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 
 function fakeApi(overrides: Record<string, unknown> = {}) {
@@ -37,7 +46,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => { localStorage.clear(); lastTerm = undefined; });
+beforeEach(() => { localStorage.clear(); lastTerm = undefined; failXtermImport = false; });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); delete (window as any).engramDesktop; });
 
 describe('CodePanelIcons', () => {
@@ -131,6 +140,17 @@ describe('CodePanel — 터미널 탭 배선', () => {
     expect(await screen.findByText(T.codeSessionEnded)).toBeInTheDocument();
     expect(screen.getByText(T.codeRestart)).toBeInTheDocument();
   });
+
+  it('I2 — xterm 동적 import 실패 시 조용히 삼키지 않고 안내+재시작 버튼을 보여준다', async () => {
+    failXtermImport = true;
+    const api = fakeApi();
+    (window as any).engramDesktop = api;
+    render(<CodePanel channelId="ch1" repoPath="/repo" tab="terminal" onChangeTab={() => {}} onClose={() => {}} />);
+    expect(await screen.findByText((content) => content.includes(T.codeTermLoadFailed))).toBeInTheDocument();
+    expect(screen.getByText(T.codeRestart)).toBeInTheDocument();
+    // ptyStart까지 도달하지 않고(로드 단계에서 실패) 조용히 삼켜지지 않았음을 재확인.
+    expect(api.ptyStart).not.toHaveBeenCalled();
+  });
 });
 
 describe('CodePanel — 프리뷰 탭', () => {
@@ -221,6 +241,18 @@ describe('CodePanel — 스플리터·닫기', () => {
     fireEvent.mouseUp(document);
     expect(panel.style.width).not.toBe(before);
     expect(localStorage.getItem('engram.codePanel.width')).toBeTruthy();
+  });
+
+  it('I1 — 드래그 도중 언마운트되면 document의 mousemove/mouseup 리스너가 정리된다(누수 방지)', () => {
+    const removeSpy = vi.spyOn(document, 'removeEventListener');
+    const { unmount } = render(<CodePanel channelId="ch1" repoPath="/repo" tab="preview" onChangeTab={() => {}} onClose={() => {}} />);
+    const splitter = document.querySelector('.codeSplitter') as HTMLElement;
+    fireEvent.mouseDown(splitter, { clientX: 500 }); // mouseup 전에 언마운트 — up()이 절대 안 불리는 경로
+    unmount();
+    expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
+    // 정리된 뒤엔 낡은 클로저가 더 이상 반응하지 않아야 한다(에러 없이 조용히 무시).
+    expect(() => fireEvent.mouseMove(document, { clientX: 100 })).not.toThrow();
   });
 
   it('닫기(×) 클릭 시 onClose가 호출된다', () => {
