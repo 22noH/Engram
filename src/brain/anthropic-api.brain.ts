@@ -44,7 +44,17 @@ export class AnthropicApiBrain implements BrainProvider {
       if (!this.profile.apiKey) return fail('anthropic-api: apiKey missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
-      const history: AnthropicMsg[] = [{ role: 'user', content: prompt }];
+      // Task 3(chat-attachments): opts.images 있으면 초기 user 턴을 텍스트+이미지 블록 배열로(vision).
+      // 없으면(기존 압도적 다수 경로) content: prompt 그대로 — 요청 바디 byte-identical(회귀 0).
+      const history: AnthropicMsg[] = [{
+        role: 'user',
+        content: opts?.images?.length
+          ? [
+              { type: 'text', text: prompt },
+              ...opts.images.map((img) => ({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.dataBase64 } })),
+            ]
+          : prompt,
+      }];
       const toolDefs: WebToolDef[] = coding
         ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
         : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : []), ...(opts?.askUser ? [askUserDef()] : [])];

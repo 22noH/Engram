@@ -105,6 +105,13 @@ export class ChatStore {
     this.autoCompactHook = fn;
   }
 
+  // Task 3(chat-attachments): self.adapter.onSend이 f.attachments(업로드된 id 목록)를 실재 메타로
+  // 해석할 때 쓰는 읽기 전용 접근자. 미주입(브레인 모드 초기·구식 테스트)이면 undefined —
+  // onSend은 이 경우 스탬프를 건너뛴다(회귀 0, attachments 없는 send는 기존과 바이트 동일).
+  getAttachmentStore(): AttachmentStore | undefined {
+    return this.attachmentStore;
+  }
+
   // Task 1(clear/compact): 이전 세션에서 실행취소 창이 만료되지 않은 채 남은 `.cleared`
   // 백업(토스트 미확정분)을 부팅 시 정리. never-throw(chatDir 없음=정리할 것 없음).
   private cleanupStaleClearBackups(): void {

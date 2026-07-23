@@ -151,6 +151,25 @@ it('observe로 흐르는 일반 메시지의 brain도 함께 넘긴다', async (
   expect(seen[0].brain).toBe('qwen');
 });
 
+it('mention 이벤트의 attachments를 handleMention에 넘긴다(Task 3, chat-attachments)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  const attachments = [{ id: 'a1', name: 'x.png', mime: 'image/png', size: 3, path: 'C:/data/a1.png' }];
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {}, attachments } as any);
+  expect(calls[0].attachments).toEqual(attachments);
+});
+
+it('attachments 없는 mention은 attachments 필드를 포함하지 않는다(회귀 0)', async () => {
+  const calls: any[] = [];
+  const orch = { handleMention: async (m: any) => { calls.push(m); } };
+  const port = new FakeMessenger();
+  bindMessenger(port, orch as any, { warn() {} });
+  await port.emit({ text: 'x', channelId: 'c1', authorId: 'u', target: {} });
+  expect('attachments' in calls[0]).toBe(false);
+});
+
 it('post(text, actions)가 port.reply에 actions를 넘긴다', async () => {
   const replied: any[] = [];
   const port = new FakeMessenger();

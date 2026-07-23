@@ -41,7 +41,13 @@ export function bindMessenger(
       const text = e.answeredQuestion ? `[The user answered this question]\n${e.answeredQuestion}\n[Answer]\n${e.text}` : e.text;
       // 지식 네임스페이스는 채널 유지(userId=channelId, 멀티플레이어).
       await orchestrator.handleMention(
-        { text, userId: e.channelId, ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}), ...(e.brain ? { brain: e.brain } : {}) },
+        {
+          text, userId: e.channelId,
+          ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}),
+          ...(e.brain ? { brain: e.brain } : {}),
+          // Task 3(chat-attachments): additive 관통 — 미첨부 send는 기존과 바이트 동일(회귀 0).
+          ...(e.attachments && e.attachments.length ? { attachments: e.attachments } : {}),
+        },
         post,
         threadKey,
       );

@@ -1,7 +1,7 @@
 // 앞단 중립 메신저 포트(설계 §9 / Phase 6a). 어댑터(Discord 등)가 구현하고,
 // 코어는 채널 ID·답신 핸들 등 메신저 특유의 것을 모른다(CoreMessage 중립성 연장).
 
-import type { Action, Message } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, Message } from '../../../shared/protocol';
 
 // 답신 경로 — 어댑터별 불투명 핸들. 코어를 통과하지 않고 어댑터↔bridge만 주고받는다.
 export type ReplyTarget = unknown;
@@ -19,6 +19,10 @@ export interface MentionEvent {
   // 질문(questionFallbackText 렌더링)을 실어준다. 카드가 없거나(펜스텍스트 경로처럼 대화이력에서
   // 자연히 보임) 일반 send면 미첨부 — 기존 이벤트와 바이트 동일(회귀 0).
   answeredQuestion?: string;
+  // Task 3(chat-attachments): onSend이 실재 id만(위조 무시) 해석해 실어주는 첨부 메타+서버-로컬
+  // 절대경로. 미첨부 send=기존과 바이트 동일(회귀 0). path는 두뇌 하네스가 vision/텍스트 읽기용으로만
+  // 쓴다 — 렌더러/클라에는 이 이벤트가 노출되지 않는다(edge 내부 전용).
+  attachments?: Array<AttachmentMeta & { path: string }>;
 }
 
 export interface MessengerPort {

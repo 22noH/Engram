@@ -269,6 +269,42 @@ describe('AnthropicApiBrain', () => {
   });
 });
 
+describe('AnthropicApiBrain — 첨부 vision 이미지 블록(Task 3, chat-attachments)', () => {
+  it('opts.images 없으면 초기 user content가 문자열 그대로(요청 바디 byte-identical, 회귀 0)', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('hello');
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.messages[0]).toEqual({ role: 'user', content: 'hello' });
+  });
+
+  it('opts.images 있으면 초기 user content가 [text, image...] 블록 배열로 실린다', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    const images = [{ mime: 'image/png', dataBase64: 'AAAA' }];
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('describe this', undefined, { images });
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.messages[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'describe this' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      ],
+    });
+  });
+
+  it('opts.images 여러 장이면 순서대로 텍스트 뒤에 이미지 블록이 이어진다', async () => {
+    const fetchFn = jest.fn(async () => sse(TEXT_TURN)) as unknown as typeof fetch;
+    const images = [
+      { mime: 'image/png', dataBase64: 'AAAA' },
+      { mime: 'image/jpeg', dataBase64: 'BBBB' },
+    ];
+    await new AnthropicApiBrain(PROFILE, fetchFn).complete('x', undefined, { images });
+    const body = JSON.parse((fetchFn as jest.Mock).mock.calls[0][1].body);
+    expect(body.messages[0].content).toHaveLength(3);
+    expect(body.messages[0].content[1].source.media_type).toBe('image/png');
+    expect(body.messages[0].content[2].source.media_type).toBe('image/jpeg');
+  });
+});
+
 describe('AnthropicApiBrain — MCP 배선(8c-1)', () => {
   beforeEach(() => {
     (loadMcpServers as jest.Mock).mockReset().mockReturnValue({});

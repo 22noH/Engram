@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { RagStore } from '../knowledge-core/rag/rag-store';
 import { SearchResult } from '../knowledge-core/rag/rag.types';
@@ -14,6 +16,12 @@ import { loadPrompt } from './prompt-store';
 import { AskUserPayload } from './ask-user-block';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
+
+// Task 3(chat-attachments): 두뇌 관통 상수(스펙 §두뇌 활용). 이미지는 vision 블록으로, 텍스트계
+// 확장자는 프롬프트에 내용을 삽입(256KB 상한, 초과분은 앞부분만+절단 표시), 그 외는 존재만 알린다.
+const IMAGE_MIME_WHITELIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const TEXT_ATTACHMENT_EXTS = new Set(['.md', '.txt', '.log', '.json', '.ts', '.js', '.py', '.yaml', '.yml', '.toml', '.csv']);
+const TEXT_ATTACHMENT_CAP = 256 * 1024; // 256KB(스펙 상한)
 
 // prompts/conductor.md 없을 때의 내장 기본값(지휘자 지침 — out-of-box 동작 보장).
 export const CONDUCTOR_DEFAULT = [
@@ -85,11 +93,15 @@ export class ReaderAgent {
       // 재진입으로 데드락하지 않는다. 기본 지휘자(msg.brain 미설정)는 undefined → 전 목록 그대로(회귀 0).
       const session = this.delegator && brain.canDelegate ? this.delegator.handle(msg.brain) : undefined;
       const handle = session && session.brains.length > 0 ? session : undefined;
-      const completeOpts: CompleteOpts | undefined = handle || askUser
-        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}) }
+      // Task 3(chat-attachments): 첨부가 있으면 이미지는 vision 블록(opts.images)으로, 텍스트계·기타는
+      // 프롬프트 블록으로. 미첨부(msg.attachments 없음)면 빈 결과 — 프롬프트·opts 둘 다 기존과 바이트
+      // 동일(회귀 0). 파일 읽기는 never-throw(attachmentBlocks 내부에서 흡수).
+      const { block: attachmentBlock, images } = await this.attachmentBlocks(msg.attachments);
+      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length
+        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}), ...(images.length ? { images } : {}) }
         : undefined;
       const result = await brain.complete(
-        this.buildPrompt(msg.text, hits, ctx, recent, !!handle),
+        this.buildPrompt(msg.text, hits, ctx, recent, !!handle, attachmentBlock),
         onChunk,
         completeOpts,
       );
@@ -117,7 +129,7 @@ export class ReaderAgent {
   }
 
   // 검색된 위키를 번호 매긴 컨텍스트로 조립 + 근거 우선·출처 표기 지시.
-  private buildPrompt(question: string, hits: SearchResult[], ctx = '', recent: ConversationRecord[] = [], conductorOn = false): string {
+  private buildPrompt(question: string, hits: SearchResult[], ctx = '', recent: ConversationRecord[] = [], conductorOn = false, attachmentBlock = ''): string {
     const context = hits.map((h, i) => `[${i + 1}] ${h.title} (slug: ${h.slug})\n${h.text}`).join('\n\n');
     const clip = (s: string): string => (s.length > 400 ? s.slice(0, 400) + '…' : s);
     const recentBlock = recent.length
@@ -138,9 +150,53 @@ export class ReaderAgent {
       outputDirective('interactive'),
       TOOL_USAGE_GUIDANCE,
       '',
-      conductorBlock + recentBlock + insightBlock + `# Searched wiki\n${context || '(none)'}`,
+      conductorBlock + recentBlock + insightBlock + attachmentBlock + `# Searched wiki\n${context || '(none)'}`,
       '',
       `# Question\n${question}`,
     ].join('\n');
+  }
+
+  // Task 3(chat-attachments): 존재만 알리는 폴백 마커 — 읽기 실패·화이트리스트 밖 파일 공용.
+  // 경로는 항상 포함(CLI 하네스가 프롬프트 텍스트만으로 파일을 직접 읽을 수 있어야 하므로).
+  private fallbackAttachmentMarker(a: { name: string; mime: string; size: number; path: string }): string {
+    return `[Attachment: ${a.name} (${a.mime}, ${a.size} bytes) — file at ${a.path}]`;
+  }
+
+  // 첨부(MentionEvent→CoreMessage 관통)를 이미지 vision 블록 + 프롬프트 `# Attachments` 블록으로
+  // 조립한다. 이미지는 화이트리스트 mime만 base64로 읽어 opts.images에 싣고 프롬프트엔 이름+경로
+  // 마커만 남긴다. 텍스트계 확장자는 내용을 프롬프트에 직접 삽입(256KB 상한, 초과분은 절단 표시).
+  // 그 외는 존재만 알리는 폴백 마커. 파일 읽기는 never-throw — 실패하면 폴백 마커로 떨어진다.
+  private async attachmentBlocks(
+    attachments?: CoreMessage['attachments'],
+  ): Promise<{ block: string; images: NonNullable<CompleteOpts['images']> }> {
+    if (!attachments || attachments.length === 0) return { block: '', images: [] };
+    const images: NonNullable<CompleteOpts['images']> = [];
+    const lines: string[] = [];
+    for (const a of attachments) {
+      if (IMAGE_MIME_WHITELIST.has(a.mime)) {
+        try {
+          const data = await fs.promises.readFile(a.path);
+          images.push({ mime: a.mime, dataBase64: data.toString('base64') });
+          lines.push(`[Image attached: ${a.name} — file at ${a.path}]`);
+        } catch {
+          lines.push(this.fallbackAttachmentMarker(a)); // 읽기 실패 — 존재만 알림(never-throw)
+        }
+        continue;
+      }
+      const ext = path.extname(a.name).toLowerCase();
+      if (TEXT_ATTACHMENT_EXTS.has(ext)) {
+        try {
+          const buf = await fs.promises.readFile(a.path);
+          const truncated = buf.length > TEXT_ATTACHMENT_CAP;
+          const content = buf.subarray(0, TEXT_ATTACHMENT_CAP).toString('utf8');
+          lines.push(`## ${a.name} — file at ${a.path}\n${content}${truncated ? '\n…[truncated — attachment exceeds 256KB]' : ''}`);
+        } catch {
+          lines.push(this.fallbackAttachmentMarker(a)); // 읽기 실패 — 존재만 알림(never-throw)
+        }
+        continue;
+      }
+      lines.push(this.fallbackAttachmentMarker(a)); // 화이트리스트 밖(바이너리 등) — 존재만 알림
+    }
+    return { block: lines.length ? `# Attachments\n${lines.join('\n\n')}\n\n` : '', images };
   }
 }

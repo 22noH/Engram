@@ -786,6 +786,16 @@ describe('ChatStore + AttachmentStore 운명 공유(Task 1: chat-attachments)', 
     expect('attachments' in m).toBe(false);
   });
 
+  // Task 3(chat-attachments): self.adapter.onSend이 스탬프용으로 쓰는 읽기 전용 접근자.
+  it('getAttachmentStore — 주입한 인스턴스를 그대로 돌려주고, 미주입이면 undefined', () => {
+    const attachmentStore = new AttachmentStore(dir);
+    const withStore = new ChatStore(dir, undefined, { attachmentStore });
+    expect(withStore.getAttachmentStore()).toBe(attachmentStore);
+
+    const withoutStore = new ChatStore(path.join(dir, 'other'));
+    expect(withoutStore.getAttachmentStore()).toBeUndefined();
+  });
+
   it('AttachmentStore 미주입 — 프루닝/removeMessagesByIds/dropClearBackup 전부 기존 동작 그대로(회귀 0)', () => {
     const store = new ChatStore(dir, { mode: 'count', value: 1 });
     store.listChannels();

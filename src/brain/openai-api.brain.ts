@@ -18,7 +18,9 @@ const DEFAULT_MAX_TOKENS = 16000;
 
 type OpenAiMsg = {
   role: 'user' | 'assistant' | 'tool';
-  content: string | null;
+  // Task 3(chat-attachments): 초기 user 턴에 vision 이미지(image_url)를 싣기 위해 배열 타입도 허용
+  // (미첨부 경로는 기존과 동일하게 string — 요청 바디 byte-identical, 회귀 0).
+  content: string | null | Array<Record<string, unknown>>;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
 };
@@ -49,7 +51,18 @@ export class OpenAiApiBrain implements BrainProvider {
       if (!this.profile.model) return fail('openai-api: model missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
-      const history: OpenAiMsg[] = [{ role: 'user', content: prompt }];
+      // Task 3(chat-attachments): opts.images 있으면 초기 user 턴을 텍스트+image_url(data URL) 배열로
+      // (vision — OpenAI 호환 서버가 지원 안 하면 기존 에러 경로로 떨어질 뿐, 폴백 시도는 하지 않는다).
+      // 없으면 content: prompt 그대로(회귀 0).
+      const history: OpenAiMsg[] = [{
+        role: 'user',
+        content: opts?.images?.length
+          ? [
+              { type: 'text', text: prompt },
+              ...opts.images.map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.dataBase64}` } })),
+            ]
+          : prompt,
+      }];
       const toolDefs: WebToolDef[] = coding
         ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
         : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : []), ...(opts?.askUser ? [askUserDef()] : [])];

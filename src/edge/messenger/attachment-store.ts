@@ -19,6 +19,8 @@ import { safeId } from './chat-store';
 
 // Task 2(AttachmentsHttp)도 업로드 스트림 누적 상한으로 동일 값이 필요해 export(중복 상수 회피).
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20MB(스펙 상한, 코드 상수)
+// Task 3(self.adapter onSend 스탬프)도 동일 상한이 필요해 export(중복 상수 회피). 스펙: 메시지당 5개.
+export const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 
 // 저장 시 발급한 id(uuid[+확장자]) 형태만 인정 — path()/meta()로 위조 id가 들어와도 실재 파일 존재
 // 여부와 별개로 구조부터 걸러 불필요한 fs 접근을 줄인다. uuid 뒤에 .ext(영숫자 1~10자)까지만 허용.

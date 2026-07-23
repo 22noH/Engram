@@ -10,7 +10,7 @@ import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
 import type { WikiPage } from '../../knowledge-core/wiki/page.types';
 import type { ProposalStore, Proposal } from '../../knowledge-core/proposal-store';
 import type { ProposalApplier } from '../proposal-applier';
-import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings } from '../../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings, AttachmentMeta } from '../../../shared/protocol';
 import type { AccountStore, Account } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
@@ -24,6 +24,7 @@ import { buildMcpServer } from '../mcp/engram-mcp';
 import { isLoopback, handleMcpRequest } from '../mcp/mcp-http';
 import { makeMcpProposals } from '../mcp/mcp-proposals';
 import type { AttachmentsHttp } from './attachments-http';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from './attachment-store';
 import { accountCanAccessChannel } from './channel-access';
 // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): messenger-bridge.ts가 이미 agent-layer(channel-policy·i18n)를
 // 끌어오는 선례가 있다 — edge/messenger는 agent-layer 순수 유틸 import가 허용되는 층. questionFallbackText는
@@ -656,10 +657,32 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
+  // Task 3(chat-attachments): f.attachments(업로드된 id 목록)가 string[]이면 실재하는 것만(스토어의
+  // meta()가 위조/미존재 id를 이미 null로 걸러준다) 해석해 스탬프용 메타로 돌려준다. 메시지당 상한
+  // MAX_ATTACHMENTS_PER_MESSAGE(스펙 5개) — 초과분은 조용히 무시(전송 차단은 렌더러 칩 단계 몫,
+  // 서버는 방어선). attachmentStore 미주입(chatStore에 옵션 없이 생성된 구식 테스트·초기 배선)이면
+  // 항상 빈 배열 — attachments 없는 send와 바이트 동일(회귀 0).
+  private resolveAttachments(channelId: string, raw: unknown): AttachmentMeta[] {
+    const store = this.store.getAttachmentStore();
+    if (!store || !Array.isArray(raw)) return [];
+    const out: AttachmentMeta[] = [];
+    for (const id of raw) {
+      if (out.length >= MAX_ATTACHMENTS_PER_MESSAGE) break;
+      if (typeof id !== 'string') continue;
+      const meta = store.meta(channelId, id);
+      if (meta) out.push(meta);
+    }
+    return out;
+  }
+
   private async onSend(ws: WebSocket, f: Record<string, unknown>): Promise<void> {
     const text = typeof f.text === 'string' ? f.text : '';
     const channelId = typeof f.channelId === 'string' ? f.channelId : '';
-    if (!text.trim() || !channelId) return;
+    if (!channelId) return;
+    // Task 3(chat-attachments): 첨부만 있고 텍스트가 빈 메시지도 통과시킨다(스펙 — 렌더러가 첨부만
+    // 보낼 수 있다). 텍스트도 첨부도 없으면 기존과 동일하게 무시.
+    const attachments = this.resolveAttachments(channelId, f.attachments);
+    if (!text.trim() && attachments.length === 0) return;
     const ch = this.store.listChannels().find((c) => c.id === channelId);
     if (!ch) { this.sendTo(ws, { t: 'error', text: 'unknown channel' }); return; }
     if (!this.canAccessChannel(ws, ch)) return; // 비공개 비접근 → 조용히 무시(기록 안 함)
@@ -686,10 +709,21 @@ export class SelfMessenger implements MessengerPort {
       text,
       threadId: typeof f.threadId === 'string' && f.threadId ? f.threadId : undefined,
       ...(answersId ? { answersId } : {}),
+      ...(attachments.length ? { attachments } : {}),
     });
     if (!msg) return;
     this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
 
+    // Task 3(chat-attachments): 스탬프된 메타에 서버-로컬 절대경로를 얹어 MentionEvent에 실어보낸다
+    // (path()도 동일한 위조/미존재 가드를 다시 타므로 이중 방어 — meta는 실재했지만 그 사이 파일이
+    // 지워졌다면 null이 나와 조용히 빠진다, never-throw).
+    const attachmentStore = this.store.getAttachmentStore();
+    const attachmentsWithPath = attachmentStore
+      ? attachments.flatMap((a) => {
+          const p = attachmentStore.path(channelId, a.id);
+          return p ? [{ ...a, path: p }] : [];
+        })
+      : [];
     const name = this.opts.engramName ?? 'Engram';
     const isMention = ch.respondMode !== 'mention' || hasEngramMention(text, name);
     const anchor = msg.threadId ?? msg.id;
@@ -704,6 +738,7 @@ export class SelfMessenger implements MessengerPort {
       ...(ch.mode === 'code' ? { mode: 'code' as const, repoPath: ch.repoPath } : {}),
       ...(ch.brain ? { brain: ch.brain } : {}), // 스펙 §3.2: 채널의 brain을 이벤트에 실어나름(미설정 채널=회귀 0)
       ...(answeredQuestion ? { answeredQuestion } : {}), // 최종 리뷰 픽스: 답이 답한 질문(있을 때만)
+      ...(attachmentsWithPath.length ? { attachments: attachmentsWithPath } : {}), // Task 3: 첨부 있을 때만
     };
     if (isMention) {
       if (this.handler) await this.handler(e);

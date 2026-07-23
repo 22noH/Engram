@@ -27,6 +27,11 @@ export interface CompleteOpts {
   askUser?: (q: { questions: QuestionItem[] }) => Promise<void>;
   codeGuard?: (absPath: string) => void; // Phase 8b-1: 코딩 쓰기 허용 판정(주입). 있으면 API 두뇌가 코딩 루프.
   cmdGuard?: (command: string) => void; // Phase 8b-2: 명령 판정(주입). 있으면 coding 루프가 Bash 노출. auto면 무조건 통과.
+  // Task 3(chat-attachments): 있으면 초기 user 턴을 [{type:'text'},...이미지 블록]으로 조립(vision).
+  // 미첨부(undefined/빈 배열)면 기존과 바이트 동일한 content:string 요청 바디(회귀 0) — anthropic-api·
+  // openai-api 양쪽이 이 필드 하나로 초기 턴을 분기한다. mime은 png/jpeg/gif/webp 화이트리스트
+  // (reader-agent가 걸러 넣는다 — 여기선 그대로 base64 블록으로 실어 보내기만 한다).
+  images?: Array<{ mime: string; dataBase64: string }>;
 }
 
 export interface BrainProvider {

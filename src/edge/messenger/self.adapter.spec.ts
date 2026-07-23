@@ -2220,6 +2220,117 @@ describe('/admin HTTP 노출(Task 2, 서버 콘솔 S1)', () => {
   });
 });
 
+describe('onSend 첨부 스탬프(Task 3, chat-attachments)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let attachments: AttachmentStore;
+  let sm: SelfMessenger;
+  let client: WebSocket;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-attach-stamp-'));
+    attachments = new AttachmentStore(path.join(dir, 'data'));
+    store = new ChatStore(path.join(dir, 'chat'), undefined, { attachmentStore: attachments });
+    store.listChannels(); // general 생성
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+  });
+  afterEach(async () => {
+    client.terminate();
+    await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('실재 id만 메시지에 스탬프되고 위조/미존재 id는 조용히 드롭된다', async () => {
+    const meta = attachments.save('general', 'a.txt', 'text/plain', Buffer.from('hi'))!;
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({
+      t: 'send', channelId: 'general', text: '첨부요',
+      attachments: [meta.id, 'forged-id', 'not-a-uuid-at-all'],
+    }));
+    const frame = await nextFrame(client);
+    expect(frame.message.attachments).toEqual([meta]);
+    expect(store.history('general').at(-1)?.attachments).toEqual([meta]);
+    expect(events).toHaveLength(1);
+    expect(events[0].attachments).toHaveLength(1);
+    expect(events[0].attachments![0]).toMatchObject({ id: meta.id, name: 'a.txt', mime: 'text/plain', size: 2 });
+    expect(events[0].attachments![0].path).toContain(meta.id);
+  });
+
+  it('메시지당 상한 5개 — 6번째부터는 조용히 무시된다(스펙 상한)', async () => {
+    const ids = Array.from({ length: 6 }, (_, i) => attachments.save('general', `f${i}.txt`, 'text/plain', Buffer.from(`x${i}`))!.id);
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '여섯개', attachments: ids }));
+    const frame = await nextFrame(client);
+    expect(frame.message.attachments).toHaveLength(5);
+    expect(events[0].attachments).toHaveLength(5);
+  });
+
+  it('텍스트 없이 첨부만 있는 메시지도 전송된다(빈 텍스트는 렌더러가 표시 처리)', async () => {
+    const meta = attachments.save('general', 'b.png', 'image/png', Buffer.from('img'))!;
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '', attachments: [meta.id] }));
+    const frame = await nextFrame(client);
+    expect(frame.message.text).toBe('');
+    expect(frame.message.attachments).toEqual([meta]);
+    expect(events).toHaveLength(1); // respondMode 기본 'all' — attachment-only도 트리거
+  });
+
+  it('텍스트도 첨부도 없으면 기존처럼 무시된다(회귀 0)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '' }));
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '진짜 메시지' })); // 무응답 증명용
+    const frame = await nextFrame(client);
+    expect(frame.message.text).toBe('진짜 메시지');
+    expect(events).toHaveLength(1);
+  });
+
+  it("respondMode='mention' 채널에서 첨부만 있는 메시지는 멘션 없어 트리거되지 않는다(관찰만, 알려진 동작)", async () => {
+    const ch = store.createChannel('team')!;
+    store.setRespondMode(ch.id, 'mention');
+    const meta = attachments.save(ch.id, 'c.png', 'image/png', Buffer.from('img'))!;
+    const mentions: MentionEvent[] = [];
+    const observed: MentionEvent[] = [];
+    sm.onMention(async (e) => { mentions.push(e); });
+    sm.onMessage(async (e) => { observed.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '', attachments: [meta.id] }));
+    await nextFrame(client);
+    expect(mentions).toHaveLength(0);
+    expect(observed).toHaveLength(1);
+    expect(observed[0].attachments).toHaveLength(1);
+    expect(observed[0].attachments![0]).toMatchObject(meta);
+  });
+
+  it('attachmentStore 미주입(옵션 없이 만든 ChatStore)이면 attachments를 보내도 스탬프 없이 기존 send와 동일(회귀 0)', async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-attach-nostore-'));
+    const store2 = new ChatStore(dir2); // attachmentStore 옵션 없음
+    store2.listChannels();
+    const sm2 = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store2, { logger: noLog });
+    await sm2.start();
+    const client2 = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
+    await once(client2, 'open');
+    try {
+      const events: MentionEvent[] = [];
+      sm2.onMention(async (e) => { events.push(e); });
+      client2.send(JSON.stringify({ t: 'send', channelId: 'general', text: '안녕', attachments: ['whatever'] }));
+      const frame = await nextFrame(client2);
+      expect(frame.message.text).toBe('안녕');
+      expect('attachments' in frame.message).toBe(false);
+      expect('attachments' in events[0]).toBe(false);
+    } finally {
+      client2.terminate();
+      await sm2.stop();
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('/attachments HTTP 라우팅 배선(Task 2, chat-attachments)', () => {
   let dir: string;
   let store: ChatStore;

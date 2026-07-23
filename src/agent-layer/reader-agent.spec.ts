@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ReaderAgent } from './reader-agent';
 import { FakeBrain } from '../brain/fake-brain';
 import { SearchResult } from '../knowledge-core/rag/rag.types';
@@ -397,5 +400,140 @@ describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
     expect(callsByName['brain-A']).toBe(1);
     expect(callsByName['brain-B']).toBe(1);
     expect(cache.get('brain-A')).not.toBe(cache.get('brain-B')); // 서로 다른 인스턴스
+  });
+});
+
+describe('ReaderAgent 첨부 관통(Task 3, chat-attachments)', () => {
+  const rag = { search: async () => [] } as any;
+  const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-reader-attach-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function recordingBrain() {
+    const seen: { prompt: string; opts?: CompleteOpts }[] = [];
+    const brain: BrainProvider = {
+      complete: async (prompt: string, _c?: (t: string) => void, opts?: CompleteOpts) => {
+        seen.push({ prompt, opts });
+        return { text: 'ok', costUsd: 0, isError: false } as BrainResult;
+      },
+    };
+    return { brain, seen };
+  }
+
+  it('첨부 없으면 프롬프트·opts 둘 다 기존과 바이트 동일(회귀 0)', async () => {
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({ text: 'q', userId: 'c1' });
+    expect(seen[0].prompt).not.toContain('# Attachments');
+    expect(seen[0].opts).toBeUndefined();
+  });
+
+  it('이미지 첨부: opts.images에 base64가 실리고 프롬프트에 이름+경로 마커가 붙는다', async () => {
+    const p = path.join(dir, 'shot.png');
+    fs.writeFileSync(p, Buffer.from([1, 2, 3, 4]));
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 'i1', name: 'shot.png', mime: 'image/png', size: 4, path: p }],
+    });
+    expect(seen[0].opts?.images).toEqual([{ mime: 'image/png', dataBase64: Buffer.from([1, 2, 3, 4]).toString('base64') }]);
+    expect(seen[0].prompt).toContain(`[Image attached: shot.png — file at ${p}]`);
+    expect(seen[0].prompt).not.toContain('[Attachment:'); // 폴백 마커는 안 씀
+  });
+
+  it('텍스트계 첨부: 파일 내용이 # Attachments 블록에 그대로 삽입된다', async () => {
+    const p = path.join(dir, 'notes.md');
+    fs.writeFileSync(p, '# 회의록\n결정사항 A');
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 't1', name: 'notes.md', mime: 'text/markdown', size: 20, path: p }],
+    });
+    expect(seen[0].prompt).toContain('# Attachments');
+    expect(seen[0].prompt).toContain(`notes.md — file at ${p}`);
+    expect(seen[0].prompt).toContain('결정사항 A');
+    expect(seen[0].opts?.images).toBeUndefined();
+  });
+
+  it('256KB 초과 텍스트 첨부는 앞부분만 삽입하고 절단 표시가 붙는다', async () => {
+    const p = path.join(dir, 'big.log');
+    const big = 'A'.repeat(300 * 1024);
+    fs.writeFileSync(p, big);
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 'b1', name: 'big.log', mime: 'text/plain', size: big.length, path: p }],
+    });
+    const prompt = seen[0].prompt;
+    expect(prompt).toContain('A'.repeat(256 * 1024));
+    expect(prompt).not.toContain('A'.repeat(256 * 1024 + 1));
+    expect(prompt).toContain('truncated');
+  });
+
+  it('화이트리스트 밖(바이너리 등) 첨부는 존재만 알리는 폴백 마커로 남는다', async () => {
+    const p = path.join(dir, 'archive.zip');
+    fs.writeFileSync(p, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 'z1', name: 'archive.zip', mime: 'application/zip', size: 4, path: p }],
+    });
+    expect(seen[0].prompt).toContain(`[Attachment: archive.zip (application/zip, 4 bytes) — file at ${p}]`);
+    expect(seen[0].opts?.images).toBeUndefined();
+  });
+
+  it('읽기 실패(파일 없음)는 던지지 않고 폴백 마커로 떨어진다(never-throw)', async () => {
+    const missing = path.join(dir, 'gone.md');
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    const out = await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 'g1', name: 'gone.md', mime: 'text/markdown', size: 10, path: missing }],
+    });
+    expect(out).not.toContain('Answer generation failed');
+    expect(seen[0].prompt).toContain(`[Attachment: gone.md (text/markdown, 10 bytes) — file at ${missing}]`);
+  });
+
+  it('이미지 읽기 실패도 던지지 않고 폴백 마커로 떨어진다(never-throw)', async () => {
+    const missing = path.join(dir, 'gone.png');
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [{ id: 'g2', name: 'gone.png', mime: 'image/png', size: 10, path: missing }],
+    });
+    expect(seen[0].opts?.images).toBeUndefined();
+    expect(seen[0].prompt).toContain(`[Attachment: gone.png (image/png, 10 bytes) — file at ${missing}]`);
+  });
+
+  it('여러 첨부(이미지+텍스트+폴백)가 한 프롬프트에 모두 반영된다', async () => {
+    const imgPath = path.join(dir, 'a.jpg');
+    const txtPath = path.join(dir, 'b.txt');
+    fs.writeFileSync(imgPath, Buffer.from([9, 9]));
+    fs.writeFileSync(txtPath, 'hello text');
+    const { brain, seen } = recordingBrain();
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({
+      text: 'q', userId: 'c1',
+      attachments: [
+        { id: 'i2', name: 'a.jpg', mime: 'image/jpeg', size: 2, path: imgPath },
+        { id: 't2', name: 'b.txt', mime: 'text/plain', size: 10, path: txtPath },
+        { id: 'z2', name: 'c.bin', mime: 'application/octet-stream', size: 0, path: path.join(dir, 'nope.bin') },
+      ],
+    });
+    expect(seen[0].opts?.images).toHaveLength(1);
+    expect(seen[0].prompt).toContain('[Image attached: a.jpg');
+    expect(seen[0].prompt).toContain('hello text');
+    expect(seen[0].prompt).toContain('[Attachment: c.bin');
   });
 });
