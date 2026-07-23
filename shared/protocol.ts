@@ -28,7 +28,12 @@ export interface Message {
   ts: string;
   threadId?: string;
   actions?: Action[];
+  question?: { questions: QuestionItem[] }; // 질문 카드(두뇌 게시)
+  answersId?: string;                        // 이 메시지가 답하는 카드 메시지 id
 }
+
+export interface QuestionOption { label: string; desc?: string; recommended?: boolean }
+export interface QuestionItem { q: string; header?: string; multiSelect?: boolean; options: QuestionOption[] }
 
 export interface UserDto { id: string; displayName: string; role: 'owner' | 'member'; permissions?: string[] }
 export interface AdminUserDto extends UserDto { loginId: string; status: 'pending' | 'active' | 'suspended'; createdAt: string; sso: boolean; permissions: string[] }
@@ -58,7 +63,7 @@ export type ClientFrame =
   | { t: 'auth'; token: string }
   | { t: 'channels' }
   | { t: 'history'; channelId: string; before?: string }
-  | { t: 'send'; channelId: string; text: string; threadId?: string }
+  | { t: 'send'; channelId: string; text: string; threadId?: string; answersId?: string }
   | { t: 'createChannel'; name: string; mode?: 'chat' | 'code' | 'team'; visibility?: 'public' | 'private' }
   | { t: 'deleteChannel'; id: string }
   | { t: 'setRepoPath'; id: string; repoPath: string }

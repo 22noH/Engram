@@ -62,6 +62,23 @@ describe('ChatStore', () => {
     expect(store.history('general')[1].threadId).toBe(anchor.id);
   });
 
+  it('question이 저장/왕복 보존되고, answersId로 답변 메시지가 카드를 가리킨다', () => {
+    store.listChannels();
+    const card = store.appendMessage('general', {
+      authorId: 'engram',
+      text: 'q',
+      question: { questions: [{ q: '포맷?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] },
+    })!;
+    expect(card.question).toEqual({ questions: [{ q: '포맷?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] });
+    const h1 = store.history('general');
+    expect(h1[0].question).toEqual(card.question);
+
+    const answer = store.appendMessage('general', { authorId: 'owner', text: 'A', answersId: card.id })!;
+    expect(answer.answersId).toBe(card.id);
+    const h2 = store.history('general');
+    expect(h2[1].answersId).toBe(card.id);
+  });
+
   it('없는 채널 append는 null, history는 빈배열', () => {
     expect(store.appendMessage('nope', { authorId: 'owner', text: 'x' })).toBeNull();
     expect(store.history('nope')).toEqual([]);

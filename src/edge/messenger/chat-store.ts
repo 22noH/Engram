@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { Action } from '../../../shared/protocol';
+import type { Action, QuestionItem } from '../../../shared/protocol';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
 // 채널 목록=state/chat/channels.json. 손상 줄 skip(ConversationStore 관례).
@@ -14,6 +14,8 @@ export interface ChatMessage {
   text: string;
   threadId?: string;
   actions?: Action[];
+  question?: { questions: QuestionItem[] }; // Task 1(ask-user): 질문 카드(두뇌 게시)
+  answersId?: string;                        // Task 1(ask-user): 이 메시지가 답하는 카드 메시지 id
   ts: string; // ISO
 }
 
@@ -245,7 +247,15 @@ export class ChatStore {
 
   appendMessage(
     channelId: string,
-    input: { authorId: string; authorName?: string; text: string; threadId?: string; actions?: Action[] },
+    input: {
+      authorId: string;
+      authorName?: string;
+      text: string;
+      threadId?: string;
+      actions?: Action[];
+      question?: ChatMessage['question'];
+      answersId?: string;
+    },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
     const msg: ChatMessage = {
@@ -255,6 +265,8 @@ export class ChatStore {
       ...(input.authorName ? { authorName: input.authorName } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.actions ? { actions: input.actions } : {}),
+      ...(input.question ? { question: input.question } : {}),
+      ...(input.answersId ? { answersId: input.answersId } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });
