@@ -262,9 +262,12 @@ function openChat(): void {
     app.quit();
   };
   // kind: 'refused'=아직 아무도 안 들음(정상 부팅 대기 — 무한 재시도·카운터 리셋),
-  //       'stalled'=연결은 되나 무응답/이상 응답(점유자 의심 — 연속 STALL_LIMIT회면 안내).
+  //       'stalled'=연결은 되나 무응답/이상 응답. 단 우리 자식이 살아있으면 첫 부팅 웜업
+  //       (임베딩 모델 다운로드로 이벤트 루프가 수 분 블록 — 실사고 2026-07-24, 새 설치 4회 재시도
+  //       전부 이 상태)일 수 있으므로 카운트 없이 계속 기다린다. 자식이 죽어 있는데도 stalled가
+  //       연속되면 그때가 진짜 외부 점유자 → 안내.
   const retry = (kind: 'refused' | 'stalled'): void => {
-    if (kind === 'refused') stallCount = 0;
+    if (kind === 'refused' || child) stallCount = 0;
     else if (++stallCount >= STALL_LIMIT) { onPortHeld(); return; }
     setTimeout(probe, 2000);
   };
