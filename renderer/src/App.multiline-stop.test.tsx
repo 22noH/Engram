@@ -66,6 +66,27 @@ describe('여러 줄 입력(Task 4) — Enter/Shift+Enter/자동높이', () => {
     await waitFor(() => expect(sentFrames(ws).some((f) => f.t === 'send' && f.text === '첫줄\n둘째줄')).toBe(true));
   });
 
+  it('IME 조합 중(isComposing) Enter는 전송도 줄바꿈도 하지 않는다(T4 리뷰 — 한글 조합 확정 보존)', async () => {
+    const ws = await openWithChannel();
+    const i = input();
+    act(() => { fireEvent.change(i, { target: { value: '안' } }); });
+    act(() => { fireEvent.keyDown(i, { key: 'Enter', isComposing: true }); });
+    expect(sentFrames(ws).some((f) => f.t === 'send')).toBe(false);
+    expect(i.value).toBe('안'); // 줄바꿈도 안 삽입됨(핸들러가 아예 관여 안 함 — IME에 맡김)
+    act(() => { fireEvent.keyDown(i, { key: 'Enter', shiftKey: true, isComposing: true }); });
+    expect(i.value).toBe('안'); // Shift+Enter 조합 중에도 마찬가지
+    expect(sentFrames(ws).some((f) => f.t === 'send')).toBe(false);
+  });
+
+  it('IME 조합 중(구형 브라우저 keyCode 229 폴백) Enter도 전송·줄바꿈을 안 한다', async () => {
+    const ws = await openWithChannel();
+    const i = input();
+    act(() => { fireEvent.change(i, { target: { value: '한' } }); });
+    act(() => { fireEvent.keyDown(i, { key: 'Enter', keyCode: 229 }); });
+    expect(sentFrames(ws).some((f) => f.t === 'send')).toBe(false);
+    expect(i.value).toBe('한');
+  });
+
   it('팔레트가 열려 있으면 Enter는 팔레트 선택(전송·줄바꿈 아님)', async () => {
     const ws = await openWithChannel();
     const i = input();
@@ -74,6 +95,15 @@ describe('여러 줄 입력(Task 4) — Enter/Shift+Enter/자동높이', () => {
     await waitFor(() => expect(sentFrames(ws).some((f) => f.t === 'clearHistory')).toBe(true));
     expect(sentFrames(ws).some((f) => f.t === 'send')).toBe(false);
     expect(i.value).toBe(''); // 전송 텍스트로 남지 않음(팔레트 액션은 입력창을 비운다)
+  });
+
+  it('팔레트가 열려 있어도 IME 조합 중 Enter는 팔레트 항목을 고르지 않는다(가드는 모든 분기보다 우선)', async () => {
+    const ws = await openWithChannel();
+    const i = input();
+    act(() => { fireEvent.change(i, { target: { value: '/clear' } }); }); // 실제로 매칭되는 팔레트 항목(items.length>0)
+    act(() => { fireEvent.keyDown(i, { key: 'Enter', isComposing: true }); });
+    expect(sentFrames(ws).some((f) => f.t === 'clearHistory')).toBe(false);
+    expect(i.value).toBe('/clear'); // 팔레트가 값을 안 지웠다 = pickCmd가 안 불렸다(가드가 먼저 return)
   });
 
   it('onChange마다 오토사이즈(scrollHeight 기반 height)를 다시 잰다', async () => {

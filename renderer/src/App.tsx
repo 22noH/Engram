@@ -934,6 +934,14 @@ export default function App() {
                     if (files && files.length) { e.preventDefault(); addFiles(files); }
                   }}
                   onKeyDown={(e) => {
+                    // T4 리뷰(Important) — 한글 등 IME 조합 중 Enter는 "음절 확정" 이벤트다. 이걸 전송·
+                    // 줄바꿈·팔레트/멘션 선택으로 가로채면 조합 중이던 마지막 음절이 날아가거나 의도치
+                    // 않게 전송/선택돼 버린다. isComposing이 true인 동안(구형 브라우저 폴백으로 keyCode
+                    // 229도 같이 본다) Enter는 이 핸들러의 어떤 분기도 타지 않고 그대로 통과시켜 IME가
+                    // 스스로 확정 처리하게 둔다 — preventDefault도 호출하지 않는다. 팔레트/멘션 선택도
+                    // 같은 결로 막는다: 조합 확정 Enter가 팔레트 항목을 잘못 골라버리면 안 되므로 이
+                    // 가드를 모든 분기보다 먼저(맨 위) 둔다.
+                    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)) return;
                     if (palFilter !== null) { // 팔레트 열림: 방향키/Enter/Esc는 팔레트 조작(전송 아님)
                       const items = filterCommands(palFilter);
                       if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); setPalIdx((p) => (p + 1) % items.length); return; }
