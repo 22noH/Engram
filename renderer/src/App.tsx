@@ -75,6 +75,10 @@ export default function App() {
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [mode, setMode] = useState<'chat' | 'code' | 'team' | 'wiki' | 'admin'>('chat');
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set()); // 키=논리 채널 이름
+  // Task 2(brain-activity) — awaiting 중 실시간 라벨(activity 프레임, 휘발). 키=논리 채널 이름(awaiting과
+  // 동일 키 공간) — 'msg' 프레임의 기존 name 역조회(connId+channelId→논리 이름)와 같은 방식으로 채운다.
+  // 없으면(아직 activity 안 옴/이미 클리어됨) 렌더 쪽이 T.thinking(기본 문구)으로 폴백한다.
+  const [activityLabels, setActivityLabels] = useState<Map<string, string>>(new Map());
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
@@ -173,7 +177,17 @@ export default function App() {
           const tm = awaitTimers.current.get(name);
           if (tm) { clearTimeout(tm); awaitTimers.current.delete(name); }
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
+          // Task 2(brain-activity) — 답 도착 시 그 채널의 활동 라벨도 같이 지운다(다음 대기는 기본 문구부터).
+          setActivityLabels((prev) => { if (!prev.has(name)) return prev; const n = new Map(prev); n.delete(name); return n; });
         }
+      }
+    } else if (f.t === 'activity') {
+      // Task 2(brain-activity) — 휘발 프레임(저장 안 됨): 그 채널이 지금 awaiting 중일 때만 라벨을 반영한다.
+      // 이미 답이 와서 awaiting이 풀렸으면(=늦게 도착한 프레임) 조용히 무시 — 회귀 0(activity 미구독 시
+      // awaiting도 어차피 안 켜져 있으므로 이 분기 자체가 아무 효과 없음).
+      const name = channelsByConnRef.current[connId]?.find((c) => c.id === f.channelId)?.name;
+      if (name && awaiting.has(name)) {
+        setActivityLabels((prev) => new Map(prev).set(name, f.label));
       }
     } else if (f.t === 'historyCleared') {
       // Task 4(clear-compact) — 그 채널 transcript를 즉시 비우고(모달·시스템 메시지 없음) 실행취소 토스트를 띄운다.
@@ -424,8 +438,11 @@ export default function App() {
     awaitTimers.current.set(name, setTimeout(() => {
       awaitTimers.current.delete(name);
       setAwaiting((p) => { const n = new Set(p); n.delete(name); return n; });
+      setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
     }, 180000));
     setAwaiting((p) => new Set(p).add(name));
+    // Task 2(brain-activity) — 새 대기 시작 시 이전 라벨 잔재를 지운다(다음 activity가 올 때까지 기본 문구).
+    setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
   };
 
   // 전송 라우팅: threadId 있으면 그 앵커를 연 Engram으로, 없으면 @이름 또는 기본 Engram으로.
@@ -816,7 +833,9 @@ export default function App() {
                   ));
                 })()}
                 {currentName && awaiting.has(currentName) && (
-                  <div className="typing"><span>{T.thinking}</span><span className="dots" /></div>
+                  // Task 2(brain-activity) — activity 프레임이 오면 그 라벨로 실시간 치환("생각 중" → "웹
+                  // 검색 중 · web_search" 등), 없으면 기존 기본 문구.
+                  <div className="typing"><span>{activityLabels.get(currentName) ?? T.thinking}</span><span className="dots" /></div>
                 )}
               </div>
               {clearToast && clearToast.connId === connState.defaultConnId && clearToast.channelId === defaultChan?.id && (

@@ -5,6 +5,7 @@ import { ko } from '../config';
 import { ActionButtons } from './ActionButtons';
 import { QuestionCard } from './QuestionCard';
 import { fetchAttachmentBlobUrl } from '../auth-api';
+import { T } from '../i18n';
 
 // Task 4(chat-attachments) — 그 메시지가 속한 연결의 접속 정보(http 엔드포인트·실 채널id·세션 토큰).
 // App이 anchorConn(메시지→연결) 매핑으로 계산해 Thread를 거쳐 내려준다. 못 구하면(edge case) 첨부는
@@ -23,6 +24,20 @@ function triggerDownload(url: string, filename: string): void {
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.rel = 'noopener';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+// Task 2(brain-activity, 목업 ②) — m.toolsUsed(등장 순서 그대로, 반복 가능)를 "이름 ×N" 요약으로 묶는다.
+// 인접(연속) 중복만 묶는다 — 순서를 안 흐트러뜨리는 게 "어떤 순서로 도구를 썼는지"를 더 정직하게 보여준다.
+export function aggregateTools(names: string[]): string {
+  const parts: string[] = [];
+  for (let i = 0; i < names.length;) {
+    let j = i + 1;
+    while (j < names.length && names[j] === names[i]) j++;
+    const count = j - i;
+    parts.push(count > 1 ? `${names[i]} ×${count}` : names[i]);
+    i = j;
+  }
+  return parts.join(' · ');
 }
 
 // 첨부 1개: 이미지=인라인 썸네일(클릭=새 창에서 원본), 그 외=칩(클릭=다운로드). 인증 연결은
@@ -98,6 +113,11 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
   return (
     <div className={'msg' + (isEngram ? '' : isMe ? ' me' : ' other')}>
       <div className="who">{who + ' · ' + new Date(m.ts).toLocaleTimeString()}</div>
+      {/* Task 2(brain-activity, 목업 ②) — 도구를 썼으면 who 아래·body(또는 카드) 위에 요약 한 줄(대시
+          보더로 구분). 없으면(m.toolsUsed 미첨부/빈 배열) 렌더 자체를 안 해 기존 메시지와 byte-identical. */}
+      {m.toolsUsed && m.toolsUsed.length > 0 && (
+        <div className="toolsUsed">{T.toolsUsedLabel(m.toolsUsed.length, aggregateTools(m.toolsUsed))}</div>
+      )}
       {m.question ? (
         <QuestionCard msgId={m.id} question={m.question} answeredText={answeredText} onAnswer={onAnswer ?? (() => {})} />
       ) : (

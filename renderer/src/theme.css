@@ -87,6 +87,10 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 /* 실측 픽스(Task 5) — --faint(a0a69d/666c63)는 11px 텍스트에서 대비 2.3:1(라이트)·3.2:1(다크)로
    WCAG AA(4.5:1) 미달(눈으로도 거의 안 보임). #wikiArea .card .who가 이미 쓰는 --dim으로 통일. */
 .msg .who { font-size:11px; color:var(--dim); margin-bottom:2px; }
+/* Task 2(brain-activity, 목업 ②) — 도구 요약 줄. --faint 대신 --dim(위 Task 5 실측 픽스와 동일 사유 —
+   11px에서 --faint는 WCAG AA 미달)로 who와 통일, 대시 보더로 body/카드와 구분한다. */
+.msg .toolsUsed { font-size:11px; color:var(--dim); padding-bottom:4px; margin-bottom:6px;
+                  border-bottom:1px dashed var(--line); }
 .msg .body { background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
              padding:8px 12px; font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .body code { background:var(--code-bg); border:1px solid var(--line); border-radius:4px;

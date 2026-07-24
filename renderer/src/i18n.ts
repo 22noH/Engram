@@ -175,4 +175,9 @@ export const T = {
   codeDiffLoadError: ko ? '변경 사항을 불러올 수 없어요' : 'Could not load changes',
   // T3 리뷰 I2 — xterm 동적 import 실패(청크 로드 오류 등) 안내. 재시작 버튼이 재시도 역할을 겸한다.
   codeTermLoadFailed: ko ? '터미널을 불러오지 못했어요 — 재시작을 눌러 다시 시도하세요' : 'Could not load the terminal — press Restart to try again',
+  // Task 2(brain-activity, 목업 ②) — 완료된 답 위 도구 요약 줄. n=총 호출 횟수(중복 포함),
+  // list=aggregateTools()가 만든 "이름 ×N" 요약(Message.tsx).
+  toolsUsedLabel: (n: number, list: string) => (ko
+    ? `🔧 도구 ${n}개 사용 — ${list}`
+    : `🔧 ${n} tool${n === 1 ? '' : 's'} used — ${list}`),
 };

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import { Message } from './Message';
+import { Message, aggregateTools } from './Message';
+import { T } from '../i18n';
 
 it('engram 번호목록은 클릭 대상이 아니라 그냥 텍스트다(선택은 actions 버튼)', () => {
   const { container } = render(
@@ -143,5 +144,53 @@ describe('Message 첨부 렌더', () => {
     });
 
     expect(revoke).toHaveBeenCalledWith('blob:mock-i3'); // state에 반영하지 않고 즉시 revoke
+  });
+});
+
+// Task 2(brain-activity) — aggregateTools 순수 함수: 인접 중복만 "이름 ×N"으로 묶는다(순서 보존).
+describe('aggregateTools', () => {
+  it('빈 배열은 빈 문자열', () => expect(aggregateTools([])).toBe(''));
+  it('중복 없으면 · 로만 이어붙인다', () => {
+    expect(aggregateTools(['web_search', 'fetch_url'])).toBe('web_search · fetch_url');
+  });
+  it('연속 중복은 ×N으로 묶는다', () => {
+    expect(aggregateTools(['web_search', 'web_search', 'fetch_url'])).toBe('web_search ×2 · fetch_url');
+  });
+  it('떨어진(비연속) 중복은 안 묶고 각각 나열한다', () => {
+    expect(aggregateTools(['web_search', 'fetch_url', 'web_search'])).toBe('web_search · fetch_url · web_search');
+  });
+  it('하나만 있으면 ×N 없이 이름만', () => expect(aggregateTools(['ask_brain'])).toBe('ask_brain'));
+});
+
+// Task 2(brain-activity, 목업 ②) — 완료된 답 위 도구 요약 줄.
+describe('Message toolsUsed 요약 줄', () => {
+  it('toolsUsed 없으면 렌더하지 않는다(회귀 0 — byte-identical)', () => {
+    const withField = render(<Message m={msg('engram', 'no-tools')} />);
+    expect(withField.container.querySelector('.toolsUsed')).toBeNull();
+    const without = render(<Message m={{ ...msg('engram', 'no-tools-2'), toolsUsed: [] } as any} />);
+    expect(without.container.querySelector('.toolsUsed')).toBeNull();
+  });
+
+  it('toolsUsed 있으면 개수+집계 포맷으로 body 위에 렌더한다', () => {
+    const m = { ...msg('engram', 'tools-1'), toolsUsed: ['web_search', 'web_search', 'fetch_url'] };
+    const { container } = render(<Message m={m as any} />);
+    const line = container.querySelector('.toolsUsed');
+    expect(line).toBeTruthy();
+    expect(line?.textContent).toBe(T.toolsUsedLabel(3, 'web_search ×2 · fetch_url'));
+    // who → toolsUsed → body 순서(요약 줄이 body 위).
+    const who = container.querySelector('.who');
+    const body = container.querySelector('.body');
+    expect(who?.nextElementSibling).toBe(line);
+    expect(line?.nextElementSibling).toBe(body);
+  });
+
+  it('question 카드와 공존 시에도 카드 위에 렌더한다', () => {
+    const q = { questions: [{ q: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }] };
+    const m = { id: 'q1', authorId: 'engram', ts: new Date(0).toISOString(), text: '', question: q, toolsUsed: ['ask_user'] };
+    const { container } = render(<Message m={m as any} onAnswer={() => {}} />);
+    const line = container.querySelector('.toolsUsed');
+    expect(line?.textContent).toBe(T.toolsUsedLabel(1, 'ask_user'));
+    expect(line?.nextElementSibling?.className).not.toBe('body'); // 다음 형제는 카드(className이 body 아님)
+    expect(container.textContent).toContain('어느 쪽?');
   });
 });
