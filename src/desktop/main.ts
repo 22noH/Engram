@@ -246,28 +246,32 @@ function openChat(): void {
     );
     app.quit();
   };
-  // 부팅 타임아웃(실사고 2026-07-24): 좀비가 포트를 쥐고 응답을 안 하면 'pending'이 영원히 돌아
-  // '시작 중'에 무한 대기했다. 상한을 넘으면 명확한 안내 후 종료. RAG 웜업으로 정상 부팅도
-  // 1분을 넘길 수 있어 넉넉히 잡는다.
-  const BOOT_TIMEOUT_MS = 120_000;
-  const probeStart = Date.now();
-  const onBootTimeout = (): void => {
+  // 무응답 점유자 감지(실사고 2026-07-24): 좀비 백엔드가 포트를 쥐고 accept만 한 채 응답을 안 하면
+  // 'pending'이 영원히 돌아 '시작 중'에 무한 대기했다. 단, "연결 거부"는 정상 첫 부팅(임베딩 모델
+  // 다운로드·RAG 웜업으로 수 분 가능)이므로 기존대로 무한정 재시도한다 — 타임아웃을 세는 건
+  // "연결은 됐는데 응답이 이상한" 경우만: 프로브 무응답(stalled)이나 엉뚱한 200 응답이 연속되면
+  // 우리 자식이 아닌 무언가가 포트를 쥔 것 → 명확한 안내 후 종료.
+  const STALL_LIMIT = 5;
+  let stallCount = 0;
+  const onPortHeld = (): void => {
     dialog.showErrorBox(
       'Engram could not start',
-      `The server did not become ready on port ${cfg.port}. ` +
-        'Another process may be holding the port, or the server failed to start. ' +
-        'Quit any other Engram instances (check Task Manager) and try again.',
+      `Something is holding port ${cfg.port} but not responding like Engram. ` +
+        'Quit any other Engram instances or the process using this port (check Task Manager), then start Engram again.',
     );
     app.quit();
   };
-  const retry = (): void => {
-    if (Date.now() - probeStart > BOOT_TIMEOUT_MS) { onBootTimeout(); return; }
+  // kind: 'refused'=아직 아무도 안 들음(정상 부팅 대기 — 무한 재시도·카운터 리셋),
+  //       'stalled'=연결은 되나 무응답/이상 응답(점유자 의심 — 연속 STALL_LIMIT회면 안내).
+  const retry = (kind: 'refused' | 'stalled'): void => {
+    if (kind === 'refused') stallCount = 0;
+    else if (++stallCount >= STALL_LIMIT) { onPortHeld(); return; }
     setTimeout(probe, 2000);
   };
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
     let settled = false; // 타임아웃 destroy와 error가 겹쳐도 재시도는 한 번만(프로브 중복 스택 방지)
-    const retryOnce = (): void => { if (settled) return; settled = true; retry(); };
+    const retryOnce = (kind: 'refused' | 'stalled'): void => { if (settled) return; settled = true; retry(kind); };
     const req = nodeHttp.get(healthUrl, (res) => {
       let body = '';
       res.on('data', (chunk: Buffer) => { body += chunk; });
@@ -275,13 +279,17 @@ function openChat(): void {
         if (!chatWin) return; // 응답 도착 사이 창이 닫혔으면 무시
         const status = classifyHealth(body, instanceId);
         if (status === 'foreign') { onForeignInstance(); return; }
-        if (status === 'pending') { retryOnce(); return; }
+        if (status === 'pending') { retryOnce('stalled'); return; } // 200인데 헬스 형식이 아님 = 점유자 의심
         const lang = resolveLanguage(cfg.language, app.getLocale());
         void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 ok → 클라 로드(포트·언어·프리셋 주입)
       });
-      res.on('error', () => { retryOnce(); });
+      res.on('error', () => { retryOnce('stalled'); });
     });
-    req.on('error', () => { retryOnce(); });
+    // ECONNREFUSED=아무도 안 들음(자식 부팅 대기 — 정상). 그 외(RST·타임아웃 destroy 등)=듣는 놈이
+    // 있는데 정상 응답이 아님 → 점유자 카운트.
+    req.on('error', (err: NodeJS.ErrnoException) => {
+      retryOnce(err.code === 'ECONNREFUSED' ? 'refused' : 'stalled');
+    });
     // 좀비가 accept만 하고 응답을 안 하는 케이스(실관측) — 프로브 자체에 짧은 타임아웃.
     req.setTimeout(3000, () => { req.destroy(new Error('probe timeout')); });
   };
