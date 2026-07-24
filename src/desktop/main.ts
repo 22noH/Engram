@@ -1,5 +1,6 @@
 // Electron 껍데기(스펙 §3): 트레이 상주 + 설정창 + 자식(상주 main.js) 감독. 로직은 테스트된 모듈에 위임.
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, utilityProcess } from 'electron';
+import { execFileSync } from 'child_process';
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -192,15 +193,16 @@ function openChat(): void {
   const rendererIndex = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html'); // 클라가 소유하는 페이지
   // 커스텀 타이틀바: 페이지 상단 바(#titlebar)가 드래그 영역, 창 버튼은 OS 오버레이.
   // 색은 시스템 라이트/다크를 따라감(페이지 팔레트와 동일 값).
+  // Quiet Library 토큰 값(renderer/src/theme.css :root과 동일 — 여긴 CSS 밖이라 hex 복제 불가피).
   const overlay = (): Electron.TitleBarOverlay =>
     nativeTheme.shouldUseDarkColors
-      ? { color: '#12161d', symbolColor: '#e6edf3', height: 36 }
-      : { color: '#ffffff', symbolColor: '#1c2733', height: 36 };
+      ? { color: '#1f221f', symbolColor: '#e6e5df', height: 36 }
+      : { color: '#fdfdfc', symbolColor: '#24292e', height: 36 };
   chatWin = new BrowserWindow({
     width: 980, height: 720, title: 'Engram',
     icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0e13' : '#f2f7fb',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#191b19' : '#f5f6f4',
     webPreferences: { preload: path.join(__dirname, 'chat-preload.js') },
   });
   const onTheme = (): void => {
@@ -220,9 +222,9 @@ function openChat(): void {
     }
   });
   const waiting = 'data:text/html;charset=utf-8,' + encodeURIComponent(
-    '<style>body{background:#f2f7fb;color:#5c6b7a;font-family:system-ui;display:flex;' +
+    '<style>body{background:#f5f6f4;color:#6b7268;font-family:system-ui;display:flex;' +
     'align-items:center;justify-content:center;height:100vh;margin:0}' +
-    '@media(prefers-color-scheme:dark){body{background:#0b0e13;color:#8b95a3}}</style>' +
+    '@media(prefers-color-scheme:dark){body{background:#191b19;color:#9aa096}}</style>' +
     `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div>`,
   );
   // 배포 프리셋(configDir/preset.json — `{name,endpoint}`): 있으면 렌더러 URL에 주입해
@@ -244,21 +246,44 @@ function openChat(): void {
     );
     app.quit();
   };
+  // 부팅 타임아웃(실사고 2026-07-24): 좀비가 포트를 쥐고 응답을 안 하면 'pending'이 영원히 돌아
+  // '시작 중'에 무한 대기했다. 상한을 넘으면 명확한 안내 후 종료. RAG 웜업으로 정상 부팅도
+  // 1분을 넘길 수 있어 넉넉히 잡는다.
+  const BOOT_TIMEOUT_MS = 120_000;
+  const probeStart = Date.now();
+  const onBootTimeout = (): void => {
+    dialog.showErrorBox(
+      'Engram could not start',
+      `The server did not become ready on port ${cfg.port}. ` +
+        'Another process may be holding the port, or the server failed to start. ' +
+        'Quit any other Engram instances (check Task Manager) and try again.',
+    );
+    app.quit();
+  };
+  const retry = (): void => {
+    if (Date.now() - probeStart > BOOT_TIMEOUT_MS) { onBootTimeout(); return; }
+    setTimeout(probe, 2000);
+  };
   const probe = (): void => {
     if (!chatWin) return; // 창 닫힘 = 폴링 중단
-    nodeHttp.get(healthUrl, (res) => {
+    let settled = false; // 타임아웃 destroy와 error가 겹쳐도 재시도는 한 번만(프로브 중복 스택 방지)
+    const retryOnce = (): void => { if (settled) return; settled = true; retry(); };
+    const req = nodeHttp.get(healthUrl, (res) => {
       let body = '';
       res.on('data', (chunk: Buffer) => { body += chunk; });
       res.on('end', () => {
         if (!chatWin) return; // 응답 도착 사이 창이 닫혔으면 무시
         const status = classifyHealth(body, instanceId);
         if (status === 'foreign') { onForeignInstance(); return; }
-        if (status === 'pending') { setTimeout(probe, 2000); return; }
+        if (status === 'pending') { retryOnce(); return; }
         const lang = resolveLanguage(cfg.language, app.getLocale());
         void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 ok → 클라 로드(포트·언어·프리셋 주입)
       });
-      res.on('error', () => { setTimeout(probe, 2000); });
-    }).on('error', () => { setTimeout(probe, 2000); });
+      res.on('error', () => { retryOnce(); });
+    });
+    req.on('error', () => { retryOnce(); });
+    // 좀비가 accept만 하고 응답을 안 하는 케이스(실관측) — 프로브 자체에 짧은 타임아웃.
+    req.setTimeout(3000, () => { req.destroy(new Error('probe timeout')); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.
   chatWin.webContents.on('did-fail-load', (_e, _code, _desc, _url, isMainFrame) => {
@@ -392,7 +417,14 @@ if (!gotLock) {
   });
   app.on('before-quit', () => {
     quitting = true;
-    child?.kill();
+    // 윈도우에서 child.kill()(TerminateProcess 1회)은 유틸리티 서브트리를 못 지울 수 있다 —
+    // 실사고(2026-07-24): 자동 업데이트 종료 후 NodeService 백엔드가 고아로 살아남아 47800을
+    // 계속 점유, 새 버전이 '시작 중'에서 영구 대기. 윈도우는 taskkill /T /F로 트리째 강제 종료.
+    if (process.platform === 'win32' && child?.pid) {
+      try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* 이미 죽음 등 — 격리 */ }
+    } else {
+      child?.kill();
+    }
     brainProcs.forEach((p) => p.kill());
     ptyManager.killAll(); // 터미널 세션 고아 방지
   });

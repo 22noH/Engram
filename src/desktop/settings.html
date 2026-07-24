@@ -883,7 +883,7 @@
 
         const tile = document.createElement('span');
         tile.className = 'tile';
-        tile.style.background = /api$/.test(b.provider) ? '#3aa5de' : '#888780';
+        tile.style.background = /api$/.test(b.provider) ? 'var(--accent)' : 'var(--dim)';
         tile.appendChild(cpuChipSvg());
         row.appendChild(tile);
 
