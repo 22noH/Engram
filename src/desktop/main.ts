@@ -7,7 +7,7 @@ import * as path from 'path';
 import { autoUpdater } from 'electron-updater';
 import { readStatus } from './status';
 import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
-import { claudeInstallCommand, detectClaude, spawnRunner } from './claude-detect';
+import { claudeInstallCommand, resolveClaude, claudeCliEnvOverride, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
 import { saveAnthropicApiKey } from './api-brain';
 import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
@@ -45,7 +45,7 @@ const configDir = path.join(dataDir, 'config');
 // 자식"인지 확인하는 재료. 자식이 죽어도 재시작(startChild)마다 새로 만들지 않고 이 프로세스 수명
 // 동안 고정(같은 데스크톱 인스턴스가 재시작한 자식은 계속 같은 id를 쓰는 게 맞다).
 const instanceId = randomUUID();
-const childEnv = {
+const childEnv: NodeJS.ProcessEnv = {
   ...process.env,
   ENGRAM_DATA_DIR: dataDir,
   ENGRAM_MODEL_CACHE_DIR: path.join(dataDir, 'models'),
@@ -399,7 +399,7 @@ function registerIpc(): void {
     warn: backoff.consecutiveFails >= WARN_AFTER,
   }));
   ipcMain.handle('engram:detect-claude', async () => ({
-    ...(await detectClaude(spawnRunner)),
+    ...(await resolveClaude(spawnRunner, process.env, process.platform)),
     installCommand: claudeInstallCommand(process.platform),
   }));
   ipcMain.handle('engram:detect-ollama', () => detectOllama());
@@ -522,7 +522,7 @@ if (!gotLock) {
   });
   // 창을 다 닫아도 트레이 상주 유지(기본 quit 동작 차단).
   app.on('window-all-closed', () => {});
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // 기본 메뉴바(File/Edit/View…) 제거 — 설정창엔 불필요하고 미완성처럼 보인다. macOS는 앱 메뉴 관례상 유지.
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     // 로그인 자동시작(스펙 §3). Linux는 API 미지원이라 제외, 개발 모드(비패키지)도 제외.
@@ -540,6 +540,14 @@ if (!gotLock) {
     if (process.env.ENGRAM_OPEN_SETTINGS === '1') openSettings();
     // dev 스모크 편의(T4 실측 검증): 트레이 더블클릭 없이 채팅창 바로 열기 (ENGRAM_OPEN_CHAT=1 electron .)
     if (process.env.ENGRAM_OPEN_CHAT === '1') openChat();
+    // 실사고: claude CLI를 설치기로 막 설치한 머신은 이 프로세스가 물려받은 PATH가 stale해서
+    // (탐색기/앱 세션이 설치보다 먼저 시작됨, 자동업데이트 재실행도 옛 env를 물려받음) PATH의
+    // 'claude'가 안 잡힌다. 자식(startChild)을 띄우기 전에 잘 알려진 설치 위치까지 한 번 확인해서
+    // — 찾았으면 ENGRAM_BRAIN_CLI로 childEnv에 얹는다(brains.json은 그대로, 기존 env 오버레이 훅
+    // 재사용 — brain.config.ts의 resolve()가 이미 이 변수를 profile.cli보다 우선시킨다).
+    const resolvedClaude = await resolveClaude(spawnRunner, process.env, process.platform);
+    const cliOverride = claudeCliEnvOverride(childEnv, resolvedClaude);
+    if (cliOverride) childEnv.ENGRAM_BRAIN_CLI = cliOverride;
     startChild();
     for (const b of loadLocalBrains(configDir)) startLocalBrain(b); // + 로컬 두뇌 재기동(재시작 감독 없음 — ponytail)
   });
