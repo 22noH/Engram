@@ -48,7 +48,11 @@ export class MemoryMonitor {
     this.alerted = true;
     const mb = Math.round(rss / 1024 / 1024);
     let snap = '(스냅샷 생략)';
-    try { snap = this.snapshotFn(); this.pruneSnapshots(); } catch (e) { this.logger.warn(`heap 스냅샷 실패: ${String(e)}`, 'MemoryMonitor'); }
+    // 힙 스냅샷은 옵트인(ENGRAM_HEAP_SNAPSHOT=1) — writeHeapSnapshot은 수백 MB를 동기로 쓰며
+    // 프로세스를 길게 블록하고 메모리를 추가로 먹어, 저사양 머신에선 그 자체가 위험(실배포 후 결정 2026-07-24).
+    if (process.env.ENGRAM_HEAP_SNAPSHOT === '1') {
+      try { snap = this.snapshotFn(); this.pruneSnapshots(); } catch (e) { this.logger.warn(`heap 스냅샷 실패: ${String(e)}`, 'MemoryMonitor'); }
+    }
     this.logger.warn(`메모리 임계치 초과: rss ${mb}MB > ${this.limitMb}MB. 스냅샷: ${snap}`, 'MemoryMonitor');
     void this.alertFn('memory-high', `rss ${mb}MB가 임계치 ${this.limitMb}MB 초과. heap 스냅샷: ${snap}`);
   }

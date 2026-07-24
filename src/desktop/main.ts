@@ -89,14 +89,50 @@ const T = {
 };
 
 // ---- 자식(상주) 감독 ----
+// 크래시 증거 캡처(실사고 2026-07-24: 새 설치 머신에서 자식이 부팅 ~46초 뒤 무단 사망을 반복하는데
+// stdio:'ignore'라 사인이 어디에도 안 남았다). stderr/stdout을 파일로 흘리고 종료 코드도 기록한다.
+// 파일이 무한히 크지 않게 시작 시 2MB 넘으면 리셋(정밀 로테이션은 과함 — 최근 크래시만 있으면 된다).
+const childLogPath = (): string => path.join(dataDir, 'logs', 'child-stderr.log');
+function childLogStream(): fs.WriteStream | null {
+  try {
+    const p = childLogPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    try { if (fs.existsSync(p) && fs.statSync(p).size > 2 * 1024 * 1024) fs.unlinkSync(p); } catch { /* 격리 */ }
+    return fs.createWriteStream(p, { flags: 'a' });
+  } catch { return null; }
+}
+// 셸 부팅 로그(실사고 2026-07-24 후속): probe 판정·인스턴스 가드·크래시 루프 등 셸의 결정이
+// 어디에도 안 남아 원격 진단이 불가능했다. logs/desktop-shell.log에 한 줄씩 append(best-effort).
+function shellLog(msg: string): void {
+  try {
+    const p = path.join(dataDir, 'logs', 'desktop-shell.log');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    try { if (fs.existsSync(p) && fs.statSync(p).size > 1024 * 1024) fs.unlinkSync(p); } catch { /* 격리 */ }
+    fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch { /* 로그 실패가 부팅을 못 막게 */ }
+}
+// 스플래시 중 크래시 루프 감지: 헬스 'ok' 전에 자식이 반복 사망하면 무한 '시작 중' 대신 안내한다.
+let childExitsBeforeReady = 0;
+let onChildCrashLoop: (() => void) | null = null; // 창 생성부에서 주입(로그 경로 안내 화면)
 function startChild(): void {
   const entry = path.join(app.getAppPath(), 'dist', 'src', 'main.js');
   childStartedAt = Date.now();
   const lang = resolveLanguage(loadChatConfig(configDir).language, app.getLocale());
-  child = utilityProcess.fork(entry, [], { env: { ...childEnv, ENGRAM_LANG: lang }, stdio: 'ignore', serviceName: 'engram-core' });
-  child.on('exit', () => {
+  child = utilityProcess.fork(entry, [], { env: { ...childEnv, ENGRAM_LANG: lang }, stdio: ['ignore', 'pipe', 'pipe'], serviceName: 'engram-core' });
+  const sink = childLogStream();
+  if (sink) {
+    const stamp = (label: string) => `\n[${new Date().toISOString()}] ${label} (pid=${child?.pid})\n`;
+    sink.write(stamp('child start'));
+    child.stdout?.on('data', (d: Buffer) => { try { sink.write(d); } catch { /* 격리 */ } });
+    child.stderr?.on('data', (d: Buffer) => { try { sink.write(d); } catch { /* 격리 */ } });
+  }
+  child.on('exit', (code) => {
     child = null;
+    try { sink?.write(`\n[${new Date().toISOString()}] child exit code=${code} uptimeMs=${Date.now() - childStartedAt}\n`); sink?.end(); } catch { /* 격리 */ }
     if (quitting) return;
+    childExitsBeforeReady += 1;
+    shellLog(`child exit code=${code} uptimeMs=${Date.now() - childStartedAt} exitsBeforeReady=${childExitsBeforeReady}`);
+    if (childExitsBeforeReady >= 3 && onChildCrashLoop) { shellLog('CRASH-LOOP: showing guidance page'); onChildCrashLoop(); return; } // 루프 확정 — 재시작 대신 안내
     // 충분히 살아있었으면 정상 운행 중 크래시로 보고 백오프 리셋.
     if (Date.now() - childStartedAt >= STABLE_UPTIME_MS) backoff.reset();
     const delay = backoff.next();
@@ -238,7 +274,9 @@ function openChat(): void {
   // 'ok'=우리 자식 → 로드. 'foreign'=다른 인스턴스가 이 포트에 이미 응답 중 → 폴링 즉시 중단하고
   // 명확한 실패(에러 다이얼로그+종료) — 조용히 남의 서버에 붙는 사고 방지. 'pending'=아직 못 믿을
   // 응답(파싱 실패·자식 미기동) → 기존과 동일하게 계속 폴링(타이밍 불변).
+  let lastProbeStatus = 'start';
   const onForeignInstance = (): void => {
+    shellLog(`FOREIGN detected on port ${cfg.port} — showing dialog and quitting`);
     dialog.showErrorBox(
       'Engram is already running',
       `Another instance of Engram is already using port ${cfg.port}. ` +
@@ -254,6 +292,7 @@ function openChat(): void {
   const STALL_LIMIT = 5;
   let stallCount = 0;
   const onPortHeld = (): void => {
+    shellLog(`PORT-HELD: ${STALL_LIMIT} stalled probes with child dead — showing dialog and quitting`);
     dialog.showErrorBox(
       'Engram could not start',
       `Something is holding port ${cfg.port} but not responding like Engram. ` +
@@ -281,8 +320,11 @@ function openChat(): void {
       res.on('end', () => {
         if (!chatWin) return; // 응답 도착 사이 창이 닫혔으면 무시
         const status = classifyHealth(body, instanceId);
+        if (status !== lastProbeStatus) { shellLog(`probe: ${lastProbeStatus} -> ${status} (body ${body.slice(0, 120)})`); lastProbeStatus = status; }
         if (status === 'foreign') { onForeignInstance(); return; }
         if (status === 'pending') { retryOnce('stalled'); return; } // 200인데 헬스 형식이 아님 = 점유자 의심
+        childExitsBeforeReady = 0; // 준비 완료 — 이후의 자식 사망은 기존 백오프 감독이 처리(크래시 화면은 부팅 실패 전용)
+        shellLog('probe ok — loading renderer');
         const lang = resolveLanguage(cfg.language, app.getLocale());
         void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 ok → 클라 로드(포트·언어·프리셋 주입)
       });
@@ -306,6 +348,23 @@ function openChat(): void {
     nativeTheme.removeListener('updated', onTheme);
     chatWin = null;
   });
+  // 크래시 루프(부팅 전 자식 3회 사망) → 무한 '시작 중' 대신 원인 파일 경로를 안내(실사고 2026-07-24).
+  onChildCrashLoop = () => {
+    if (!chatWin) return;
+    const logP = childLogPath().replace(/\\/g, '\\\\');
+    const kor = ko();
+    const page = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+      '<style>body{background:#f5f6f4;color:#24292e;font-family:system-ui;display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;height:100vh;margin:0;gap:10px;text-align:center;padding:0 32px}' +
+      'code{background:#eef0ec;border-radius:6px;padding:2px 8px;font-size:12px;word-break:break-all}' +
+      'p{margin:0;color:#6b7268;font-size:13px;line-height:1.6}h1{font-size:17px;font-weight:600;margin:0}' +
+      '@media(prefers-color-scheme:dark){body{background:#191b19;color:#e6e5df}p{color:#9aa096}code{background:rgba(255,255,255,.07)}}</style>' +
+      (kor
+        ? `<h1>Engram 서버가 반복해서 종료됩니다</h1><p>백엔드가 시작 직후 계속 종료되고 있어요.<br>아래 파일에 원인이 기록돼 있으니 공유해 주세요.</p><code>${logP}</code>`
+        : `<h1>The Engram server keeps stopping</h1><p>The backend exits right after starting.<br>The cause is recorded in this file — please share it.</p><code>${logP}</code>`),
+    );
+    void chatWin.loadURL(page);
+  };
   void chatWin.loadURL(waiting);
   probe();
 }
@@ -417,8 +476,10 @@ function registerIpc(): void {
 // ---- 부팅 ----
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  shellLog('single-instance lock NOT acquired — yielding to existing instance and quitting');
   app.quit(); // 중복 실행: 기존 인스턴스에 양보(스펙 §7)
 } else {
+  shellLog(`shell boot pid=${process.pid} instanceId=${instanceId}`);
   // 아이콘 재클릭(중복 실행) = 기존 창 포커스(스펙 §7). 창이 있으면 그걸 복원·포커스,
   // 트레이 상주라 창이 하나도 없을 수도 있으면 채팅창을 새로 열어 트레이 더블클릭과 동일하게 반응한다.
   app.on('second-instance', () => {
