@@ -21,6 +21,10 @@ declare global {
       gitDiffFile?: (repoPath: string, file: string) => Promise<
         { ok: true; diff: string } | { ok: false; reason: string }
       >;
+      // 자동 업데이트 상태(사용자 요청 2026-07-24) — 현재 버전 표시 + 다운로드된 새 버전 배너/설치 버튼.
+      updateState?: () => Promise<{ current: string; pending: string | null }>;
+      installUpdate?: () => Promise<void>;
+      onUpdateReady?: (cb: (version: string) => void) => () => void;
     };
   }
 }

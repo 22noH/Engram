@@ -115,6 +115,9 @@ export default function App() {
   // Phase 16c — 비공개 채널 멤버 관리(주인 전용, 기본 연결의 실제 채널 대상).
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [membersFor, setMembersFor] = useState<string | null>(null); // 관리 중인 실제 채널 id(기본 연결)
+  // 자동 업데이트 배너(사용자 요청 2026-07-24): 새 버전이 다 받아지면 상단에 "업데이트 준비됨 · 재시작" 노출.
+  // 데스크톱(engramDesktop)에서만 — 브라우저엔 updateState가 없어 항상 null(배너 미표시).
+  const [updateReady, setUpdateReady] = useState<string | null>(null);
   // Task 4 — 채널별 두뇌 드롭다운 채우기용 등록 이름 목록. wiki/admin과 같은 결로 기본 연결
   // (그 서버) 기준 하나만 들고 있는다 — respondMode 팬아웃과 동형으로 다른 연결에도 그대로 전송된다.
   const [brainNames, setBrainNames] = useState<string[]>([]);
@@ -466,6 +469,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentName, awaiting, stopping]);
 
+  // 자동 업데이트 상태 조회+구독(사용자 요청 2026-07-24): mount 시 이미 받아둔 업데이트가 있으면 즉시
+  // 배너를, 이후 다운로드 완료 이벤트도 반영. 데스크톱 아닐 땐 updateState가 없어 조용히 no-op.
+  useEffect(() => {
+    const api = window.engramDesktop;
+    if (!api?.updateState) return;
+    void api.updateState().then((s) => { if (s.pending) setUpdateReady(s.pending); });
+    return api.onUpdateReady?.((version) => setUpdateReady(version));
+  }, []);
+
   // 답을 기대하며 "생각 중" 표시(멘션-전용 채널에서 비멘션이면 안 띄움 — chat.html expectReply 이전).
   const expectReply = (name: string, text: string, connId: string) => {
     const c = channelsByConn[connId]?.find((x) => x.name === name);
@@ -745,6 +757,13 @@ export default function App() {
         <span id="tbtitle">Engram Desktop</span>
         {meByConn[connState.defaultConnId] && <span id="tbuser">{meByConn[connState.defaultConnId].displayName}</span>}
       </div>
+      {updateReady && (
+        <div id="updateBanner">
+          <span>{T.updateReady(updateReady)}</span>
+          <button className="updateBtn" onClick={() => void window.engramDesktop?.installUpdate?.()}>{T.updateRestart}</button>
+          <button className="updateDismiss" title={T.close} onClick={() => setUpdateReady(null)}>✕</button>
+        </div>
+      )}
       {showManage && (
         <ManageEngrams
           connections={connState.connections}

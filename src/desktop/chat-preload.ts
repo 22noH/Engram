@@ -30,4 +30,13 @@ contextBridge.exposeInMainWorld('engramDesktop', {
   // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).
   gitDiffStatus: (repoPath: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-status', repoPath),
   gitDiffFile: (repoPath: string, file: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-file', repoPath, file),
+
+  // 자동 업데이트 상태(사용자 요청 2026-07-24): 현재 버전 표시 + 다운로드된 새 버전 배너/버튼.
+  updateState: (): Promise<{ current: string; pending: string | null }> => ipcRenderer.invoke('engram:update-state'),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('engram:install-update'),
+  onUpdateReady: (cb: (version: string) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, version: string): void => cb(version);
+    ipcRenderer.on('engram:update-ready', listener);
+    return () => ipcRenderer.removeListener('engram:update-ready', listener);
+  },
 });

@@ -182,4 +182,7 @@ export const T = {
   toolsUsedLabel: (n: number, list: string) => (ko
     ? `🔧 도구 ${n}개 사용 — ${list}`
     : `🔧 ${n} tool${n === 1 ? '' : 's'} used — ${list}`),
+  // 자동 업데이트 배너(사용자 요청 2026-07-24) — 새 버전 다운로드 완료 시 상단 배너.
+  updateReady: (v: string) => (ko ? `새 버전 v${v} 준비됨` : `New version v${v} is ready`),
+  updateRestart: ko ? '재시작해서 업데이트' : 'Restart to update',
 };

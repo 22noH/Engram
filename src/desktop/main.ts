@@ -87,6 +87,7 @@ const T = {
   restart: () => (ko() ? '재시작' : 'Restart'),
   quit: () => (ko() ? '종료' : 'Quit'),
   warnTip: () => (ko() ? 'Engram — 재시작 반복 실패 (로그 확인)' : 'Engram — restarts failing repeatedly (check logs)'),
+  updateTo: (v: string) => (ko() ? `v${v}로 업데이트 (재시작)` : `Update to v${v} (restart)`),
 };
 
 // ---- 자식(상주) 감독 ----
@@ -177,23 +178,49 @@ function trayIcon(): Electron.NativeImage {
   return nativeImage.createFromPath(path.join(app.getAppPath(), 'src', 'desktop', 'assets', 'tray.png'));
 }
 
+// 자동 업데이트가 새 버전을 다 받으면 채워진다(사용자가 클로드처럼 "언제 최신인지" 알고 즉시 눌러
+// 재시작할 수 있게 — 트레이 항목·인앱 배너 양쪽에 반영). null이면 최신(표시할 업데이트 없음).
+let pendingUpdateVersion: string | null = null;
+
+// 다운로드된 업데이트를 지금 설치(앱 종료→NSIS 설치→재실행). before-quit가 자식을 트리킬하므로
+// 백엔드가 파일을 쥔 채 설치 실패하는 일은 없다. 무다운로드 시엔 no-op(방어).
+function installUpdate(): void {
+  if (!pendingUpdateVersion) return;
+  try { autoUpdater.quitAndInstall(true, true); } catch { /* 설치 실패는 조용히 — 다음 종료 시 재시도 */ }
+}
+
+function trayTemplate(): Electron.MenuItemConstructorOptions[] {
+  const items: Electron.MenuItemConstructorOptions[] = [
+    { label: `Engram v${app.getVersion()}`, enabled: false }, // 현재 버전 상시 표시
+  ];
+  if (pendingUpdateVersion) items.push({ label: T.updateTo(pendingUpdateVersion), click: () => installUpdate() });
+  items.push(
+    { type: 'separator' },
+    { label: T.openChat(), click: () => openChat() },
+    { label: T.openSettings(), click: () => openSettings() },
+    { label: T.restart(), click: () => restartChild() },
+    { type: 'separator' },
+    { label: T.quit(), click: () => app.quit() },
+  );
+  return items;
+}
+
 function updateTray(): void {
   if (!tray) return;
   const warn = backoff.consecutiveFails >= WARN_AFTER;
   tray.setToolTip(warn ? T.warnTip() : 'Engram');
+  tray.setContextMenu(Menu.buildFromTemplate(trayTemplate())); // 버전·업데이트 상태 반영해 매번 재구성
+}
+
+// 업데이트 다운로드 완료 → 트레이 갱신 + 열려있는 채팅창에 배너 알림(늦게 열리는 창은 mount 시 조회).
+function onUpdateDownloaded(version: string): void {
+  pendingUpdateVersion = version;
+  updateTray();
+  chatWin?.webContents.send('engram:update-ready', version);
 }
 
 function createTray(): void {
   tray = new Tray(trayIcon());
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: T.openChat(), click: () => openChat() },
-      { label: T.openSettings(), click: () => openSettings() },
-      { label: T.restart(), click: () => restartChild() },
-      { type: 'separator' },
-      { label: T.quit(), click: () => app.quit() },
-    ]),
-  );
   tray.on('double-click', () => openChat());
   updateTray();
 }
@@ -452,6 +479,10 @@ function registerIpc(): void {
     return shell.openPath(target);
   });
   ipcMain.handle('engram:restart', () => restartChild());
+  // 업데이트 UI(사용자 요청 2026-07-24): 렌더러가 mount 시 현재 버전+대기 중 업데이트를 조회(늦게 열린 창도
+  // 배너를 그릴 수 있게)하고, 버튼을 누르면 즉시 설치한다.
+  ipcMain.handle('engram:update-state', () => ({ current: app.getVersion(), pending: pendingUpdateVersion }));
+  ipcMain.handle('engram:install-update', () => { installUpdate(); });
   ipcMain.handle('engram:log-tail', () => {
     try {
       const text = fs.readFileSync(path.join(dataDir, 'logs', 'engram.log'), 'utf8');
@@ -531,7 +562,10 @@ if (!gotLock) {
     }
     // 자동 업데이트(NSIS): GitHub Release에서 새 버전 확인→다운로드→종료 시 설치.
     // Windows 한정 — 무서명 mac은 electron-updater가 서명을 요구해 불가. 실패는 조용히 무시(오프라인 등).
+    // 다운로드가 끝나면(update-downloaded) 조용히 종료를 기다리는 대신 트레이·인앱 배너로 "업데이트 준비됨,
+    // 눌러서 재시작"을 노출한다(사용자 요청 2026-07-24: 클로드처럼 어디선가 최신 여부를 알고 즉시 눌러 설치).
     if (app.isPackaged && process.platform === 'win32') {
+      autoUpdater.on('update-downloaded', (info) => onUpdateDownloaded(info.version));
       autoUpdater.checkForUpdatesAndNotify().catch(() => {});
     }
     registerIpc();

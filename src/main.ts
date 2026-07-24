@@ -71,6 +71,19 @@ function readMcpWriteMode(configDir: string): 'propose' | 'write' {
   }
 }
 
+// 치명적 크래시 진단(실사고 2026-07-24): 상주 백엔드가 운행 중 code=1로 조용히 죽는데(스택 없이 exit 1)
+// 사인이 자식 stderr에 아무것도 안 남아 원인을 못 잡았다. 전체 스택을 stderr(부모가 child-stderr.log로
+// 파이프)로 동기 출력한다 — 다음 크래시가 진범을 뱉는다.
+function logFatal(kind: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  try { console.error(`\n[FATAL ${kind}] ${new Date().toISOString()}\n${detail}\n`); } catch { /* teardown 중 */ }
+}
+// uncaughtException: 상태가 오염됐을 수 있어 로그 후 기존과 동일하게 종료(exit 1 유지).
+process.on('uncaughtException', (err) => { logFatal('uncaughtException', err); process.exit(1); });
+// unhandledRejection: 로그만 남기고 상주는 유지한다. Node 기본은 여기서도 exit 1이라 — 만약 이게
+// 크래시-재시작 폭주의 진범이었다면, 로그를 남기면서 프로세스를 살려 폭주 자체를 끊는다(회복력 우선).
+process.on('unhandledRejection', (reason) => logFatal('unhandledRejection', reason));
+
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
 async function bootstrap(): Promise<void> {
