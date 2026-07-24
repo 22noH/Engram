@@ -25,10 +25,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # 렌더러·콘솔은 별도 워크스페이스(자체 package.json) — 실사고(2026-07-24): 이 두 빌드가 빠져
+      # CI 설치본에 화면 파일(renderer/dist·console/dist)이 없었고, 앱이 헬스 ok 후 로드 실패를
+      # 무한 반복(영구 '시작 중'). 로컬 desktop:build와 동일 체인을 CI에도 강제한다.
+      - run: npm ci --prefix renderer
+      - run: npm ci --prefix console
       # 테스트는 Windows에서만(로컬 검증 환경과 동일 — mac/linux 테스트 호환은 비범위).
       - run: npm test
         if: runner.os == 'Windows'
       - run: npm run build
+      - run: npm run renderer:build
+      - run: npm run console:build
+      # 패키징 전 가드: 화면 파일이 실제로 존재해야 한다(없으면 여기서 실패 — 깡통 설치본 원천 차단).
+      - run: node -e "const fs=require('fs');for(const p of ['renderer/dist/index.html','console/dist/index.html']){if(!fs.existsSync(p)){console.error('missing '+p);process.exit(1)}}"
       - run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

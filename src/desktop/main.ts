@@ -29,6 +29,7 @@ import { focusOrRestore } from './window-focus';
 import { PtyManager } from './pty-manager';
 import { diffStatus, diffFile } from './git-diff';
 import { classifyHealth } from './health-identity';
+import { killOrphanEngramOnPort } from './orphan-cleanup';
 import * as nodeHttp from 'http';
 import { randomUUID } from 'crypto';
 
@@ -275,7 +276,24 @@ function openChat(): void {
   // 명확한 실패(에러 다이얼로그+종료) — 조용히 남의 서버에 붙는 사고 방지. 'pending'=아직 못 믿을
   // 응답(파싱 실패·자식 미기동) → 기존과 동일하게 계속 폴링(타이밍 불변).
   let lastProbeStatus = 'start';
+  // 고아 자가 치유(실사고 2026-07-24): foreign 판정의 실제 정체가 "예전 실행이 남긴 우리 백엔드"인
+  // 경우가 대부분 — 그 고아는 앱 종료·재설치로도 안 죽어 영구 잠금이 된다. Engram.exe로 확인되는
+  // 점유자만 1회 자동 정리 후 자식을 재시작해 재시도한다. 그래도 foreign이면(진짜 타 프로그램·
+  // 정리 실패) 기존 안내로 폴백.
+  let orphanCleanupTried = false;
   const onForeignInstance = (): void => {
+    if (!orphanCleanupTried) {
+      orphanCleanupTried = true;
+      shellLog(`FOREIGN on port ${cfg.port} — attempting orphan self-heal`);
+      if (killOrphanEngramOnPort(cfg.port, shellLog)) {
+        restartChild();
+        lastProbeStatus = 'start';
+        stallCount = 0;
+        setTimeout(probe, 1500);
+        return;
+      }
+      shellLog('orphan self-heal: nothing killed — falling through to dialog');
+    }
     shellLog(`FOREIGN detected on port ${cfg.port} — showing dialog and quitting`);
     dialog.showErrorBox(
       'Engram is already running',
@@ -339,8 +357,10 @@ function openChat(): void {
     req.setTimeout(3000, () => { req.destroy(new Error('probe timeout')); });
   };
   // 로드 후 자식이 죽는 등 메인 프레임 로드가 실패하면 대기 화면으로 되돌리고 다시 폴링.
-  chatWin.webContents.on('did-fail-load', (_e, _code, _desc, _url, isMainFrame) => {
+  chatWin.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || !chatWin) return;
+    // 실사고(2026-07-24): CI 깡통 설치본에서 이 실패가 무한 반복됐는데 이유가 어디에도 안 남았다.
+    shellLog(`renderer load FAILED code=${code} desc=${desc} url=${url}`);
     void chatWin.loadURL(waiting);
     setTimeout(probe, 2000);
   });
