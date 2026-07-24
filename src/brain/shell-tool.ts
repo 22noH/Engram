@@ -21,7 +21,8 @@ export const BASH_TOOL_DEF: WebToolDef = {
 };
 
 // 프로세스 트리 강제종료(자식까지). Win=taskkill /T /F, POSIX=프로세스그룹 kill(detached로 그룹 생성).
-function killTree(pid: number): void {
+// Task 4(여러 줄 입력+생성 중지): claude-cli.brain의 abort 처리도 이 헬퍼를 재사용(중복 구현 방지).
+export function killTree(pid: number): void {
   if (process.platform === 'win32') {
     try {
       // ★ taskkill 자식에 'error' 리스너 필수 — cross-spawn은 spawn 실패(AV·축소 PATH 등)를 비동기 'error'로

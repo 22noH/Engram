@@ -152,6 +152,33 @@ describe('OpenAiApiBrain', () => {
     expect(toolSignal?.aborted).toBe(true);
   });
 
+  it('opts.signal abort는 내부 컨트롤러에 즉시 전파되어 isError(raw=aborted)를 낸다(timeout과 구분)', async () => {
+    const fetchFn = ((_u: string, init: { signal: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        if (init.signal.aborted) { rej(new Error('aborted')); return; }
+        init.signal.addEventListener('abort', () => rej(new Error('aborted')));
+      })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const p = new OpenAiApiBrain(PROFILE, fetchFn).complete('x', undefined, { signal: ctrl.signal });
+    ctrl.abort();
+    const r = await p;
+    expect(r.isError).toBe(true);
+    expect(String(r.raw)).toBe('aborted');
+  });
+
+  it('진입 시 이미 opts.signal이 aborted면 즉시 aborted로 끝난다(멈춰있지 않음)', async () => {
+    const fetchFn = ((_u: string, init: { signal: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        if (init.signal.aborted) { rej(new Error('aborted')); return; }
+        init.signal.addEventListener('abort', () => rej(new Error('aborted')));
+      })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('x', undefined, { signal: ctrl.signal });
+    expect(r.isError).toBe(true);
+    expect(String(r.raw)).toBe('aborted');
+  });
+
   it('opts.delegate 있으면 ask_brain 도구 노출 + 호출 시 delegate.run 라우팅', async () => {
     const ASK_CHUNKS = [
       { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'ask_brain', arguments: '' } }] } }] },

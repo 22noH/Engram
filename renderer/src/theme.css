@@ -231,8 +231,19 @@ details.thread .msg { max-width:100%; }
 input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:9px;
                    padding:10px 12px; color:var(--text); outline:none; }
 input[type=text]:focus, input[type=password]:focus { border-color:var(--accent); }
+/* Task 4(여러 줄 입력+생성 중지) — #input이 input→textarea로 바뀜(목업 승인). 기존 입력 스타일 그대로
+   물려받되(배경·테두리·radius·패딩·색), resize:none+줄간격 고정+최대 ~6줄까지만 자라고 그 이상은
+   내부 스크롤(overflow-y:auto) — max-height는 JS 오토사이즈가 만드는 실제 height를 이 값으로 clamp한다. */
+#inputbar textarea { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:9px;
+                   padding:10px 12px; color:var(--text); outline:none; resize:none; font:inherit;
+                   line-height:1.4; max-height:152px; overflow-y:auto; }
+#inputbar textarea:focus { border-color:var(--accent); }
 button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; cursor:pointer;
          color:var(--accent-text); font-weight:600; }
+/* Task 4 — 생성 중 보내기 버튼이 바뀌는 중지 버튼(danger 아웃라인, .engramRow button.danger·#advancedLocal
+   .localCreateRow button과 같은 톤). 클릭 직후 중복 프레임 방지용 disabled는 흐림 처리만(구조는 그대로). */
+.stopBtn { background:transparent; border:1px solid var(--danger); color:var(--danger); }
+.stopBtn:disabled { opacity:.5; cursor:default; }
 
 /* Phase 12 — Engram 선택기(입력바 오른쪽, 보내기 옆) */
 #engramSelector { position:relative; flex:none; }

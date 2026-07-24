@@ -108,6 +108,9 @@ export class SelfMessenger implements MessengerPort {
       // 메서드+bridge)은 별도 후속 태스크 — 여기선 훅 계약만 정의한다. 미주입(brain 모드/미배선)이면
       // compact 케이스는 조용한 no-op(무크래시, 브로드캐스트 없음).
       compactHandler?: (channelId: string, brainName?: string) => Promise<{ slug: string } | null>;
+      // Task 4(여러 줄 입력+생성 중지): stopGeneration ws 케이스가 부르는 훅 — 그 채널의 진행 중 두뇌
+      // 턴을 중단(true=있었음, false=무턴). 미주입이면 조용한 no-op(compactHandler와 동일 결).
+      stopHandler?: (channelId: string) => boolean;
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
@@ -489,6 +492,19 @@ export class SelfMessenger implements MessengerPort {
             if (this.canAdminChannel(ws, ch)) {
               const r = this.opts.compactHandler ? await this.opts.compactHandler(f.id, ch?.brain) : null;
               if (r) this.broadcastToChannel(f.id, { t: 'compacted', channelId: f.id, slug: r.slug });
+            }
+          }
+          return;
+        }
+        case 'stopGeneration': {
+          // Task 4(여러 줄 입력+생성 중지): send와 동일한 접근 게이트(canAccessChannel — admin 아님, 이
+          // 채널에서 대화할 수 있는 누구나 자기 요청한 턴을 멈출 수 있다). 채널 없음·비접근·미주입
+          // stopHandler·무턴(반환 false) 전부 조용한 no-op(응답 프레임 없음 — 서버가 그 턴을 실제로
+          // 중단했으면 중단 안내 메시지가 일반 'msg' 경로로 곧 도착한다).
+          if (typeof f.channelId === 'string') {
+            const ch = this.store.listChannels().find((c) => c.id === f.channelId);
+            if (ch && this.canAccessChannel(ws, ch)) {
+              this.opts.stopHandler?.(f.channelId);
             }
           }
           return;

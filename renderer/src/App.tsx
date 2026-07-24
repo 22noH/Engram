@@ -29,6 +29,14 @@ function chanKey(connId: string, mode: string, name: string): string {
   return `${connId}::${mode}::${name}`;
 }
 
+// Task 4(여러 줄 입력+생성 중지) — #input(textarea) 오토사이즈: 높이를 'auto'로 리셋한 뒤 scrollHeight로
+// 다시 잰다(줄이 줄어들 때도 정확히 축소되게). 실제 렌더 높이의 상한(~6줄)은 theme.css의
+// max-height(overflow-y:auto)가 clamp — 여기선 항상 콘텐츠 높이 그대로 설정해도 안전하다.
+function autosizeTextarea(el: HTMLTextAreaElement): void {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 // 최종 재리뷰 minor(T4) — pendingSendRef(지연 생성 채널 버퍼)의 "flush 대상 판정" 순수 함수로 추출.
 // 실제 UI로는 hasAttachments=true(첨부 있음)가 이 버퍼 분기(sendText의 else if (!threadId))와 동시에
 // 일어날 수 없다 — 첨부는 항상 이미 존재하는 채널에만 업로드되고(addFiles가 업로드 전 채널 존재를
@@ -75,6 +83,9 @@ export default function App() {
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [mode, setMode] = useState<'chat' | 'code' | 'team' | 'wiki' | 'admin'>('chat');
   const [awaiting, setAwaiting] = useState<Set<string>>(new Set()); // 키=논리 채널 이름
+  // Task 4(여러 줄 입력+생성 중지) — stopGeneration 프레임을 보낸 뒤 응답(awaiting 해제) 전까지 중지
+  // 버튼을 잠가 중복 프레임을 막는다. 키=논리 채널 이름(awaiting과 같은 키 공간).
+  const [stopping, setStopping] = useState<Set<string>>(new Set());
   // Task 2(brain-activity) — awaiting 중 실시간 라벨(activity 프레임, 휘발). 키=논리 채널 이름(awaiting과
   // 동일 키 공간) — 'msg' 프레임의 기존 name 역조회(connId+channelId→논리 이름)와 같은 방식으로 채운다.
   // 없으면(아직 activity 안 옴/이미 클리어됨) 렌더 쪽이 T.thinking(기본 문구)으로 폴백한다.
@@ -179,6 +190,8 @@ export default function App() {
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
           // Task 2(brain-activity) — 답 도착 시 그 채널의 활동 라벨도 같이 지운다(다음 대기는 기본 문구부터).
           setActivityLabels((prev) => { if (!prev.has(name)) return prev; const n = new Map(prev); n.delete(name); return n; });
+          // Task 4(여러 줄 입력+생성 중지) — 답(중단 안내 포함)이 왔으니 중지 버튼 잠금도 같이 푼다.
+          setStopping((prev) => { if (!prev.has(name)) return prev; const n = new Set(prev); n.delete(name); return n; });
         }
       }
     } else if (f.t === 'activity') {
@@ -430,6 +443,29 @@ export default function App() {
     }
   };
 
+  // Task 4(여러 줄 입력+생성 중지) — 현재 채널의 진행 중 턴을 중지. fanoutToName과 같은 결로 그 이름을
+  // 가진 모든 연결의 채널에 보낸다 — 실제로 그 턴을 처리 중인 서버만 반응하고(무턴이면 조용히 무시),
+  // 나머지는 no-op이라 안전(다중 연결 동명 채널이라도 실수로 남의 턴을 건드리지 않는다).
+  const stopCurrent = () => {
+    if (!currentName || stopping.has(currentName)) return; // 중복 클릭 방지(중단 안내 도착 전까지 잠금)
+    setStopping((p) => new Set(p).add(currentName));
+    fanoutToName(currentName, (channelId) => ({ t: 'stopGeneration', channelId }));
+  };
+
+  // Esc(생성 중지): 입력창 포커스든 아니든 window 레벨에서 한 번만 처리(팔레트/QuestionCard의 자체
+  // Escape 처리와 겹치지 않게 awaiting일 때만 반응). 팔레트가 열려 있으면 #input의 onKeyDown이 먼저
+  // 팔레트를 닫고 e.stopPropagation()으로 이 리스너까지 안 번지게 막는다(아래 onKeyDown 참고).
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (!currentName || !awaiting.has(currentName)) return;
+      stopCurrent();
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentName, awaiting, stopping]);
+
   // 답을 기대하며 "생각 중" 표시(멘션-전용 채널에서 비멘션이면 안 띄움 — chat.html expectReply 이전).
   const expectReply = (name: string, text: string, connId: string) => {
     const c = channelsByConn[connId]?.find((x) => x.name === name);
@@ -439,10 +475,13 @@ export default function App() {
       awaitTimers.current.delete(name);
       setAwaiting((p) => { const n = new Set(p); n.delete(name); return n; });
       setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
+      setStopping((p) => { if (!p.has(name)) return p; const n = new Set(p); n.delete(name); return n; });
     }, 180000));
     setAwaiting((p) => new Set(p).add(name));
     // Task 2(brain-activity) — 새 대기 시작 시 이전 라벨 잔재를 지운다(다음 activity가 올 때까지 기본 문구).
     setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
+    // Task 4(여러 줄 입력+생성 중지) — 새 턴이 시작됐으니 이전 턴의 중지 버튼 잠금 잔재도 지운다.
+    setStopping((p) => { if (!p.has(name)) return p; const n = new Set(p); n.delete(name); return n; });
   };
 
   // 전송 라우팅: threadId 있으면 그 앵커를 연 Engram으로, 없으면 @이름 또는 기본 Engram으로.
@@ -626,20 +665,20 @@ export default function App() {
     setPalFilter(null);
     if (insert === MANAGE_ENGRAMS_INSERT) { setShowManage(true); return; }
     if (insert === CLEAR_INSERT || insert === COMPACT_INSERT) {
-      const i = document.getElementById('input') as HTMLInputElement;
-      i.value = ''; i.focus(); setInputText('');
+      const i = document.getElementById('input') as HTMLTextAreaElement;
+      i.value = ''; i.focus(); setInputText(''); autosizeTextarea(i);
       if (currentName) { if (insert === CLEAR_INSERT) runClear(currentName); else runCompact(currentName); }
       return;
     }
-    const i = document.getElementById('input') as HTMLInputElement;
-    i.value = insert; i.focus(); setInputText(insert);
+    const i = document.getElementById('input') as HTMLTextAreaElement;
+    i.value = insert; i.focus(); setInputText(insert); autosizeTextarea(i);
   };
 
   // '@' 자동완성에서 클릭·Enter로 이름을 고르면 커서 앞 '@토큰'을 '@이름 '으로 치환한다.
   const pickMention = (name: string) => {
-    const i = document.getElementById('input') as HTMLInputElement;
+    const i = document.getElementById('input') as HTMLTextAreaElement;
     const v = i.value.replace(/(^|\s)@(\S*)$/, (_all, pre: string) => `${pre}@${name} `);
-    i.value = v; i.focus(); setInputText(v);
+    i.value = v; i.focus(); setInputText(v); autosizeTextarea(i);
   };
   const mentionNames = connState.connections.map((c) => c.name);
 
@@ -876,7 +915,11 @@ export default function App() {
                   onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
                 <button type="button" className="attachBtn" title={T.attachTitle}
                   onClick={() => fileInputRef.current?.click()}>📎</button>
-                <input id="input" type="text" placeholder={T.placeholder}
+                {/* Task 4(여러 줄 입력+생성 중지, 목업 승인) — input→textarea. rows=1 시작, onChange마다
+                    autosizeTextarea로 scrollHeight까지 키우고(최대 ~6줄은 theme.css max-height가 clamp).
+                    Enter(시프트 없음·팔레트/멘션 닫힘)=전송, Shift+Enter=줄바꿈(네이티브 기본 동작에 기대지
+                    않고 직접 삽입 — jsdom 등 합성 keydown 환경에서도 동일하게 동작하도록). */}
+                <textarea id="input" rows={1} placeholder={T.placeholder}
                   onChange={(e) => {
                     const v = e.target.value;
                     setInputText(v);
@@ -884,6 +927,7 @@ export default function App() {
                     setPalFilter(open ? v.slice(1).toLowerCase() : null);
                     setPalIdx(0);
                     setMentionIdx(0);
+                    autosizeTextarea(e.target);
                   }}
                   onPaste={(e) => {
                     const files = e.clipboardData?.files; // Ctrl+V 스크린샷 등은 파일로 온다
@@ -895,22 +939,40 @@ export default function App() {
                       if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); setPalIdx((p) => (p + 1) % items.length); return; }
                       if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setPalIdx((p) => (p - 1 + items.length) % items.length); return; }
                       if (e.key === 'Enter' && items.length) { e.preventDefault(); pickCmd(items[Math.min(palIdx, items.length - 1)].insert); return; }
-                      if (e.key === 'Escape') { setPalFilter(null); return; }
+                      // 팔레트가 열려 있으면 Esc는 팔레트부터 닫는다 — window 레벨 생성-중지 리스너까지
+                      // 이벤트가 안 번지게 stopPropagation(중지는 이 Esc 입력에서 트리거되지 않는다).
+                      if (e.key === 'Escape') { e.stopPropagation(); setPalFilter(null); return; }
                     } else { // 팔레트 닫힘: '@' 자동완성 열려 있으면 방향키/Enter는 그쪽 조작
                       const items = mentionCandidates(inputText, mentionNames);
                       if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); setMentionIdx((p) => (p + 1) % items.length); return; }
                       if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setMentionIdx((p) => (p - 1 + items.length) % items.length); return; }
                       if (e.key === 'Enter' && items.length) { e.preventDefault(); pickMention(items[Math.min(mentionIdx, items.length - 1)]); return; }
                     }
+                    if (e.key === 'Enter' && e.shiftKey) {
+                      // 줄바꿈 삽입 — 커서 위치에 직접 삽입해 네이티브 기본 동작(브라우저마다·테스트 환경마다
+                      // 다를 수 있음)에 기대지 않는다.
+                      e.preventDefault();
+                      const el = e.target as HTMLTextAreaElement;
+                      const start = el.selectionStart ?? el.value.length;
+                      const end = el.selectionEnd ?? el.value.length;
+                      const next = el.value.slice(0, start) + '\n' + el.value.slice(end);
+                      el.value = next;
+                      el.selectionStart = el.selectionEnd = start + 1;
+                      setInputText(next);
+                      autosizeTextarea(el);
+                      return;
+                    }
                     if (e.key === 'Enter') {
+                      e.preventDefault();
                       // T4 리뷰 I4 — 업로드 완료 전(id 미확정)이거나 실패 칩이 남아있으면 전송 보류
                       // (실패 칩을 조용히 빼고 보내면 사용자가 "첨부됐다"고 착각한다 — 안내(attachHasError)로
                       // 제거/재시도를 유도한다).
                       if (attachmentsUploading || hasErrorAttachment) return;
-                      const i = e.target as HTMLInputElement;
+                      const i = e.target as HTMLTextAreaElement;
                       if (!i.value.trim() && pendingAttachments.length === 0) return; // 텍스트도 첨부도 없음
                       const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
                       const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                      autosizeTextarea(i);
                       // Minor 픽스: 프레임이 실제로 나갔을 때만 첨부 칩을 지운다 — 실패(소켓 끊김 등)면
                       // 칩을 남겨 사용자가 재전송/제거를 선택할 수 있게 한다(에러 안내는 sendText가 이미 남김).
                       if (sent) clearComposerAttachments();
@@ -923,14 +985,24 @@ export default function App() {
                   onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
                   onManage={() => setShowManage(true)}
                 />
-                <button
-                  disabled={attachmentsUploading || hasErrorAttachment || (!inputText.trim() && pendingAttachments.length === 0)}
-                  onClick={() => {
-                    const i = document.getElementById('input') as HTMLInputElement;
-                    const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
-                    const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
-                    if (sent) clearComposerAttachments();
-                  }}>{T.send}</button>
+                {currentName && awaiting.has(currentName) ? (
+                  // Task 4(여러 줄 입력+생성 중지) — 대기 중엔 보내기 대신 ■ 중지(danger 아웃라인). 클릭
+                  // 즉시 잠가(stopping) 중복 stopGeneration 프레임을 막고, 중단 안내(또는 정상 답) 도착 시
+                  // awaiting이 풀리며 자동으로 보내기 버튼으로 되돌아간다(별도 원복 로직 불필요).
+                  <button type="button" className="stopBtn" disabled={stopping.has(currentName)} onClick={stopCurrent}>
+                    ■ {T.stopGen}
+                  </button>
+                ) : (
+                  <button
+                    disabled={attachmentsUploading || hasErrorAttachment || (!inputText.trim() && pendingAttachments.length === 0)}
+                    onClick={() => {
+                      const i = document.getElementById('input') as HTMLTextAreaElement;
+                      const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
+                      const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                      autosizeTextarea(i);
+                      if (sent) clearComposerAttachments();
+                    }}>{T.send}</button>
+                )}
               </div>
                 </>
                 );

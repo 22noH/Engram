@@ -99,7 +99,9 @@ export type ClientFrame =
   | { t: 'adminSetPermissions'; id: string; permissions: string[] }
   | { t: 'setChannelVisibility'; id: string; visibility: 'public' | 'private' }
   | { t: 'setChannelMembers'; id: string; memberIds: string[] }
-  | { t: 'channelRoster' };
+  | { t: 'channelRoster' }
+  // Task 4(여러 줄 입력+생성 중지): 이 채널의 진행 중인 두뇌 턴을 중단. 무턴이면 서버가 조용히 무시.
+  | { t: 'stopGeneration'; channelId: string };
 
 // 서버 → 클라
 export type ServerFrame =

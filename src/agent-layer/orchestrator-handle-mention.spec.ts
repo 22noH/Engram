@@ -1,5 +1,6 @@
 import { Orchestrator } from './orchestrator';
 import { questionFallbackText } from './ask-user-block';
+import { t } from './i18n';
 
 const logger = { warn() {}, error() {}, log() {} } as any;
 
@@ -264,5 +265,78 @@ describe('두뇌 활동 표시(Task 1) — activity 관통·toolsUsed 동봉', (
       calls.push({ toolsUsed });
     });
     expect(calls[0].toolsUsed).toEqual([]);
+  });
+});
+
+// Task 4(여러 줄 입력+생성 중지): handleMention이 threadKey별 AbortController를 만들어(1) reader.handle까지
+// signal을 관통시키고(2) cancel/cancelByChannel로 중단시킬 수 있으며(3) 이미 중단된 채 route()가 돌아오면
+// 그 텍스트 대신 짧은 중단 안내를 post한다(4) 종료 후엔 레지스트리에서 빠져 cancel이 false를 돌려준다.
+describe('여러 줄 입력+생성 중지(Task 4) — AbortController 레지스트리·signal 관통·중단 안내', () => {
+  function orcWithReader(reader: any) {
+    const brain = { complete: async () => ({ text: '{"kind":"chat","team":[]}', costUsd: 0, isError: false }) } as any;
+    const conversations = { append: async () => {} } as any;
+    return new Orchestrator(
+      reader, conversations, logger, null as any,
+      null as any, null as any, null as any, null as any,
+      null as any, null as any, null as any, null as any, null as any,
+      brain, null as any, null as any, null as any,
+    );
+  }
+
+  it('handleMention이 만든 signal이 reader.handle의 7번째 인자로 전달된다', async () => {
+    let captured: unknown = 'unset';
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, _activity: any, _onToolsUsed: any, signal: any) => {
+        captured = signal;
+        return '답';
+      },
+    };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {});
+    expect(captured).toBeInstanceOf(AbortSignal);
+  });
+
+  it('cancel(threadKey)는 진행 중엔 true(abort 호출), 무턴이면 false', async () => {
+    let enteredResolve: (() => void) | undefined;
+    const entered = new Promise<void>((res) => { enteredResolve = res; });
+    let released: (() => void) | undefined;
+    const gate = new Promise<void>((res) => { released = res; });
+    let seenSignal: AbortSignal | undefined;
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, _activity: any, _onToolsUsed: any, signal: any) => {
+        seenSignal = signal;
+        enteredResolve?.();
+        await gate; // handleMention이 아직 진행 중인 동안 cancel을 걸 수 있게 붙잡아둔다
+        return '답';
+      },
+    };
+    const o = orcWithReader(reader);
+    // 무턴(아직 아무 handleMention도 안 돎) — false.
+    expect(o.cancel('c1')).toBe(false);
+    expect(o.cancelByChannel('c1')).toBe(false);
+    const p = o.handleMention({ text: 'q', userId: 'c1' }, async () => {}, 'c1');
+    await entered; // reader.handle 진입(=classify 등 앞단 마이크로태스크 다 지난 시점)까지 확실히 대기
+    expect(o.cancel('c1')).toBe(true);
+    expect(seenSignal?.aborted).toBe(true);
+    released?.();
+    await p;
+    // 턴이 끝났으니 레지스트리에서 빠져 다시 false.
+    expect(o.cancel('c1')).toBe(false);
+  });
+
+  it('route()가 돌아온 시점에 이미 aborted면 그 텍스트 대신 중단 안내를 post한다', async () => {
+    const o = orcWithReader({} as any); // route 자체를 오버라이드하므로 reader는 안 쓰임
+    (o as any).route = async () => { o.cancel('c1'); return '두뇌가 낸 부분/에러 텍스트(버려져야 함)'; };
+    const posts: string[] = [];
+    await o.handleMention({ text: 'q', userId: 'c1' }, async (text) => { posts.push(text); }, 'c1');
+    expect(posts).toEqual([t('interrupted')]);
+  });
+
+  it('중단되지 않으면 기존과 동일하게 route()의 텍스트가 그대로 post된다(회귀 0)', async () => {
+    const o = orcWithReader({} as any);
+    (o as any).route = async () => '정상 답';
+    const posts: string[] = [];
+    await o.handleMention({ text: 'q', userId: 'c1' }, async (text) => { posts.push(text); }, 'c1');
+    expect(posts).toEqual(['정상 답']);
   });
 });

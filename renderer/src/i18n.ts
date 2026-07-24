@@ -6,6 +6,8 @@ const defaultLabel = ko ? '기본' : 'Default';
 export const T = {
   placeholder: ko ? '메시지 입력…' : 'Message…',
   send: ko ? '보내기' : 'Send',
+  // Task 4(여러 줄 입력+생성 중지) — 대기 중 보내기 버튼이 바뀌는 중지 버튼(danger 아웃라인, ■ 글리프는 CSS로).
+  stopGen: ko ? '중지' : 'Stop',
   newChannel: ko ? '+ 새 채널' : '+ New channel',
   newChannelPrompt: ko ? '채널 이름:' : 'Channel name:',
   replies: (n: number) => (ko ? `답글 ${n}개` : `${n} replies`),

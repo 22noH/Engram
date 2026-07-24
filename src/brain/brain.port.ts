@@ -35,6 +35,10 @@ export interface CompleteOpts {
   // 두뇌 활동 표시(Task 1): 있으면 도구 실행 직전마다 호출(도구 이름·1부터 시작하는 실행 순번).
   // askUser/delegate와 같은 결(closure-injection) — never-throw 격리는 호출부(tool-loop·claude-cli) 책임.
   onTool?: (name: string, seq: number) => void;
+  // Task 4(여러 줄 입력+생성 중지): 있으면 이 호출을 외부에서 중단할 수 있다. anthropic-api·openai-api는
+  // 내부 타임아웃 AbortController에 이 signal을 연동(abort 전파, addEventListener+cleanup). claude-cli는
+  // 이 signal의 abort로 spawn된 자식을 kill. 미주입(기존 압도적 다수 호출부)이면 회귀 0.
+  signal?: AbortSignal;
 }
 
 export interface BrainProvider {

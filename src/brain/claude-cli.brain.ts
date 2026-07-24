@@ -4,6 +4,7 @@ import { BrainProvider, BrainResult, CompleteOpts } from './brain.port';
 import { BrainProfile } from './brain.config';
 import { Semaphore } from './semaphore';
 import { readClaudeMcpServers } from './claude-mcp-import';
+import { killTree } from './shell-tool';
 
 // 고정 기본 4개(엔그램 자체 MCP·웹 도구) — 판독 실패 시 폴백값이자 항상 포함되는 하한선.
 const BASE_ALLOWED_TOOLS = ['WebSearch', 'WebFetch', 'mcp__engram', 'mcp__plugin_engram_engram'];
@@ -104,7 +105,11 @@ export class ClaudeCliBrain implements BrainProvider {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        child.kill();
+        opts?.signal?.removeEventListener('abort', onAbort);
+        // Task 4(여러 줄 입력+생성 중지): shell-tool의 killTree 재사용 — Win은 taskkill /T /F로 자식
+        // 트리째 종료(child.kill() 단독은 cross-spawn이 .cmd 실행을 위해 끼워 넣는 cmd.exe 래퍼 아래
+        // 손자 프로세스를 못 잡을 수 있음). pid 미확보(spawn 실패 등)면 기존 child.kill()로 폴백.
+        if (child.pid) killTree(child.pid); else child.kill();
         resolve(r);
       };
 
@@ -112,6 +117,13 @@ export class ClaudeCliBrain implements BrainProvider {
         () => finish({ text, costUsd, isError: true, raw: 'timeout' }),
         opts?.timeoutMs ?? this.profile.timeoutMs,
       );
+      // Task 4: 외부 signal(stopGeneration) → 즉시 종료(부분 텍스트는 버리고 aborted 마커로 판정하도록
+      // orchestrator가 signal.aborted 자체로 분기하므로 raw 값은 참고용).
+      const onAbort = (): void => finish({ text, costUsd, isError: true, raw: 'aborted' });
+      if (opts?.signal) {
+        if (opts.signal.aborted) onAbort();
+        else opts.signal.addEventListener('abort', onAbort);
+      }
 
       child.stdout?.on('data', (d: Buffer) => {
         buf += d.toString();

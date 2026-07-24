@@ -74,6 +74,52 @@ describe('ClaudeCliBrain', () => {
     jest.useRealTimers();
   });
 
+  it('opts.signal abort 시 isError(raw=aborted)를 반환하고 자식을 kill한다(pid 미확보=폴백 kill)', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const ctrl = new AbortController();
+    const p = brain.complete('q', undefined, { signal: ctrl.signal });
+    ctrl.abort();
+    const r = await p;
+    expect(r.isError).toBe(true);
+    expect(r.raw).toBe('aborted');
+    expect(child.kill).toHaveBeenCalled();
+  });
+
+  it('진입 시 이미 opts.signal이 aborted면 즉시 aborted로 끝난다(멈춰있지 않음)', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const r = await brain.complete('q', undefined, { signal: ctrl.signal });
+    expect(r.isError).toBe(true);
+    expect(r.raw).toBe('aborted');
+  });
+
+  it('opts.signal abort 시 pid가 있으면(Win) killTree가 taskkill /T /F로 트리종료한다', async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const child = fakeChild();
+      child.pid = 4321;
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const ctrl = new AbortController();
+      const p = brain.complete('q', undefined, { signal: ctrl.signal });
+      ctrl.abort();
+      const r = await p;
+      expect(r.isError).toBe(true);
+      expect(r.raw).toBe('aborted');
+      const killCall = (spawn as unknown as jest.Mock).mock.calls.find((c) => c[0] === 'taskkill');
+      expect(killCall).toBeDefined();
+      expect(killCall![1]).toEqual(['/pid', '4321', '/T', '/F']);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: origPlatform });
+    }
+  });
+
   it('profile.env가 spawn 환경에 병합된다', async () => {
     const child = fakeChild();
     (spawn as unknown as jest.Mock).mockReturnValue(child);

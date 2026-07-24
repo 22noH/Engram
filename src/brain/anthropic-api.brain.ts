@@ -44,6 +44,14 @@ export class AnthropicApiBrain implements BrainProvider {
       if (!this.profile.apiKey) return fail('anthropic-api: apiKey missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
+      // Task 4(여러 줄 입력+생성 중지): 외부 signal(stopGeneration)이 오면 내부 타임아웃 ctrl에 그대로
+      // 전파(추가 배관 없이 기존 abort 처리 경로를 그대로 탄다). 정상 종료 시 리스너를 반드시 떼어낸다
+      // (opts.signal은 orchestrator가 threadKey 단위로 재사용하지 않지만, 방어적으로 누수 차단).
+      const onExternalAbort = (): void => ctrl.abort();
+      if (opts?.signal) {
+        if (opts.signal.aborted) ctrl.abort();
+        else opts.signal.addEventListener('abort', onExternalAbort);
+      }
       // Task 3(chat-attachments): opts.images 있으면 초기 user 턴을 텍스트+이미지 블록 배열로(vision).
       // 없으면(기존 압도적 다수 경로) content: prompt 그대로 — 요청 바디 byte-identical(회귀 0).
       const history: AnthropicMsg[] = [{
@@ -102,9 +110,12 @@ export class AnthropicApiBrain implements BrainProvider {
           ...(r.hitLimit ? { raw: 'tool-loop-limit' } : {}),
         };
       } catch (e) {
-        return fail(ctrl.signal.aborted ? 'timeout' : String(e));
+        // 외부 signal이 abort 원인이면 'aborted'(사용자 중지) — 내부 타임아웃 자체 만료면 'timeout'.
+        // 순서 중요: 외부 signal이 곧 내부 ctrl도 abort시키므로 ctrl.signal.aborted만 보면 구분이 안 된다.
+        return fail(opts?.signal?.aborted ? 'aborted' : ctrl.signal.aborted ? 'timeout' : String(e));
       } finally {
         clearTimeout(timer);
+        opts?.signal?.removeEventListener('abort', onExternalAbort);
         await Promise.all(mcpSessions.map((s) => s.close()));
       }
     });

@@ -217,11 +217,17 @@ async function bootstrap(): Promise<void> {
       });
       chatStore.setAutoCompactEnabled(chatCfg.autoCompact !== false); // 부팅 초기 상태(기본 true)
     }
+    // Task 4(여러 줄 입력+생성 중지): stopGeneration ws 훅. compactHandler와 달리 isServer 여부와 무관하게
+    // 항상 배선 — brain 모드(개인용, 계정·위키 없음)도 채팅 자체는 되므로 생성 중지는 거기서도 동작해야
+    // 한다. self 채팅의 threadKey는 항상 channelId(threadId 미사용, messenger-bridge.ts 참고)라
+    // orchestrator.cancelByChannel이 그대로 맞는 조회 키다.
+    const stopHandler = (channelId: string): boolean => orchestrator.cancelByChannel(channelId);
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,
       brainNames: () => listBrainNames(paths.getConfigDir()),
       defaultBrain: () => defaultBrainName(paths.getConfigDir()),
       compactHandler,
+      stopHandler,
     },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
       authDeps, mcpDeps, adminDeps, attachmentsDeps);

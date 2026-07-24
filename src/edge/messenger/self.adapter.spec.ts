@@ -2726,3 +2726,122 @@ describe('compact(clear-compact Task 3)', () => {
     expect(called).toBe(false); // 게이트가 막아 핸들러가 아예 호출되지 않음
   });
 });
+
+describe('stopGeneration(여러 줄 입력+생성 중지 Task 4)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger | undefined;
+  let client: WebSocket | undefined;
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-stopgen-'));
+    store = new ChatStore(dir);
+    store.listChannels(); // general 생성
+  });
+  afterEach(async () => {
+    client?.terminate();
+    if (sm) await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('stopHandler 주입 시: 접근 가능한 채널이면 channelId로 호출된다(응답 프레임 없음)', async () => {
+    const calls: string[] = [];
+    const stopHandler = (channelId: string): boolean => { calls.push(channelId); return true; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, stopHandler });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: 'general' }));
+    // stopGeneration 자체는 응답 프레임을 안 보낸다 — 뒤이은 channels 요청의 응답이 먼저(그리고 유일하게) 온다.
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(calls).toEqual(['general']);
+  });
+
+  it('stopHandler 미주입: 무크래시·무응답(안전한 no-op)', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: 'general' }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+  });
+
+  it('stopHandler가 false(무턴) 반환해도 무크래시(호출은 됨)', async () => {
+    const calls: string[] = [];
+    const stopHandler = (channelId: string): boolean => { calls.push(channelId); return false; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, stopHandler });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: 'general' }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(calls).toEqual(['general']);
+  });
+
+  it('알 수 없는 channelId는 조용히 무시(핸들러 미호출)', async () => {
+    let called = false;
+    const stopHandler = (): boolean => { called = true; return true; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog, stopHandler });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: 'nope' }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(called).toBe(false);
+  });
+
+  it('비공개 채널의 비멤버 소켓은 stopGeneration 무시(핸들러 미호출 — canAccessChannel 게이트 실증)', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const intruder = deps.accounts.createPassword('intruder', 'pw', 'Intruder', { status: 'active' });
+    const gated = new ChatStore(path.join(dir, 'chat2'));
+    const ch = gated.createChannel('secret', 'chat', creator.id, 'private')!;
+    let called = false;
+    const stopHandler = (): boolean => { called = true; return true; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, gated, { logger: noLog, stopHandler }, undefined, deps);
+    await sm.start();
+
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+    client.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(intruder.id).token }));
+    await nextFrame(client); // authOk
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: ch.id }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(called).toBe(false);
+  });
+
+  it('비공개 채널의 멤버(생성자) 소켓은 stopGeneration이 정상 통과한다', async () => {
+    const deps = makeAuthDeps(dir);
+    const creator = deps.accounts.createPassword('creator', 'pw', 'Creator', { status: 'active' });
+    const gated = new ChatStore(path.join(dir, 'chat3'));
+    const ch = gated.createChannel('secret2', 'chat', creator.id, 'private')!;
+    const calls: string[] = [];
+    const stopHandler = (channelId: string): boolean => { calls.push(channelId); return true; };
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, gated, { logger: noLog, stopHandler }, undefined, deps);
+    await sm.start();
+
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+    client.send(JSON.stringify({ t: 'auth', token: deps.sessions.issue(creator.id).token }));
+    await nextFrame(client); // authOk
+    client.send(JSON.stringify({ t: 'stopGeneration', channelId: ch.id }));
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(calls).toEqual([ch.id]);
+  });
+});

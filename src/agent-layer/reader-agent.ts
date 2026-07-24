@@ -96,6 +96,10 @@ export class ReaderAgent {
     // 실사용 도구 이름들을(응답 post에 toolsUsed로 동봉하도록) 한 번 통지한다.
     activity?: (label: string) => void,
     onToolsUsed?: (names: string[]) => void,
+    // Task 4(여러 줄 입력+생성 중지, additive — 맨 뒤에 붙여 기존 위치 인자 호출 회귀 0): 있으면
+    // CompleteOpts.signal로 그대로 실어보낸다. 브레인 하네스가 abort를 실제로 처리(anthropic/openai
+    // ctrl 연동, claude-cli child kill) — 여기선 그냥 관통.
+    signal?: AbortSignal,
   ): Promise<string> {
     const emit = (s: string): void => onChunk?.(s);
     // 요청 한정 지역 변수(스펙 §3.2) — this.brain(싱글턴)에 대입하지 않는다.
@@ -141,8 +145,14 @@ export class ReaderAgent {
             } catch { /* 격리 — UI 콜백 실패가 답변 흐름을 끊으면 안 됨 */ }
           }
         : undefined;
-      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length || onTool
-        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}), ...(images.length ? { images } : {}), ...(onTool ? { onTool } : {}) }
+      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length || onTool || signal
+        ? {
+            ...(handle ? { delegate: handle } : {}),
+            ...(askUser ? { askUser } : {}),
+            ...(images.length ? { images } : {}),
+            ...(onTool ? { onTool } : {}),
+            ...(signal ? { signal } : {}),
+          }
         : undefined;
       const result = await brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle, attachmentBlock),

@@ -51,6 +51,12 @@ export class OpenAiApiBrain implements BrainProvider {
       if (!this.profile.model) return fail('openai-api: model missing in brains.json profile');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), opts?.timeoutMs ?? this.profile.timeoutMs);
+      // Task 4(여러 줄 입력+생성 중지): anthropic-api와 동일 결 — 외부 signal을 내부 타임아웃 ctrl에 전파.
+      const onExternalAbort = (): void => ctrl.abort();
+      if (opts?.signal) {
+        if (opts.signal.aborted) ctrl.abort();
+        else opts.signal.addEventListener('abort', onExternalAbort);
+      }
       // Task 3(chat-attachments): opts.images 있으면 초기 user 턴을 텍스트+image_url(data URL) 배열로
       // (vision — OpenAI 호환 서버가 지원 안 하면 기존 에러 경로로 떨어질 뿐, 폴백 시도는 하지 않는다).
       // 없으면 content: prompt 그대로(회귀 0).
@@ -109,9 +115,10 @@ export class OpenAiApiBrain implements BrainProvider {
           ...(r.hitLimit ? { raw: 'tool-loop-limit' } : {}),
         };
       } catch (e) {
-        return fail(ctrl.signal.aborted ? 'timeout' : String(e));
+        return fail(opts?.signal?.aborted ? 'aborted' : ctrl.signal.aborted ? 'timeout' : String(e));
       } finally {
         clearTimeout(timer);
+        opts?.signal?.removeEventListener('abort', onExternalAbort);
         await Promise.all(mcpSessions.map((s) => s.close()));
       }
     });

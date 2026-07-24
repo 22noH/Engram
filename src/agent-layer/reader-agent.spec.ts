@@ -358,6 +358,33 @@ describe('ReaderAgent 두뇌 활동 표시(Task 1, onTool 관통)', () => {
   });
 });
 
+describe('ReaderAgent 여러 줄 입력+생성 중지(Task 4, signal 관통)', () => {
+  const rag = { search: async () => [] } as any;
+  const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;
+  const msg = { text: 'q', userId: 'default' } as any;
+
+  it('signal 미주입이면 opts.signal 자체가 안 실린다(회귀 0)', async () => {
+    let seenOpts: CompleteOpts | undefined;
+    const brain: BrainProvider = {
+      complete: async (_p, _c, opts) => { seenOpts = opts; return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle(msg);
+    expect(seenOpts).toBeUndefined();
+  });
+
+  it('signal을 주면 CompleteOpts.signal로 그대로 관통한다', async () => {
+    let seenOpts: CompleteOpts | undefined;
+    const brain: BrainProvider = {
+      complete: async (_p, _c, opts) => { seenOpts = opts; return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const reader = new ReaderAgent(rag, brain, logger);
+    const ctrl = new AbortController();
+    await reader.handle(msg, undefined, undefined, undefined, undefined, undefined, ctrl.signal);
+    expect(seenOpts?.signal).toBe(ctrl.signal);
+  });
+});
+
 describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
   const rag = { search: async () => [] } as any;
   const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;

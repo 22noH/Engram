@@ -53,6 +53,8 @@ const MESSAGES: Record<string, Entry> = {
   synthesisFailed: { en: () => 'Synthesis failed: model call error', ko: () => '종합 실패: 모델 호출 오류' },
   agendaHeader: { en: () => '# Agenda', ko: () => '# 안건' },
   conclusionHeader: { en: () => '# Conclusion', ko: () => '# 결론' },
+  // Task 4(여러 줄 입력+생성 중지): stopGeneration으로 중단된 턴의 게시 문구(목업 승인 문구 그대로).
+  interrupted: { en: () => '⏹ Stopped', ko: () => '⏹ 중단됨' },
 
   // ── with args ──
   chooseFromRange: { en: (n) => `Please pick a number from 1 to ${n}.`, ko: (n) => `1~${n} 중에서 골라주세요.` },

@@ -82,6 +82,9 @@ export class Orchestrator {
   private readonly inflight: Promise<void>[] = [];
   // 코딩 위임 대기(스레드별 2단: 후보 선택 → 승인). 6b-2.
   private readonly pending = new Map<string, PendingCode>();
+  // Task 4(여러 줄 입력+생성 중지): threadKey별 진행 중 턴의 AbortController. handleMention 진입 시
+  // 등록, 종료(finally) 시 제거 — cancel(threadKey)이 stopGeneration ws 프레임의 최종 도착지.
+  private readonly abortRegistry = new Map<string, AbortController>();
   private codeReposCache?: CodeReposConfig;
   private channelPolicyCache?: ChannelPolicy;
   // 예약(스케줄) 포트 — main.ts에서 setter 주입(메신저처럼 DI 밖). 6b-3.
@@ -134,6 +137,22 @@ export class Orchestrator {
       return;
     }
     await post(text, actions, undefined, toolsUsed);
+  }
+
+  // Task 4(여러 줄 입력+생성 중지): route()가 돌려준 시점에 이미 이 턴이 stopGeneration으로 중단됐으면
+  // (signal.aborted) route()의 반환 텍스트(브레인이 abort 시 돌려주는 부분 결과·에러 문구)는 버리고
+  // 짧은 중단 안내만 게시 — 이 post()는 일반 채널 게시 경로 그대로라 렌더러 awaiting을 정상 해제한다
+  // (별도 클라 신호 불필요). signal이 한 번도 abort 안 되는 압도적 다수 경로는 이 분기 자체를 안 타
+  // postReply 그대로(회귀 0).
+  private async postReplyOrInterrupted(
+    reply: string,
+    post: PostFn,
+    signal: AbortSignal,
+    actions?: Action[],
+    toolsUsed?: string[],
+  ): Promise<void> {
+    if (signal.aborted) { await post(t('interrupted')); return; }
+    await this.postReply(reply, post, actions, toolsUsed);
   }
 
   // ask_user 도구 경로(Task 4): 도구 호출 중간에 곧바로 카드를 게시하는 클로저 — postReply의 펜스텍스트
@@ -234,9 +253,11 @@ export class Orchestrator {
     askUser?: (q: AskUserPayload) => Promise<void>,
     activity?: (label: string) => void,
     onToolsUsed?: (names: string[]) => void,
+    // Task 4(여러 줄 입력+생성 중지, additive): reader.handle까지 그대로 관통 → CompleteOpts.signal.
+    signal?: AbortSignal,
   ): Promise<string> {
     let sources: string[] = [];
-    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; }, askUser, activity, onToolsUsed);
+    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; }, askUser, activity, onToolsUsed, signal);
     try {
       await this.conversations.append(msg.userId, {
         ts: new Date().toISOString(), question: msg.text, answer, sources,
@@ -257,6 +278,42 @@ export class Orchestrator {
     post: PostFn,
     threadKey: string = msg.userId,
     activity?: (label: string) => void,
+  ): Promise<void> {
+    // Task 4(여러 줄 입력+생성 중지): 이 턴 전용 AbortController를 등록(threadKey 키) — self.adapter의
+    // stopGeneration 프레임이 cancel(threadKey)/cancelByChannel(channelId)로 이걸 abort시킨다. 종료(성공·
+    // 실패·중간 return 전부)엔 반드시 finally로 제거 — 동시성 방어로 "그 사이 새 턴이 같은 threadKey로
+    // 다시 시작해 레지스트리를 갈아치우지 않았을 때만" 지운다(identity 비교, 늦은 finally가 새 턴 것을
+    // 실수로 지우지 않게).
+    const ctrl = new AbortController();
+    this.abortRegistry.set(threadKey, ctrl);
+    try {
+      await this.handleMentionCore(msg, post, threadKey, activity, ctrl.signal);
+    } finally {
+      if (this.abortRegistry.get(threadKey) === ctrl) this.abortRegistry.delete(threadKey);
+    }
+  }
+
+  // stopGeneration ws 프레임의 최종 도착지(self.adapter opts.stopHandler → 이 메서드). threadKey에 등록된
+  // AbortController가 있으면 abort하고 true(있었음), 없으면(무턴) false — 호출부가 조용히 무시하는 재료.
+  cancel(threadKey: string): boolean {
+    const ctrl = this.abortRegistry.get(threadKey);
+    if (!ctrl) return false;
+    ctrl.abort();
+    return true;
+  }
+
+  // self.adapter의 stopHandler 훅(channelId 기준). self 채팅은 threadId를 항상 비워(messenger-bridge.ts
+  // 참고) threadKey가 곧 channelId — cancel과 동일 레지스트리를 그대로 재사용.
+  cancelByChannel(channelId: string): boolean {
+    return this.cancel(channelId);
+  }
+
+  private async handleMentionCore(
+    msg: CoreMessage,
+    post: PostFn,
+    threadKey: string,
+    activity: ((label: string) => void) | undefined,
+    signal: AbortSignal,
   ): Promise<void> {
     const trimmed = msg.text.trim();
     // 이 요청 한정 두뇌(스펙 §3.2) — 아래 코딩/분류 경로 전부가 이 지역 변수를 공유한다.
@@ -367,15 +424,17 @@ export class Orchestrator {
     }
     if (trimmed.startsWith('ask ')) {
       let toolsUsed: string[] = [];
-      await this.postReply(
+      await this.postReplyOrInterrupted(
         await this.route(
           { text: trimmed.slice('ask '.length), userId: msg.userId },
           undefined,
           this.askUserFor(post),
           activity,
           (names) => { toolsUsed = names; },
+          signal,
         ),
         post,
+        signal,
         undefined,
         toolsUsed,
       );
@@ -424,9 +483,10 @@ export class Orchestrator {
       return;
     }
     let toolsUsed: string[] = [];
-    await this.postReply(
-      await this.route(msg, undefined, this.askUserFor(post), activity, (names) => { toolsUsed = names; }),
+    await this.postReplyOrInterrupted(
+      await this.route(msg, undefined, this.askUserFor(post), activity, (names) => { toolsUsed = names; }, signal),
       post,
+      signal,
       undefined,
       toolsUsed,
     );
