@@ -1,6 +1,6 @@
 {
   "name": "engram-wiki-mcp",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "productName": "Engram",
   "license": "AGPL-3.0-only",
   "description": "Engram — a self-hosted team knowledge wiki with semantic search, served as an MCP server. Propose-and-approve knowledge flow (human gate), shared data with the Engram desktop app.",
