@@ -24,6 +24,12 @@
   }
 }
 * { box-sizing: border-box; margin: 0; }
+/* 클로드식 스크롤바(2026-07-24 사용자 요청): 평소 투명, 스크롤 영역에 호버할 때만 얇은 썸 표시. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 99px; }
+:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--dim) 30%, transparent); }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--dim) 55%, transparent); }
 body { display:flex; flex-direction:column; height:100vh; background:var(--bg); color:var(--text);
        font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif; font-size:14px; }
 /* Task 2(Quiet Library) — 재사용 눈썹(eyebrow) 마이크로타이포. 카테고리·섹션 라벨 전역 공용
@@ -51,7 +57,11 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .ch .menu { visibility:hidden; }
 .ch:hover .menu { visibility:visible; }
 #newch { padding:10px 16px; color:var(--dim); cursor:pointer; border-top:1px solid var(--line); }
-#newch input { width:100%; padding:6px 8px; font-size:13px; }
+/* 16c 잔재 픽스(2026-07-24): 폭 100% 규칙이 비공개 체크박스까지 늘려 배치가 깨졌었다 — 텍스트 입력만. */
+#newch input[type="text"] { width:100%; padding:6px 8px; font-size:13px; }
+#newch .privToggle { display:flex; align-items:center; gap:7px; margin-top:8px; font-size:12.5px;
+                     color:var(--dim); cursor:pointer; user-select:none; }
+#newch .privToggle input[type="checkbox"] { width:14px; height:14px; margin:0; accent-color:var(--accent); cursor:pointer; }
 #main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
 /* R2-1(Quiet Library 라운드2) — Claude 스타일 중앙 고정폭 채팅 칼럼(760px). #msgs+#inputbar(+그 사이의
    #palette/#mention/#clearToast)를 감싸 폭을 통일. flex 컬럼 아이템의 cross-axis auto margin으로 중앙
