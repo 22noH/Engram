@@ -91,6 +91,22 @@ describe('AnthropicApiBrain', () => {
     expect(r.costUsd).toBeCloseTo(((50 + 100) * 5 + (2 + 4) * 25) / 1_000_000);
   });
 
+  it('두뇌 활동 표시(Task 1): opts.onTool이 도구 실행 직전 이름·순번으로 발화된다', async () => {
+    let call = 0;
+    const fetchFn = jest.fn(async (url: string) => {
+      if (String(url).includes('/v1/messages')) {
+        call++;
+        return call === 1 ? sse(TOOL_TURN) : sse(TEXT_TURN);
+      }
+      return new Response('<html><body>Hello page</body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }) as unknown as typeof fetch;
+    const brain = new AnthropicApiBrain(PROFILE, fetchFn);
+    const calls: Array<{ name: string; seq: number }> = [];
+    const r = await brain.complete('fetch it', undefined, { onTool: (name, seq) => calls.push({ name, seq }) });
+    expect(r.isError).toBe(false);
+    expect(calls).toEqual([{ name: 'web_fetch', seq: 1 }]);
+  });
+
   it('HTTP 4xx는 isError(never-throw)', async () => {
     const fetchFn = (async () => new Response('bad key', { status: 401 })) as unknown as typeof fetch;
     const r = await new AnthropicApiBrain(PROFILE, fetchFn).complete('x');

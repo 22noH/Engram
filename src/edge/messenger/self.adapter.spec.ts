@@ -118,6 +118,32 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general').at(-1)?.question).toEqual(question);
   });
 
+  it('reply(toolsUsed)가 메시지에 도구 요약을 실어 broadcast+영속한다(두뇌 활동 표시 Task 1)', async () => {
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '답변', undefined, undefined, ['web_search', 'fetch_url']);
+    const frame = await nextFrame(client);
+    expect(frame.t).toBe('msg');
+    expect(frame.message.toolsUsed).toEqual(['web_search', 'fetch_url']);
+    expect(store.history('general').at(-1)?.toolsUsed).toEqual(['web_search', 'fetch_url']);
+  });
+
+  it('reply(toolsUsed=빈 배열/미전달)은 메시지에 toolsUsed 필드 자체가 없다(회귀 0)', async () => {
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '답변1', undefined, undefined, []);
+    const f1 = await nextFrame(client);
+    expect('toolsUsed' in f1.message).toBe(false);
+
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '답변2');
+    const f2 = await nextFrame(client);
+    expect('toolsUsed' in f2.message).toBe(false);
+  });
+
+  it('activity(channelId, label)이 실시간 activity 프레임으로 브로드캐스트되고 jsonl에는 저장되지 않는다(휘발, 두뇌 활동 표시 Task 1)', async () => {
+    sm.activity!('general', '웹 검색 중 · web_search');
+    const frame = await nextFrame(client);
+    expect(frame).toEqual({ t: 'activity', channelId: 'general', label: '웹 검색 중 · web_search' });
+    // 저장 안 함 — 대화 기록에 activity 프레임의 흔적이 전혀 없어야 한다.
+    expect(store.history('general')).toEqual([]);
+  });
+
   it('send에 answersId가 실리면 저장 메시지에 answersId가 붙고 onMention이 정상 트리거된다(Task 2)', async () => {
     const events: MentionEvent[] = [];
     sm.onMention(async (e) => { events.push(e); });

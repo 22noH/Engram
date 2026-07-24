@@ -30,8 +30,12 @@ export interface MessengerPort {
   // 관찰(6c-1): 멘션이 아닌 일반 메시지 수신 — 옵셔널(어댑터가 지원할 때만). 정책 필터는 bridge 몫.
   onMessage?(handler: (e: MentionEvent) => Promise<void>): void;
   // Task 2(ask-user): question은 additive 옵션 4번째 인자 — 3인자 구현체(다른 어댑터)는 구조적 호환 유지.
-  reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question']): Promise<void>;
+  // Task 1(brain-activity): toolsUsed는 additive 5번째 인자 — 4인자 이하 구현체도 구조적 호환 유지.
+  reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void>;
   postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
+  // Task 1(brain-activity): 옵셔널 — 실시간 활동 라벨(예: "웹 검색 중 · web_search")을 그 채널에만
+  // 브로드캐스트. 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0).
+  activity?(channelId: string, label: string): void;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

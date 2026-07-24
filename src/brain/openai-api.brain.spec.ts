@@ -84,6 +84,21 @@ describe('OpenAiApiBrain', () => {
     expect(second.messages[2].content).toContain('Page body');
   });
 
+  it('두뇌 활동 표시(Task 1): opts.onTool이 도구 실행 직전 이름·순번으로 발화된다', async () => {
+    let call = 0;
+    const fetchFn = jest.fn(async (url: string) => {
+      if (String(url).includes('/chat/completions')) {
+        call++;
+        return call === 1 ? sse(TOOL_CHUNKS) : sse(TEXT_CHUNKS);
+      }
+      return new Response('<p>Page body</p>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }) as unknown as typeof fetch;
+    const calls: Array<{ name: string; seq: number }> = [];
+    const r = await new OpenAiApiBrain(PROFILE, fetchFn).complete('go', undefined, { onTool: (name, seq) => calls.push({ name, seq }) });
+    expect(r.isError).toBe(false);
+    expect(calls).toEqual([{ name: 'web_fetch', seq: 1 }]);
+  });
+
   it('apiKey 있으면 Bearer 헤더', async () => {
     const fetchFn = jest.fn(async () => sse(TEXT_CHUNKS)) as unknown as typeof fetch;
     await new OpenAiApiBrain({ ...PROFILE, apiKey: 'sk-o' }, fetchFn).complete('x');

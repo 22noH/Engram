@@ -93,6 +93,7 @@ export class AnthropicApiBrain implements BrainProvider {
           }),
           executor,
           coding ? MAX_CODING_ITERATIONS : MAX_TOOL_ITERATIONS,
+          opts?.onTool,
         );
         return {
           text: r.text,

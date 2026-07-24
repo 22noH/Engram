@@ -193,3 +193,76 @@ it('askUserFor 클로저: brain이 주입된 askUser를 부르면 post가 (fallb
   });
   expect(calls[0]).toEqual({ text: questionFallbackText(question), actions: undefined, question });
 });
+
+// 두뇌 활동 표시(Task 1): handleMention 4번째 인자(activity)가 reader.handle까지 그대로(5번째 인자)
+// 통과하는지, 그리고 reader.handle이 onToolsUsed(6번째 인자)로 통지한 도구 이름들이 최종 post의
+// 4번째 인자(toolsUsed)로 동봉되는지 — postReply·route를 오버라이드하지 않고 실배선을 태운다.
+describe('두뇌 활동 표시(Task 1) — activity 관통·toolsUsed 동봉', () => {
+  function orcWithReader(reader: any) {
+    const brain = { complete: async () => ({ text: '{"kind":"chat","team":[]}', costUsd: 0, isError: false }) } as any;
+    const conversations = { append: async () => {} } as any;
+    return new Orchestrator(
+      reader, conversations, logger, null as any,
+      null as any, null as any, null as any, null as any,
+      null as any, null as any, null as any, null as any, null as any,
+      brain, null as any, null as any, null as any,
+    );
+  }
+
+  it('handleMention에 넘긴 activity가 reader.handle의 5번째 인자로 그대로 전달된다', async () => {
+    let captured: unknown;
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, activityArg: any) => {
+        captured = activityArg;
+        return '답';
+      },
+    };
+    const activity = (_label: string): void => {};
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {}, undefined, activity);
+    expect(captured).toBe(activity);
+  });
+
+  it('activity 미전달(3인자 호출)이면 reader.handle에도 undefined가 전달된다(회귀 0)', async () => {
+    let captured: unknown = 'unset';
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, activityArg: any) => {
+        captured = activityArg;
+        return '답';
+      },
+    };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {});
+    expect(captured).toBeUndefined();
+  });
+
+  it('reader.handle이 onToolsUsed로 통지한 도구 이름이 최종 post에 toolsUsed로 동봉된다', async () => {
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, _activity: any, onToolsUsed: any) => {
+        onToolsUsed?.(['web_search', 'fetch_url']);
+        return '답';
+      },
+    };
+    const o = orcWithReader(reader);
+    const calls: Array<{ text: string; toolsUsed?: string[] }> = [];
+    await o.handleMention({ text: 'q', userId: 'c1' }, async (text, _actions, _question, toolsUsed) => {
+      calls.push({ text, toolsUsed });
+    });
+    expect(calls).toEqual([{ text: '답', toolsUsed: ['web_search', 'fetch_url'] }]);
+  });
+
+  it('도구를 안 쓰면 post에 빈 배열이 실린다(빈 배열 폐기는 self.adapter/chat-store 몫)', async () => {
+    const reader = {
+      handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, _activity: any, onToolsUsed: any) => {
+        onToolsUsed?.([]);
+        return '답';
+      },
+    };
+    const o = orcWithReader(reader);
+    const calls: Array<{ toolsUsed?: string[] }> = [];
+    await o.handleMention({ text: 'q', userId: 'c1' }, async (_text, _actions, _question, toolsUsed) => {
+      calls.push({ toolsUsed });
+    });
+    expect(calls[0].toolsUsed).toEqual([]);
+  });
+});

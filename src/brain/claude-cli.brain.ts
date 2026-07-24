@@ -44,6 +44,18 @@ function extractDelta(ev: Record<string, unknown>): string {
   return '';
 }
 
+// 두뇌 활동 표시(Task 1): assistant 메시지 content 블록 중 tool_use(Anthropic Messages API와 동일
+// 블록 shape — Claude Code의 stream-json이 그대로 실어보낸다)의 이름만 등장 순서대로 뽑는다.
+// stream_event(부분 메시지) 쪽은 tool_use 블록이 완결된 형태로만 오지 않아(input_json_delta 등
+// 조각남) 다루지 않는다 — assistant 메시지 단위 이벤트만으로 충분(텍스트 델타와 달리 도구 이름은
+// 스트리밍 중간에 필요하지 않다).
+function extractToolUseNames(ev: Record<string, unknown>): string[] {
+  if (ev.type !== 'assistant') return [];
+  const content = (ev.message as { content?: Array<{ type?: string; name?: unknown }> })?.content;
+  if (!Array.isArray(content)) return [];
+  return content.filter((c) => c?.type === 'tool_use' && typeof c.name === 'string').map((c) => c.name as string);
+}
+
 // Claude CLI(claude -p) 어댑터(설계 §7.5). 구독 한도 내 토큰 $0.
 // 모든 호출이 complete() 한 메서드로 수렴 → Semaphore가 유일한 choke point(설계 §8).
 @Injectable()
@@ -86,6 +98,7 @@ export class ClaudeCliBrain implements BrainProvider {
       let costUsd = 0;
       let isError = false;
       let settled = false;
+      let toolSeq = 0; // 두뇌 활동 표시(Task 1): 이 spawn 전체에 걸친 1부터 시작하는 도구 실행 순번.
 
       const finish = (r: BrainResult): void => {
         if (settled) return;
@@ -117,6 +130,12 @@ export class ClaudeCliBrain implements BrainProvider {
           if (delta) {
             text += delta;
             onChunk?.(delta);
+          }
+          if (opts?.onTool) {
+            for (const name of extractToolUseNames(ev)) {
+              toolSeq++;
+              try { opts.onTool(name, toolSeq); } catch { /* 격리 — UI 콜백 실패가 파싱 루프를 끊으면 안 됨 */ }
+            }
           }
           if (ev.type === 'result') {
             costUsd = Number(ev.total_cost_usd ?? 0);

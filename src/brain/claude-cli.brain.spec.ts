@@ -185,4 +185,88 @@ describe('ClaudeCliBrain', () => {
     expect(r.isError).toBe(true);
     jest.useRealTimers();
   });
+
+  describe('onTool(두뇌 활동 표시 Task 1) — stream-json tool_use 이벤트', () => {
+    it('assistant 메시지의 tool_use 블록마다 이름·1부터 시작하는 순번으로 발화한다', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const calls: Array<{ name: string; seq: number }> = [];
+      const p = brain.complete('q', undefined, { onTool: (name, seq) => calls.push({ name, seq }) });
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'tu_1', name: 'WebSearch', input: {} }] },
+      }) + '\n');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답', total_cost_usd: 0 }) + '\n');
+      child.emit('close', 0);
+      await p;
+      expect(calls).toEqual([{ name: 'WebSearch', seq: 1 }]);
+    });
+
+    it('한 assistant 메시지에 tool_use 블록이 여러 개면 등장 순서대로 순번이 매겨진다(텍스트 블록은 무시)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const calls: Array<{ name: string; seq: number }> = [];
+      const p = brain.complete('q', undefined, { onTool: (name, seq) => calls.push({ name, seq }) });
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant',
+        message: { content: [
+          { type: 'text', text: '검색해볼게요' },
+          { type: 'tool_use', id: 'tu_1', name: 'web_search', input: {} },
+          { type: 'tool_use', id: 'tu_2', name: 'fetch_url', input: {} },
+        ] },
+      }) + '\n');
+      child.emit('close', 0);
+      await p;
+      expect(calls).toEqual([{ name: 'web_search', seq: 1 }, { name: 'fetch_url', seq: 2 }]);
+    });
+
+    it('여러 assistant 메시지(여러 턴)에 걸쳐 순번이 누적된다', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const calls: Array<{ name: string; seq: number }> = [];
+      const p = brain.complete('q', undefined, { onTool: (name, seq) => calls.push({ name, seq }) });
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_1', name: 'a', input: {} }] },
+      }) + '\n');
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_2', name: 'b', input: {} }] },
+      }) + '\n');
+      child.emit('close', 0);
+      await p;
+      expect(calls).toEqual([{ name: 'a', seq: 1 }, { name: 'b', seq: 2 }]);
+    });
+
+    it('opts.onTool 미주입이면 파싱은 기존과 동일(회귀 0, 크래시 없음)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_1', name: 'a', input: {} }] },
+      }) + '\n');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답', total_cost_usd: 0 }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.text).toBe('답');
+      expect(r.isError).toBe(false);
+    });
+
+    it('onTool이 던져도 파싱 루프는 계속된다(never-throw 격리)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q', undefined, { onTool: () => { throw new Error('ui boom'); } });
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_1', name: 'a', input: {} }] },
+      }) + '\n');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답', total_cost_usd: 0 }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.text).toBe('답');
+      expect(r.isError).toBe(false);
+    });
+  });
 });

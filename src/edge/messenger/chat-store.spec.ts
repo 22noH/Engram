@@ -80,6 +80,19 @@ describe('ChatStore', () => {
     expect(h2[1].answersId).toBe(card.id);
   });
 
+  it('toolsUsed가 저장/왕복 보존되고, 빈 배열/미첨부는 필드 자체가 없다(두뇌 활동 표시 Task 1)', () => {
+    store.listChannels();
+    const withTools = store.appendMessage('general', { authorId: 'engram', text: 'a', toolsUsed: ['web_search', 'fetch_url'] })!;
+    expect(withTools.toolsUsed).toEqual(['web_search', 'fetch_url']);
+    expect(store.history('general')[0].toolsUsed).toEqual(['web_search', 'fetch_url']);
+
+    const emptyTools = store.appendMessage('general', { authorId: 'engram', text: 'b', toolsUsed: [] })!;
+    expect('toolsUsed' in emptyTools).toBe(false);
+
+    const noTools = store.appendMessage('general', { authorId: 'engram', text: 'c' })!;
+    expect('toolsUsed' in noTools).toBe(false);
+  });
+
   it('없는 채널 append는 null, history는 빈배열', () => {
     expect(store.appendMessage('nope', { authorId: 'owner', text: 'x' })).toBeNull();
     expect(store.history('nope')).toEqual([]);

@@ -6,6 +6,9 @@ export class FakeMessenger implements MessengerPort {
   private msgHandler?: (e: MentionEvent) => Promise<void>;
   readonly replies: Array<{ target: ReplyTarget; text: string }> = [];
   readonly channelPosts: Array<{ channelId: string; threadId?: string; text: string }> = [];
+  // Task 1(brain-activity): 브리지가 port.activity 유무로 activity fn을 빌드하므로 여기 구현해둬야
+  // bindMessenger의 그 분기를 테스트로 확인할 수 있다(추가만 — 안 부르는 기존 테스트는 그대로 통과).
+  readonly activities: Array<{ channelId: string; label: string }> = [];
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
     this.handler = handler;
@@ -20,6 +23,9 @@ export class FakeMessenger implements MessengerPort {
   }
   async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
     this.channelPosts.push({ channelId, threadId, text });
+  }
+  activity(channelId: string, label: string): void {
+    this.activities.push({ channelId, label });
   }
   async start(): Promise<void> {}
   async stop(): Promise<void> {}

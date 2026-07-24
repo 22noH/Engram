@@ -9,8 +9,11 @@ export interface MentionHandler {
   handleMention(
     msg: CoreMessage,
     // question(ask-user Task 3): Orchestrator.PostFn과 짝(구조적 동일 — { questions: QuestionItem[] }).
-    post: (text: string, actions?: Action[], question?: Message['question']) => Promise<void>,
+    // toolsUsed(brain-activity Task 1): additive 4번째 인자 — 안 쓰는 호출부는 그대로(회귀 0).
+    post: (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]) => Promise<void>,
     threadKey?: string,
+    // activity(brain-activity Task 1): 대기 중 실시간 라벨 발화 — port.activity 미지원 어댑터면 undefined.
+    activity?: (label: string) => void,
   ): Promise<void>;
   // 관찰 끼어들기(6c-1) — 옵셔널(구식 스텁 호환).
   observe?(msg: CoreMessage, post: (text: string) => Promise<void>): Promise<void>;
@@ -25,9 +28,15 @@ export function bindMessenger(
   policy?: ChannelPolicy,
 ): void {
   port.onMention(async (e) => {
-    const post = (text: string, actions?: Action[], question?: Message['question']): Promise<void> =>
-      port.reply(e.target, text, actions, question);
+    const post = (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void> =>
+      port.reply(e.target, text, actions, question, toolsUsed);
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
+    // Task 1(brain-activity): port.activity 지원 어댑터(self.adapter)만 채널에 바인딩된 activity fn을
+    // 만든다 — 미지원 어댑터는 undefined(orchestrator/reader-agent가 그대로 no-op으로 흡수, 회귀 0).
+    // never-throw: UI 브로드캐스트 실패가 두뇌 하네스의 도구 루프를 끊으면 안 된다.
+    const activity = port.activity
+      ? (label: string): void => { try { port.activity!(e.channelId, label); } catch { /* 격리 */ } }
+      : undefined;
     try {
       // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answeredQuestion이 있으면(=answersId 답장 재트리거,
       // ask_user 도구 경로) 브레인 프롬프트가 될 text 앞에 원본 질문 문맥을 붙인다. 없으면 e.text 그대로
@@ -50,6 +59,7 @@ export function bindMessenger(
         },
         post,
         threadKey,
+        activity,
       );
     } catch (err) {
       logger.warn(`멘션 처리 실패: ${String(err)}`, 'Messenger');

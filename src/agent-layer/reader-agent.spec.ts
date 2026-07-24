@@ -275,6 +275,89 @@ describe('ReaderAgent 지휘자 배선(Phase 8d)', () => {
   });
 });
 
+describe('ReaderAgent 두뇌 활동 표시(Task 1, onTool 관통)', () => {
+  const rag = { search: async () => [] } as any;
+  const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;
+
+  // 실제 brain.complete가 도구 루프 중 opts.onTool을 부르는 것을 흉내(tool-loop.ts가 실제로 하는 일).
+  function brainThatCallsTools(calls: Array<{ name: string; seq: number }>): BrainProvider {
+    return {
+      complete: async (_p: string, _c?: (t: string) => void, opts?: CompleteOpts) => {
+        for (const c of calls) opts?.onTool?.(c.name, c.seq);
+        return { text: 'ok', costUsd: 0, isError: false } as BrainResult;
+      },
+    };
+  }
+  const msg = { text: 'q', userId: 'default' } as any;
+
+  it('activity·onToolsUsed 둘 다 없으면 opts.onTool 자체가 안 실린다(회귀 0)', async () => {
+    let seenOpts: CompleteOpts | undefined;
+    const brain: BrainProvider = {
+      complete: async (_p, _c, opts) => { seenOpts = opts; return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle(msg);
+    expect(seenOpts).toBeUndefined();
+  });
+
+  it('activity만 주면 도구 호출마다 라벨을 실시간 발화한다(ko)', async () => {
+    process.env.ENGRAM_LANG = 'ko';
+    try {
+      const brain = brainThatCallsTools([{ name: 'web_search', seq: 1 }]);
+      const reader = new ReaderAgent(rag, brain, logger);
+      const labels: string[] = [];
+      await reader.handle(msg, undefined, undefined, undefined, (label) => labels.push(label));
+      expect(labels).toEqual(['웹 검색 중 · web_search']);
+    } finally {
+      delete process.env.ENGRAM_LANG;
+    }
+  });
+
+  it('도구를 2개 이상 쓰면 라벨 끝에 순번이 붙는다(ko)', async () => {
+    process.env.ENGRAM_LANG = 'ko';
+    try {
+      const brain = brainThatCallsTools([{ name: 'web_search', seq: 1 }, { name: 'fetch_url', seq: 2 }]);
+      const reader = new ReaderAgent(rag, brain, logger);
+      const labels: string[] = [];
+      await reader.handle(msg, undefined, undefined, undefined, (label) => labels.push(label));
+      expect(labels).toEqual(['웹 검색 중 · web_search', '페이지 읽는 중 · fetch_url · 도구 2번째']);
+    } finally {
+      delete process.env.ENGRAM_LANG;
+    }
+  });
+
+  it('미지의 도구 이름은 이름 그대로 발화(중복 없이)', async () => {
+    const brain = brainThatCallsTools([{ name: 'mcp__engram__wiki_search', seq: 1 }]);
+    const reader = new ReaderAgent(rag, brain, logger);
+    const labels: string[] = [];
+    await reader.handle(msg, undefined, undefined, undefined, (label) => labels.push(label));
+    expect(labels).toEqual(['mcp__engram__wiki_search']);
+  });
+
+  it('onToolsUsed는 실사용 도구 이름들을 순서대로 한 번 통지한다(activity 없이도)', async () => {
+    const brain = brainThatCallsTools([{ name: 'web_search', seq: 1 }, { name: 'Bash', seq: 2 }]);
+    const reader = new ReaderAgent(rag, brain, logger);
+    let toolsUsed: string[] = [];
+    await reader.handle(msg, undefined, undefined, undefined, undefined, (names) => { toolsUsed = names; });
+    expect(toolsUsed).toEqual(['web_search', 'Bash']);
+  });
+
+  it('도구를 안 쓰면 onToolsUsed에 빈 배열이 통지된다', async () => {
+    const brain = brainThatCallsTools([]);
+    const reader = new ReaderAgent(rag, brain, logger);
+    let toolsUsed: string[] | undefined;
+    await reader.handle(msg, undefined, undefined, undefined, undefined, (names) => { toolsUsed = names; });
+    expect(toolsUsed).toEqual([]);
+  });
+
+  it('activity 콜백이 던져도 답변 흐름은 끊기지 않는다(never-throw 격리)', async () => {
+    const brain = brainThatCallsTools([{ name: 'web_search', seq: 1 }]);
+    const reader = new ReaderAgent(rag, brain, logger);
+    const out = await reader.handle(msg, undefined, undefined, undefined, () => { throw new Error('ui boom'); });
+    expect(out).toContain('ok');
+  });
+});
+
 describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {
   const rag = { search: async () => [] } as any;
   const logger = { error: () => {}, log: () => {}, warn: () => {} } as any;

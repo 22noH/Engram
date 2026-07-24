@@ -180,3 +180,57 @@ it('post(text, actions)가 port.reply에 actions를 넘긴다', async () => {
   await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
   expect(replied[0].actions).toEqual([{ label: 'x', send: '승인' }]);
 });
+
+// 두뇌 활동 표시(Task 1)
+it('post(text, actions, question, toolsUsed)가 port.reply의 5번째 인자로 그대로 넘어간다', async () => {
+  const replied: any[] = [];
+  const port = new FakeMessenger();
+  const origReply = port.reply.bind(port);
+  port.reply = (t: any, text: string, actions?: any, question?: any, toolsUsed?: any) => {
+    replied.push({ text, toolsUsed });
+    return origReply(t, text);
+  };
+  const orch = { handleMention: async (_m: any, post: any) => { await post('답', undefined, undefined, ['web_search', 'fetch_url']); } };
+  bindMessenger(port as any, orch as any, { warn() {} });
+  await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+  expect(replied[0]).toEqual({ text: '답', toolsUsed: ['web_search', 'fetch_url'] });
+});
+
+it('port.activity 지원 어댑터면 채널에 바인딩된 activity fn을 handleMention 4번째 인자로 넘긴다', async () => {
+  const port = new FakeMessenger();
+  const orch = {
+    handleMention: async (_m: any, _post: any, _threadKey: any, activity?: (label: string) => void) => {
+      activity?.('웹 검색 중 · web_search');
+    },
+  };
+  bindMessenger(port as any, orch as any, { warn() {} });
+  await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+  expect(port.activities).toEqual([{ channelId: 'c1', label: '웹 검색 중 · web_search' }]);
+});
+
+it('port.activity 미지원 어댑터면 handleMention에 activity=undefined가 넘어간다(회귀 0)', async () => {
+  class NoActivityMessenger extends FakeMessenger {}
+  const port = new NoActivityMessenger();
+  (port as any).activity = undefined; // 명시적으로 미지원 흉내
+  let captured: unknown = 'unset';
+  const orch = {
+    handleMention: async (_m: any, _post: any, _threadKey: any, activity?: (label: string) => void) => {
+      captured = activity;
+    },
+  };
+  bindMessenger(port as any, orch as any, { warn() {} });
+  await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+  expect(captured).toBeUndefined();
+});
+
+it('activity 콜백이 던져도 상주는 죽지 않는다(never-throw 격리)', async () => {
+  const port = new FakeMessenger();
+  (port as any).activity = () => { throw new Error('ui boom'); };
+  const orch = {
+    handleMention: async (_m: any, _post: any, _threadKey: any, activity?: (label: string) => void) => {
+      activity?.('아무 라벨'); // 던지지 않고 조용히 격리돼야 여기가 정상 진행된다
+    },
+  };
+  bindMessenger(port as any, orch as any, { warn() {} });
+  await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} }); // throw하면 테스트가 실패로 드러남
+});

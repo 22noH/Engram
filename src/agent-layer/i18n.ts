@@ -94,6 +94,8 @@ const MESSAGES: Record<string, Entry> = {
   humanToday: { en: (hour) => `today at ${hour}:00`, ko: (hour) => `오늘 ${hour}시` },
   humanTomorrow: { en: (hour) => `tomorrow at ${hour}:00`, ko: (hour) => `내일 ${hour}시` },
   humanMinutesLater: { en: (min, hhmm) => `in ${min} min (${hhmm})`, ko: (min, hhmm) => `${min}분 뒤(${hhmm})` },
+  // 두뇌 활동 표시(Task 1): 같은 응답 안에서 도구를 2개 이상 쓸 때 활동 라벨 끝에 붙이는 순번 표기.
+  toolOrdinal: { en: (n) => `tool #${n}`, ko: (n) => `도구 ${n}번째` },
 };
 
 export function t(key: string, ...args: any[]): string {

@@ -41,7 +41,8 @@ import { extractAskUser, questionFallbackText, AskUserPayload } from './ask-user
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 // question(ask-user Task 3): 범용 경로가 뽑아낸 질문 카드 페이로드 — 기존 (text, actions) 호출부는
 // 3번째 인자를 안 넘기니 무영향(TS 함수 타입은 뒤쪽 파라미터를 덜 받는 쪽이 항상 대입 가능).
-type PostFn = (text: string, actions?: Action[], question?: AskUserPayload) => Promise<void>;
+// toolsUsed(brain-activity Task 1): additive 4번째 — 같은 이유로 미전달 호출부는 무영향.
+type PostFn = (text: string, actions?: Action[], question?: AskUserPayload, toolsUsed?: string[]) => Promise<void>;
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 export const DECOMPOSE_DEFAULT = [
@@ -126,13 +127,13 @@ export class Orchestrator {
   // 없으면 폴백 텍스트)+question을 게시 — actions는 question과 함께 안 보낸다(질문 카드 자체가 응답 UI라
   // 별도 액션 버튼과 동시 노출하면 사용자가 어느 쪽에 답해야 할지 헷갈린다). 블록이 없으면 기존 그대로
   // (text, actions)만 게시(회귀 0).
-  private async postReply(reply: string, post: PostFn, actions?: Action[]): Promise<void> {
+  private async postReply(reply: string, post: PostFn, actions?: Action[], toolsUsed?: string[]): Promise<void> {
     const { text, question } = extractAskUser(reply);
     if (question) {
-      await post(text || questionFallbackText(question), undefined, question);
+      await post(text || questionFallbackText(question), undefined, question, toolsUsed);
       return;
     }
-    await post(text, actions);
+    await post(text, actions, undefined, toolsUsed);
   }
 
   // ask_user 도구 경로(Task 4): 도구 호출 중간에 곧바로 카드를 게시하는 클로저 — postReply의 펜스텍스트
@@ -226,9 +227,16 @@ export class Orchestrator {
   // askUser(Task 4): 있으면 reader.handle로 그대로 흘려 CompleteOpts.askUser에 실린다(delegate와 동일 결).
   // route()는 인터랙티브 호출(handleMention)과 예약 재주입(resumeInterrupted 등)이 같은 경로를 타 여기서
   // 인터랙티브 여부를 가르지 않는다 — TOOL_USAGE_GUIDANCE 프롬프트 지침이 예약 턴 사용을 이미 막는다.
-  async route(msg: CoreMessage, onChunk?: (t: string) => void, askUser?: (q: AskUserPayload) => Promise<void>): Promise<string> {
+  // activity/onToolsUsed(brain-activity Task 1): askUser와 같은 결로 reader.handle에 그대로 통과.
+  async route(
+    msg: CoreMessage,
+    onChunk?: (t: string) => void,
+    askUser?: (q: AskUserPayload) => Promise<void>,
+    activity?: (label: string) => void,
+    onToolsUsed?: (names: string[]) => void,
+  ): Promise<string> {
     let sources: string[] = [];
-    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; }, askUser);
+    const answer = await this.reader.handle(msg, onChunk, (s) => { sources = s; }, askUser, activity, onToolsUsed);
     try {
       await this.conversations.append(msg.userId, {
         ts: new Date().toISOString(), question: msg.text, answer, sources,
@@ -242,10 +250,13 @@ export class Orchestrator {
 
   // 멘션 진입점(Phase 6a→6b-1, the colleague brain). 허브가 유일 배정구(§7.1) 유지.
   // post 콜백 모델: ack·진행·결과·상태를 여러 번 게시. collaborate는 백그라운드로 detach.
+  // activity(brain-activity Task 1): additive — bridge가 port.activity 지원 어댑터에서만 만들어 넘긴다.
+  // 미지원 어댑터·재주입(resumeInterrupted 등 3인자 호출)은 undefined(reader-agent까지 no-op으로 흡수, 회귀 0).
   async handleMention(
     msg: CoreMessage,
     post: PostFn,
     threadKey: string = msg.userId,
+    activity?: (label: string) => void,
   ): Promise<void> {
     const trimmed = msg.text.trim();
     // 이 요청 한정 두뇌(스펙 §3.2) — 아래 코딩/분류 경로 전부가 이 지역 변수를 공유한다.
@@ -355,9 +366,18 @@ export class Orchestrator {
       return;
     }
     if (trimmed.startsWith('ask ')) {
+      let toolsUsed: string[] = [];
       await this.postReply(
-        await this.route({ text: trimmed.slice('ask '.length), userId: msg.userId }, undefined, this.askUserFor(post)),
+        await this.route(
+          { text: trimmed.slice('ask '.length), userId: msg.userId },
+          undefined,
+          this.askUserFor(post),
+          activity,
+          (names) => { toolsUsed = names; },
+        ),
         post,
+        undefined,
+        toolsUsed,
       );
       return;
     }
@@ -403,7 +423,13 @@ export class Orchestrator {
       this.launchCollaboration(msg.text, team, msg.userId, threadKey, post);
       return;
     }
-    await this.postReply(await this.route(msg, undefined, this.askUserFor(post)), post);
+    let toolsUsed: string[] = [];
+    await this.postReply(
+      await this.route(msg, undefined, this.askUserFor(post), activity, (names) => { toolsUsed = names; }),
+      post,
+      undefined,
+      toolsUsed,
+    );
   }
 
   // collaborate를 백그라운드로 detach. 끝나면 결과 게시 + 대화로그 적재 + 트래커 종료.

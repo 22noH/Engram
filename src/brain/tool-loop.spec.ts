@@ -48,4 +48,67 @@ describe('runToolLoop', () => {
       async () => { throw new Error('boom'); },
     )).rejects.toThrow('boom');
   });
+
+  describe('onTool(두뇌 활동 표시 Task 1)', () => {
+    it('도구 실행 직전마다 이름·1부터 시작하는 순번으로 발화한다(실행 전에 발화됨)', async () => {
+      const calls: Array<{ name: string; seq: number }> = [];
+      const order: string[] = [];
+      const r = await runToolLoop(
+        turnSeq([
+          { text: '', toolCalls: [{ id: 't1', name: 'web_search', input: {} }], inputTokens: 1, outputTokens: 1 },
+          { text: '완성', toolCalls: [], inputTokens: 1, outputTokens: 1 },
+        ]),
+        () => {},
+        async (name) => { order.push(`exec:${name}`); return 'r'; },
+        8,
+        (name, seq) => { calls.push({ name, seq }); order.push(`onTool:${name}:${seq}`); },
+      );
+      expect(calls).toEqual([{ name: 'web_search', seq: 1 }]);
+      expect(order).toEqual(['onTool:web_search:1', 'exec:web_search']); // 발화가 실행보다 먼저
+      expect(r.text).toBe('완성');
+    });
+
+    it('여러 회전에 걸쳐 순번이 누적된다(회전마다 리셋 아님)', async () => {
+      const calls: Array<{ name: string; seq: number }> = [];
+      await runToolLoop(
+        turnSeq([
+          { text: '', toolCalls: [{ id: 't1', name: 'a', input: {} }], inputTokens: 0, outputTokens: 0 },
+          { text: '', toolCalls: [{ id: 't2', name: 'b', input: {} }, { id: 't3', name: 'c', input: {} }], inputTokens: 0, outputTokens: 0 },
+          { text: '끝', toolCalls: [], inputTokens: 0, outputTokens: 0 },
+        ]),
+        () => {},
+        async () => 'r',
+        8,
+        (name, seq) => calls.push({ name, seq }),
+      );
+      expect(calls).toEqual([{ name: 'a', seq: 1 }, { name: 'b', seq: 2 }, { name: 'c', seq: 3 }]);
+    });
+
+    it('onTool 미주입이면 회귀 0(기존 결과와 동일)', async () => {
+      const r = await runToolLoop(
+        turnSeq([
+          { text: '', toolCalls: [{ id: 't1', name: 'web_fetch', input: { url: 'u' } }], inputTokens: 10, outputTokens: 3 },
+          { text: '완성 답변', toolCalls: [], inputTokens: 20, outputTokens: 7 },
+        ]),
+        () => {},
+        async (name) => `result-of-${name}`,
+      );
+      expect(r).toEqual({ text: '완성 답변', inputTokens: 30, outputTokens: 10, hitLimit: false });
+    });
+
+    it('onTool이 던져도 도구 실행 자체는 계속된다(never-throw 격리)', async () => {
+      const r = await runToolLoop(
+        turnSeq([
+          { text: '', toolCalls: [{ id: 't1', name: 'x', input: {} }], inputTokens: 0, outputTokens: 0 },
+          { text: '끝', toolCalls: [], inputTokens: 0, outputTokens: 0 },
+        ]),
+        () => {},
+        async () => 'r',
+        8,
+        () => { throw new Error('ui boom'); },
+      );
+      expect(r.text).toBe('끝');
+      expect(r.hitLimit).toBe(false);
+    });
+  });
 });

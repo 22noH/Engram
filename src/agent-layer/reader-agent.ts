@@ -14,6 +14,7 @@ import { BrainDelegator } from './brain-delegator';
 import { ChannelBrainResolver } from './channel-brain-resolver';
 import { loadPrompt } from './prompt-store';
 import { AskUserPayload } from './ask-user-block';
+import { toolLabel } from './tool-labels';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
 
@@ -90,6 +91,11 @@ export class ReaderAgent {
     // ask_user 도구를 노출). 호출부(orchestrator.route)가 인터랙티브/예약을 가르지 않으므로 여기도
     // 가르지 않는다 — TOOL_USAGE_GUIDANCE(프롬프트 지침)가 예약 턴에서 쓰지 말라고 이미 안내한다.
     askUser?: (q: AskUserPayload) => Promise<void>,
+    // 두뇌 활동 표시(Task 1, additive — askUser 뒤에 붙여 기존 위치 인자 호출 회귀 0): 있으면 도구
+    // 실행마다 실시간 라벨을 발화(대기 인디케이터용). onSources와 같은 결로 onToolsUsed는 완료 시점에
+    // 실사용 도구 이름들을(응답 post에 toolsUsed로 동봉하도록) 한 번 통지한다.
+    activity?: (label: string) => void,
+    onToolsUsed?: (names: string[]) => void,
   ): Promise<string> {
     const emit = (s: string): void => onChunk?.(s);
     // 요청 한정 지역 변수(스펙 §3.2) — this.brain(싱글턴)에 대입하지 않는다.
@@ -119,14 +125,31 @@ export class ReaderAgent {
       // 프롬프트 블록으로. 미첨부(msg.attachments 없음)면 빈 결과 — 프롬프트·opts 둘 다 기존과 바이트
       // 동일(회귀 0). 파일 읽기는 never-throw(attachmentBlocks 내부에서 흡수).
       const { block: attachmentBlock, images } = await this.attachmentBlocks(msg.attachments);
-      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length
-        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}), ...(images.length ? { images } : {}) }
+      // 두뇌 활동 표시(Task 1): activity·onToolsUsed 둘 다 없으면 onTool 자체를 opts에 안 실어(호출
+      // 비용 0, 완전 회귀 0) — 있을 때만 조립. 도구 이름 수집은 항상 로컬 배열에(activity 없이
+      // onToolsUsed만 원하는 호출부도 지원), 실시간 라벨 발화는 activity가 있을 때만.
+      const toolNames: string[] = [];
+      const onTool = (activity || onToolsUsed)
+        ? (name: string, seq: number): void => {
+            toolNames.push(name);
+            if (!activity) return;
+            try {
+              const label = toolLabel(name);
+              // 라벨==이름(미지/MCP 접두)이면 " · 이름" 중복 생략 — tool-labels.ts 조립 규칙과 짝.
+              const base = label === name ? label : `${label} · ${name}`;
+              activity(seq > 1 ? `${base} · ${t('toolOrdinal', seq)}` : base);
+            } catch { /* 격리 — UI 콜백 실패가 답변 흐름을 끊으면 안 됨 */ }
+          }
+        : undefined;
+      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length || onTool
+        ? { ...(handle ? { delegate: handle } : {}), ...(askUser ? { askUser } : {}), ...(images.length ? { images } : {}), ...(onTool ? { onTool } : {}) }
         : undefined;
       const result = await brain.complete(
         this.buildPrompt(msg.text, hits, ctx, recent, !!handle, attachmentBlock),
         onChunk,
         completeOpts,
       );
+      onToolsUsed?.(toolNames);
       // 위임 비용 노출(응답 문자열엔 비용 필드가 없어 로그로) — 스펙 §2.4 "비용 합산".
       if (handle && handle.spentUsd() > 0) {
         this.logger.log(`delegation cost $${handle.spentUsd().toFixed(4)}`, 'ReaderAgent');

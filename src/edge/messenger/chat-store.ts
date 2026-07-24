@@ -18,6 +18,7 @@ export interface ChatMessage {
   question?: { questions: QuestionItem[] }; // Task 1(ask-user): 질문 카드(두뇌 게시)
   answersId?: string;                        // Task 1(ask-user): 이 메시지가 답하는 카드 메시지 id
   attachments?: AttachmentMeta[];            // Task 1(chat-attachments): 첨부(메시지와 운명 공유)
+  toolsUsed?: string[];                      // Task 1(brain-activity): 이 응답 생성 중 쓴 도구 이름들(순서대로). 비어있으면 필드 생략.
   ts: string; // ISO
 }
 
@@ -276,6 +277,7 @@ export class ChatStore {
       question?: ChatMessage['question'];
       answersId?: string;
       attachments?: AttachmentMeta[];
+      toolsUsed?: string[];
     },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
@@ -289,6 +291,8 @@ export class ChatStore {
       ...(input.question ? { question: input.question } : {}),
       ...(input.answersId ? { answersId: input.answersId } : {}),
       ...(input.attachments && input.attachments.length ? { attachments: input.attachments } : {}),
+      // Task 1(brain-activity): 요약줄용 도구 목록. 빈 배열/미첨부는 필드 생략(회귀 0 — actions/attachments와 동일 관례).
+      ...(input.toolsUsed && input.toolsUsed.length ? { toolsUsed: input.toolsUsed } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });

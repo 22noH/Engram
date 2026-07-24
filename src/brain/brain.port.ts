@@ -32,6 +32,9 @@ export interface CompleteOpts {
   // openai-api 양쪽이 이 필드 하나로 초기 턴을 분기한다. mime은 png/jpeg/gif/webp 화이트리스트
   // (reader-agent가 걸러 넣는다 — 여기선 그대로 base64 블록으로 실어 보내기만 한다).
   images?: Array<{ mime: string; dataBase64: string }>;
+  // 두뇌 활동 표시(Task 1): 있으면 도구 실행 직전마다 호출(도구 이름·1부터 시작하는 실행 순번).
+  // askUser/delegate와 같은 결(closure-injection) — never-throw 격리는 호출부(tool-loop·claude-cli) 책임.
+  onTool?: (name: string, seq: number) => void;
 }
 
 export interface BrainProvider {

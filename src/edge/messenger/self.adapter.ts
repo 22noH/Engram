@@ -752,7 +752,7 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
-  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question']): Promise<void> {
+  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void> {
     const t = target as SelfTarget;
     const msg = this.store.appendMessage(t.channelId, {
       authorId: 'engram',
@@ -760,6 +760,7 @@ export class SelfMessenger implements MessengerPort {
       threadId: t.anchorId,
       ...(actions ? { actions } : {}),
       ...(question ? { question } : {}),
+      ...(toolsUsed && toolsUsed.length ? { toolsUsed } : {}),
     });
     if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }
@@ -767,6 +768,12 @@ export class SelfMessenger implements MessengerPort {
   async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
     const msg = this.store.appendMessage(channelId, { authorId: 'engram', text, threadId });
     if (msg) this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
+  }
+
+  // Task 1(brain-activity): 휘발성 활동 브로드캐스트 — store.appendMessage를 거치지 않는다(저장 안 함).
+  // broadcastToChannel이 이미 비공개 채널 접근 필터를 갖고 있어(canAccessChannel) 그대로 재사용.
+  activity(channelId: string, label: string): void {
+    this.broadcastToChannel(channelId, { t: 'activity', channelId, label });
   }
 
   // Phase 16a: 관리자가 계정을 정지/삭제할 때 그 계정의 연결 소켓을 즉시 끊는다.

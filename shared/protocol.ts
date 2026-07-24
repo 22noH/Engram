@@ -31,6 +31,7 @@ export interface Message {
   question?: { questions: QuestionItem[] }; // 질문 카드(두뇌 게시)
   answersId?: string;                        // 이 메시지가 답하는 카드 메시지 id
   attachments?: AttachmentMeta[];            // 채팅 첨부(이미지/파일) — 메시지와 운명 공유
+  toolsUsed?: string[];                      // 두뇌 활동 표시(Task 1): 이 응답 생성 중 쓴 도구 이름들(순서대로, 원시 이름). 비어있으면 필드 자체 생략.
 }
 
 // 채팅 첨부 메타(Task 1). 실파일은 dataDir/attachments/<channelId>/<id>. 사용자 파일명은
@@ -119,4 +120,6 @@ export type ServerFrame =
   | { t: 'proposalsChanged' }
   | { t: 'adminUsers'; list: AdminUserDto[] }
   | { t: 'adminSettings'; settings: AdminSettings }
-  | { t: 'roster'; list: RosterEntry[] };
+  | { t: 'roster'; list: RosterEntry[] }
+  // 두뇌 활동 표시(Task 1): 대기 중 실시간 진행 라벨 — 휘발성(저장 안 함, 브로드캐스트만).
+  | { t: 'activity'; channelId: string; label: string };
