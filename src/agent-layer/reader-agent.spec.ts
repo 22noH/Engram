@@ -101,6 +101,18 @@ describe('ReaderAgent', () => {
       delete process.env.ENGRAM_LANG;
     }
   });
+
+  it('brain이 isError+raw(CLI 미로그인)면 실행 가능한 안내로 답한다(라이브 사고 재현)', async () => {
+    const rag = stubRag([]);
+    const reader = new ReaderAgent(
+      rag,
+      new FakeBrain({ text: '', costUsd: 0, isError: true, raw: 'Not logged in · Please run /login' }),
+      logger,
+    );
+    const out = await reader.handle({ text: '질문', userId: 'default' });
+    expect(out).toContain('Claude CLI needs to log in');
+    expect(out).toContain('/login');
+  });
 });
 
 describe('ReaderAgent 인사이트 주입', () => {

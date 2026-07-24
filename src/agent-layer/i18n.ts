@@ -48,7 +48,26 @@ const MESSAGES: Record<string, Entry> = {
   failureFallback: { en: () => 'failure', ko: () => '실패' },
   // reader / synthesizer / meeting
   noHitsHeader: { en: () => '⚠ No related content in the wiki — answering from general knowledge\n\n', ko: () => '⚠ 위키에 관련 내용 없음 — 일반 지식 기반 답변\n\n' },
-  answerGenFailedBrainError: { en: () => 'Answer generation failed: model call error', ko: () => '답변 생성 실패: 모델 호출 오류' },
+  // 두뇌 실패 사유 표면화: 알려진 실패유형이 아닐 때의 기본 문구(brain-error-hints.ts의 unknown 버킷).
+  // snippet(있으면 원문 에러 한 줄, 이미 새니타이즈·120자 캡·코드스팬 처리됨)이 없으면 기존 문구와
+  // 바이트 동일 — reader-agent.spec.ts의 기존 어서션(raw 미지정 케이스)이 그대로 통과한다.
+  answerGenFailedBrainError: { en: (snippet?: string) => `Answer generation failed: model call error${snippet ? `\n${snippet}` : ''}`, ko: (snippet?: string) => `답변 생성 실패: 모델 호출 오류${snippet ? `\n${snippet}` : ''}` },
+  brainErrorNotLoggedIn: {
+    en: () => 'Claude CLI needs to log in — open a terminal, run `claude`, then `/login`, and try again.',
+    ko: () => 'Claude CLI 로그인이 필요해요 — 터미널에서 `claude`를 열고 `/login`으로 로그인한 뒤 다시 시도해 주세요.',
+  },
+  brainErrorRateLimit: {
+    en: () => 'Usage limit reached — please try again in a bit.',
+    ko: () => '사용량 한도에 걸렸어요 — 잠시 후 다시 시도해 주세요.',
+  },
+  brainErrorCliNotFound: {
+    en: () => "Can't find the Claude CLI — check the install in Settings → Model.",
+    ko: () => 'Claude CLI를 찾을 수 없어요 — 설정 → 모델에서 설치 여부를 확인해 주세요.',
+  },
+  brainErrorInvalidApiKey: {
+    en: () => 'Invalid API key — please check it in Settings.',
+    ko: () => 'API 키가 올바르지 않아요 — 설정에서 API 키를 확인해 주세요.',
+  },
   noContributions: { en: () => 'No expert input to synthesize.', ko: () => '전문가 기여가 없어 종합할 내용이 없습니다.' },
   synthesisFailed: { en: () => 'Synthesis failed: model call error', ko: () => '종합 실패: 모델 호출 오류' },
   agendaHeader: { en: () => '# Agenda', ko: () => '# 안건' },

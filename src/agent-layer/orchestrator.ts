@@ -37,6 +37,7 @@ import { t } from './i18n';
 import { ChannelBrainResolver } from './channel-brain-resolver';
 import type { ChatMessage } from '../edge/messenger/chat-store';
 import { extractAskUser, questionFallbackText, AskUserPayload } from './ask-user-block';
+import { brainErrorHint } from './brain-error-hints';
 
 // post 콜백 통일 타입(Phase 11b Task 3). text만 쓰던 호출부는 넓히기라 무영향.
 // question(ask-user Task 3): 범용 경로가 뽑아낸 질문 카드 페이로드 — 기존 (text, actions) 호출부는
@@ -608,7 +609,7 @@ export class Orchestrator {
       cwd: msg.repoPath,
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
     });
-    if (r.isError) return { reply: t('answerUnavailable') };
+    if (r.isError) return { reply: brainErrorHint(r.raw) };
     return extractPropose(r.text);
   }
 

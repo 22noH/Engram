@@ -15,6 +15,7 @@ import { ChannelBrainResolver } from './channel-brain-resolver';
 import { loadPrompt } from './prompt-store';
 import { AskUserPayload } from './ask-user-block';
 import { toolLabel } from './tool-labels';
+import { brainErrorHint } from './brain-error-hints';
 
 const RECENT_TURNS = 6; // 직전 대화 주입 개수 — 연속성용 단기 창(장기 기억은 위키)
 
@@ -165,7 +166,7 @@ export class ReaderAgent {
         this.logger.log(`delegation cost $${handle.spentUsd().toFixed(4)}`, 'ReaderAgent');
       }
       if (result.isError) {
-        const m = t('answerGenFailedBrainError');
+        const m = brainErrorHint(result.raw);
         emit(m);
         return header + m;
       }

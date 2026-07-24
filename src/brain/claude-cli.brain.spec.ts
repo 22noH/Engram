@@ -61,6 +61,76 @@ describe('ClaudeCliBrain', () => {
     expect(r.isError).toBe(true);
   });
 
+  describe('두뇌 실패 사유 표면화(brain-error-hints) — CLI 원본 에러 텍스트 캡처', () => {
+    it('실사고: is_error+result(로그인 필요)를 raw로 그대로 캡처한다', async () => {
+      // 라이브 사고 재현: assistant 이벤트가 error:"authentication_failed"를 먼저 실어보내고,
+      // 뒤이은 result 이벤트가 is_error:true + "Not logged in · Please run /login"로 마무리.
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stdout.emit('data', JSON.stringify({
+        type: 'assistant',
+        message: { content: [] },
+        error: 'authentication_failed',
+      }) + '\n');
+      child.stdout.emit('data', JSON.stringify({
+        type: 'result', is_error: true, result: 'Not logged in · Please run /login', total_cost_usd: 0,
+      }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.isError).toBe(true);
+      expect(r.text).toBe('Not logged in · Please run /login');
+      expect(r.raw).toBe('Not logged in · Please run /login (authentication_failed)');
+    });
+
+    it('result 이벤트만 있고 error 필드가 없으면 result 문자열 그대로가 raw', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: true, result: 'usage limit reached', total_cost_usd: 0 }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.isError).toBe(true);
+      expect(r.raw).toBe('usage limit reached');
+    });
+
+    it('성공 경로엔 raw가 채워지지 않는다(회귀 0)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '안녕하세요', total_cost_usd: 0.01 }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.isError).toBe(false);
+      expect(r.raw).toBeUndefined();
+    });
+
+    it('spawn 에러(ENOENT)의 err.message를 raw에 담는다(CLI 미설치 감지용)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.emit('error', new Error('ENOENT'));
+      const r = await p;
+      expect(r.isError).toBe(true);
+      expect(String(r.raw)).toContain('ENOENT');
+    });
+
+    it('spawn 에러에 err.code가 있으면 code를 우선한다', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      const err = Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' });
+      child.emit('error', err);
+      const r = await p;
+      expect(r.raw).toBe('spawn-error: ENOENT');
+    });
+  });
+
   it('타임아웃 시 isError를 반환하고 kill한다', async () => {
     jest.useFakeTimers();
     const child = fakeChild();

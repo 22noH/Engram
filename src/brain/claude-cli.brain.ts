@@ -100,6 +100,12 @@ export class ClaudeCliBrain implements BrainProvider {
       let isError = false;
       let settled = false;
       let toolSeq = 0; // 두뇌 활동 표시(Task 1): 이 spawn 전체에 걸친 1부터 시작하는 도구 실행 순번.
+      // 두뇌 실패 사유 표면화: CLI가 실은 원본 에러 텍스트(예: "Not logged in · Please run /login")를
+      // 그대로 보관 — 성공 시엔 절대 채워지지 않으므로(close 핸들러가 isError일 때만 raw에 얹음)
+      // 성공 경로 BrainResult는 바이트 동일(회귀 0). assistant 이벤트의 top-level error 필드(예:
+      // "authentication_failed")가 먼저 오고 최종 result 이벤트의 is_error+result가 뒤따르는 실사고
+      // 순서를 그대로 따라 — 최종 result 텍스트를 주 문구로, 먼저 본 에러 코드를 괄호로 덧붙인다.
+      let errorRaw: string | undefined;
 
       const finish = (r: BrainResult): void => {
         if (settled) return;
@@ -149,16 +155,21 @@ export class ClaudeCliBrain implements BrainProvider {
               try { opts.onTool(name, toolSeq); } catch { /* 격리 — UI 콜백 실패가 파싱 루프를 끊으면 안 됨 */ }
             }
           }
+          if (typeof ev.error === 'string' && ev.error && !errorRaw) errorRaw = ev.error;
           if (ev.type === 'result') {
             costUsd = Number(ev.total_cost_usd ?? 0);
             isError = Boolean(ev.is_error);
-            if (typeof ev.result === 'string') text = ev.result; // 최종 권위 텍스트로 교체
+            if (typeof ev.result === 'string') {
+              text = ev.result; // 최종 권위 텍스트로 교체
+              if (isError) errorRaw = errorRaw && errorRaw !== ev.result ? `${ev.result} (${errorRaw})` : ev.result;
+            }
           }
         }
       });
 
-      child.on('error', () => finish({ text: '', costUsd: 0, isError: true, raw: 'spawn-error' }));
-      child.on('close', () => finish({ text, costUsd, isError }));
+      child.on('error', (err: NodeJS.ErrnoException) =>
+        finish({ text: '', costUsd: 0, isError: true, raw: err?.code ? `spawn-error: ${err.code}` : `spawn-error: ${err?.message ?? 'unknown'}` }));
+      child.on('close', () => finish({ text, costUsd, isError, ...(isError && errorRaw ? { raw: errorRaw } : {}) }));
     });
   }
 }

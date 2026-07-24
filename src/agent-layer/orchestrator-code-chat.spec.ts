@@ -87,6 +87,20 @@ it('[구현 시작] 누르면 startProposal로 escalate', async () => {
   expect((orch as any).pending.get('c1')).toBeUndefined(); // proposeReady 소비됨
 });
 
+it('Code 채널 두뇌 isError(raw=API키오류)면 실행 가능한 안내로 답한다', async () => {
+  const brain = { complete: async () => ({ text: '', costUsd: 0, isError: true, raw: 'HTTP 401: invalid x-api-key' }) } as any;
+  const conversations = { append: async () => {}, recent: async () => [] } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    {} as any, null as any, null as any, null as any, null as any,
+    brain, { assertWritable() {} } as any, null as any, { all: () => [] } as any, null as any,
+  );
+  const { posts, post } = collect();
+  await o.handleMention({ text: '왜 막혔어?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+  expect(posts[0].text).toBe('Invalid API key — please check it in Settings.');
+});
+
 it('proposeReady 중 비매칭 메시지는 제안을 버리고 일반 대화로 흐른다', async () => {
   const orch = makeOrch('그건 이래.'); // 두 번째 턴은 마커 없는 일반 답
   const spyProposal = jest.spyOn(orch as any, 'startProposal').mockResolvedValue(undefined);
