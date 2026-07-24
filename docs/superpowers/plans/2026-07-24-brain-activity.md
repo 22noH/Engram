@@ -43,3 +43,12 @@
 
 - 커버: 프레임·수집·양 하네스·렌더·휘발/영속 경계·스모크. 함정 명시: allow-list·never-throw 콜백·늦은 프레임 무시.
 - 불확실(구현 확정·보고): CLI stream-json tool_use 이벤트 실형태·기존 awaiting 인디케이터 구현 위치.
+
+### Task 4: 여러 줄 입력 + 생성 중지 (사용자 요청 2026-07-24·목업 게시)
+
+**요구:** ①입력창 textarea 자동 높이(최대 ~6줄) — Enter=전송·Shift+Enter=줄바꿈, 팔레트/멘션 키 상호작용 보존 ②생성 중: 보내기 버튼→■ 중지(danger 아웃라인)+Esc 동일, `{t:'stopGeneration'; channelId}` additive 프레임 → 서버가 그 채널의 진행 중 턴 abort(무턴이면 조용히 무시) → 두뇌 abort(자체 하네스=AbortSignal→기존 ctrl 연동·CLI=자식 프로세스 kill) → "⏹ 중단됨"(i18n) 메시지 게시+awaiting 해제.
+
+**Files:** shared/protocol.ts(프레임)·self.adapter(프레임→핸들러)·orchestrator(threadKey별 AbortController 레지스트리·중단 메시지)·brain.port.ts(CompleteOpts.signal?)·anthropic/openai(기존 내부 ctrl에 외부 signal 연동)·claude-cli(spawn abort→kill)·renderer App(textarea 전환·버튼 스왑·Esc)·i18n·theme.css.
+
+- [ ] TDD: textarea Enter/Shift+Enter·팔레트 키 회귀/stop 프레임→abort 호출·무턴 무시/anthropic signal abort→루프 중단/CLI kill/중단 메시지 게시·awaiting 해제/버튼 스왑·Esc. 회귀 0(중지 미사용 경로 byte-identical).
+- [ ] full+렌더러+빌드. `git commit -m "feat(input): Shift+Enter 줄바꿈+생성 중지(■/Esc·서버 abort 관통)"`
