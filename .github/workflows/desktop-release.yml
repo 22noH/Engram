@@ -6,6 +6,11 @@ on:
   push:
     tags: ['v*']
 
+# electron-builder가 릴리스를 생성/업로드하려면 contents 쓰기 권한 필요 —
+# 기본 GITHUB_TOKEN은 read-only라 403(v0.0.7 첫 게시에서 실제 발생).
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
