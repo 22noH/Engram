@@ -7,11 +7,33 @@ import { PinoLogger } from './logger';
 
 describe('memory-monitor', () => {
   const ORIGINAL_RESIDENT = process.env.ENGRAM_RESIDENT;
-  beforeEach(() => { process.env.ENGRAM_RESIDENT = '1'; }); // sample()은 상주 게이트 뒤에 있음
+  const ORIGINAL_SNAPSHOT = process.env.ENGRAM_HEAP_SNAPSHOT;
+  // 스냅샷은 옵트인(2026-07-24) — 스냅샷 동작을 검증하는 케이스들은 게이트를 켠 상태에서 돈다.
+  beforeEach(() => { process.env.ENGRAM_RESIDENT = '1'; process.env.ENGRAM_HEAP_SNAPSHOT = '1'; });
   afterEach(() => {
     delete process.env.ENGRAM_HEAP_KEEP;
     if (ORIGINAL_RESIDENT === undefined) delete process.env.ENGRAM_RESIDENT;
     else process.env.ENGRAM_RESIDENT = ORIGINAL_RESIDENT;
+    if (ORIGINAL_SNAPSHOT === undefined) delete process.env.ENGRAM_HEAP_SNAPSHOT;
+    else process.env.ENGRAM_HEAP_SNAPSHOT = ORIGINAL_SNAPSHOT;
+  });
+
+  it('ENGRAM_HEAP_SNAPSHOT 미설정이면 스냅샷을 쓰지 않는다(옵트인 — 알림은 그대로)', async () => {
+    delete process.env.ENGRAM_HEAP_SNAPSHOT;
+    const paths = new PathResolver(os.tmpdir());
+    const logger = new PinoLogger(paths);
+    const alerts: string[] = [];
+    let snapped = false;
+    const m = new MemoryMonitor(paths, logger, {
+      limitMb: 1,
+      rssFn: () => 999 * 1024 * 1024,
+      alertFn: async (_e, msg) => { alerts.push(msg); },
+      snapshotFn: () => { snapped = true; return '/tmp/heap.x'; },
+    });
+    m.sample();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(snapped).toBe(false);   // 저사양 보호 — 무거운 동기 쓰기 없음
+    expect(alerts).toHaveLength(1); // 경고·알림은 여전히 나간다
   });
 
   it('ENGRAM_RESIDENT 미설정(헤드리스 등) — sample 무발화', () => {
