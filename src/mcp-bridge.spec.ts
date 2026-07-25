@@ -7,6 +7,7 @@ import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { handleMcpRequest } from './edge/mcp/mcp-http';
 import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
 import { makeBridgeServer, parseBridgeArgs, withChannelIdentity } from './mcp-bridge';
+import { APP_CHANNEL_ENV, APP_RESIDENT_ENV } from './edge/mcp/mcp-elicit';
 import { CHANNEL_ARG } from '../shared/browser-ops';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}bridge__${bare}`;
@@ -126,6 +127,21 @@ describe('makeBridgeServer', () => {
 describe('makeBridgeServer — elicitation 승인 게이트', () => {
   type ElicitHandler = (params: Record<string, unknown>) => unknown;
 
+  // 테스트 위생(engram-mcp.spec.ts와 동일 근거): 앱이 띄운 셸에서 돌려도 결과가 뒤집히지 않게.
+  const APP_ENVS = [APP_RESIDENT_ENV, APP_CHANNEL_ENV];
+  let savedAppEnv: Array<string | undefined> = [];
+  beforeEach(() => {
+    savedAppEnv = APP_ENVS.map((k) => process.env[k]);
+    APP_ENVS.forEach((k) => delete process.env[k]);
+  });
+  afterEach(() => {
+    APP_ENVS.forEach((k, i) => {
+      const v = savedAppEnv[i];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    });
+  });
+
   async function elicitingBridgeClient(url: string, handler: ElicitHandler): Promise<Client> {
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await makeBridgeServer(url).connect(serverT);
@@ -198,6 +214,42 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
       });
       await callText(c, 'wiki_search', { query: 'x' });
       expect(seen).toHaveLength(0);
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  // ★회귀 수정(2026-07-25) — 이 브리지가 바로 앱의 두뇌가 지나는 길이다: 상주 → claude -p →
+  // (env 상속) → 이 stdio 브리지. 헤드리스 claude는 elicitation을 선언하고도 사람이 없어 즉시
+  // cancel로 답한다(실측) — 그때 앱의 저장이 통째로 막혔던 사고. 앱 표식이 있으면 묻지 않는다.
+  it('앱 내부 호출(ENGRAM_RESIDENT) → 대화상자 없이 상류로 그대로 전달', async () => {
+    process.env[APP_RESIDENT_ENV] = '1';
+    const upstream = await startUpstream(makeUpstreamDeps({ propose: jest.fn().mockResolvedValue('p-app') }));
+    try {
+      const seen: unknown[] = [];
+      const c = await elicitingBridgeClient(upstream.url, (p) => {
+        seen.push(p);
+        return { action: 'cancel' };
+      });
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(seen).toHaveLength(0);
+      expect(out).toContain('p-app');
+      await c.close();
+    } finally {
+      delete process.env[APP_RESIDENT_ENV];
+      await upstream.close();
+    }
+  });
+
+  it('외부 헤드리스 클라이언트(사람 없음 → cancel) → 거부가 아니라 상류 제안 큐로 폴백', async () => {
+    const propose = jest.fn().mockResolvedValue('p-fallback');
+    const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    try {
+      const c = await elicitingBridgeClient(upstream.url, () => ({ action: 'cancel' }));
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+      expect(out).toContain('p-fallback');
       await c.close();
     } finally {
       await upstream.close();

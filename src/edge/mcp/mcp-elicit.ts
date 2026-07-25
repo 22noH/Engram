@@ -28,6 +28,31 @@ export const ELICIT_TIMEOUT_ENV = 'ENGRAM_MCP_ELICIT_TIMEOUT_MS';
 // 탈출구 — 자동화/CI처럼 사람이 없는 게 확실한 맥락에서 대화상자를 아예 끄고 기존 경로로.
 export const ELICIT_OFF_ENV = 'ENGRAM_MCP_NO_ELICIT';
 
+// ★회귀 수정(2026-07-25) — "앱 내부 호출엔 대화상자를 걸지 않는다".
+//
+// 실사고: 앱 채팅에서 "저장해라"가 계속 "저장 취소됐습니다"로 돌아왔다. 원인은 엔그램 앱의 두뇌도
+// MCP 클라이언트라는 사실이다 — 앱은 턴마다 `claude -p`(헤드리스)를 스폰하고, 그 claude가 이
+// MCP 서버(stdio 브리지/헤드리스)를 자식으로 띄운다. 실측(2026-07-25, claude 2.1.218): 헤드리스
+// claude는 elicitation.form capability를 **선언은 하면서** 요청이 오면 6ms 만에
+// {action:'cancel'}로 답한다(사람이 없으니 대화상자를 못 띄운다). 우리는 그걸 "사용자가 거부"로
+// 읽어 제안조차 만들지 않았다 = 앱에서의 모든 위키 저장이 막혔다.
+//
+// 설계 오류의 본질: 앱에서 승인 주체는 이미 **앱의 승인함(제안 큐)** 이다. 거기에 대화상자를 하나
+// 더 끼워 이중 게이트가 됐고, 하필 답할 사람이 없는 쪽에 게이트가 걸렸다.
+//
+// 판별: 이 MCP 프로세스가 상주 앱의 프로세스 트리에서 태어났는가. 상주(src/main.ts bootstrap)는
+// 자기 env에 ENGRAM_RESIDENT=1을 심고, 두뇌 스폰이 env를 통째로 물려주며(claude-cli.brain.ts),
+// claude가 띄우는 MCP 자식도 그 env를 그대로 본다(ba16f22에서 ENGRAM_CHANNEL_ID로 실측 확인된
+// 바로 그 경로). 그 턴의 채널 정체성(ENGRAM_CHANNEL_ID)이 실렸으면 두말할 것 없이 앱 내부다.
+// 헤드리스(mcp-headless.ts)는 ENGRAM_RESIDENT를 절대 세팅하지 않으므로 외부 사용자 경로와 섞이지
+// 않는다.
+export const APP_RESIDENT_ENV = 'ENGRAM_RESIDENT';
+export const APP_CHANNEL_ENV = 'ENGRAM_CHANNEL_ID';
+
+export function isEngramAppCall(env: NodeJS.ProcessEnv): boolean {
+  return !!(env[APP_RESIDENT_ENV] ?? '').trim() || !!(env[APP_CHANNEL_ENV] ?? '').trim();
+}
+
 const PREVIEW_CHARS = 400;
 
 // 'accept'=사용자가 저장 승인, 'decline'=사용자가 거부(제안 자체를 만들지 않는다),
@@ -116,6 +141,9 @@ export async function confirmWikiSave(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SaveConfirm> {
   if (env[ELICIT_OFF_ENV]) return 'unavailable';
+  // ★앱 내부 호출이면 묻지 않는다(위 주석). 승인은 앱 승인함이 한다 — 게이트는 '추가'지 '대체'가
+  // 아니라는 원칙 그대로, 이미 사람 게이트가 있는 경로에 두 번째 게이트를 얹지 않는다.
+  if (isEngramAppCall(env)) return 'unavailable';
   if (isElicitationDisabled(server)) return 'unavailable';
   if (!supportsFormElicitation(server)) return 'unavailable';
   try {
@@ -129,8 +157,13 @@ export async function confirmWikiSave(
       // 스키마상 'save' | 'cancel'. 값이 없으면(느슨한 클라이언트) accept=승인으로 본다.
       return decision === 'cancel' ? 'decline' : 'accept';
     }
-    // 'decline'(명시 거부)·'cancel'(대화상자 닫음) 모두 저장하지 않는다.
-    return 'decline';
+    // 'decline' = 사람이 명시적으로 거부(MCP 규약) → 저장하지 않는다.
+    if (result.action === 'decline') return 'decline';
+    // 'cancel' = **명시적 선택 없이 닫힘**. 사람이 ESC를 눌렀을 수도, 사람이 아예 없어서
+    // 클라이언트가 자동으로 답했을 수도 있다(헤드리스 claude -p 실측이 바로 이 경우) — 거부 의사로
+    // 읽으면 안 된다. 제안 경로는 기존 경로(제안 큐, 앱에서 사람이 승인)로 폴백하고, 즉시 게시
+    // (wiki_write)는 폴백이 곧 게시라 애매함을 절대 승인으로 바꾸지 않는다(거부 쪽이 안전).
+    return req.op === 'write' ? 'decline' : 'unavailable';
   } catch {
     // 미지원·타임아웃·전송 실패 전부 — 조용히 기존 경로로.
     return 'unavailable';
@@ -143,6 +176,9 @@ export async function confirmWikiSave(
 //  - 설정 변경: 못 물어보면 **거부**한다 — "AI에게 말로 설정"을 열어준 대가로, 사람이 볼 수 없는
 //    맥락에서 위키 원격 주소나 승인 우회 스위치가 조용히 바뀌는 일은 절대 없어야 한다.
 //    (그 판정은 호출자(mcp-settings.ts)가 하고, 여기선 승인 결과만 정직하게 돌려준다.)
+//  - 그래서 isEngramAppCall(앱 내부 호출이면 묻지 않기)도 **여기엔 적용하지 않는다** — 앱의 두뇌가
+//    말로 위험 설정을 바꾸는 길을 열어주는 셈이 되기 때문. 앱 내부 호출은 물어보고, 답이 없으면
+//    거부된다(설정에는 앱 승인함 같은 대체 게이트가 없다).
 export interface SettingChangeRequest {
   key: string;
   /** 현재 값(빈 문자열 = 미설정). */

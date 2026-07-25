@@ -3,7 +3,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
 import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS } from './engram-mcp';
-import { disableElicitation, ELICIT_OFF_ENV, ELICIT_TIMEOUT_ENV } from './mcp-elicit';
+import {
+  disableElicitation,
+  APP_CHANNEL_ENV,
+  APP_RESIDENT_ENV,
+  ELICIT_OFF_ENV,
+  ELICIT_TIMEOUT_ENV,
+} from './mcp-elicit';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}test__${bare}`;
 
@@ -358,6 +364,22 @@ describe('buildMcpServer', () => {
 describe('elicitation 승인 게이트', () => {
   type ElicitHandler = (params: Record<string, unknown>) => unknown;
 
+  // ★테스트 위생: 이 스위트를 엔그램 앱이 띄운 셸에서 돌리면 앱 표식이 이미 env에 있어 결과가
+  // 뒤집힌다(외부 클라이언트 경로 테스트가 전부 폴백으로 샌다) — 매 테스트마다 지우고 되돌린다.
+  const APP_ENVS = [APP_RESIDENT_ENV, APP_CHANNEL_ENV];
+  let savedAppEnv: Array<string | undefined> = [];
+  beforeEach(() => {
+    savedAppEnv = APP_ENVS.map((k) => process.env[k]);
+    APP_ENVS.forEach((k) => delete process.env[k]);
+  });
+  afterEach(() => {
+    APP_ENVS.forEach((k, i) => {
+      const v = savedAppEnv[i];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    });
+  });
+
   // elicitation을 선언하고 요청을 handler로 처리하는 가짜 클라이언트.
   async function elicitingClient(deps: McpDeps, handler: ElicitHandler): Promise<Client> {
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
@@ -419,13 +441,44 @@ describe('elicitation 승인 게이트', () => {
     await c.close();
   });
 
-  it('대화상자 취소(action:cancel)도 저장하지 않는다', async () => {
-    const propose = jest.fn();
+  // ★2026-07-25 실사고: 사람 없는 클라이언트(헤드리스 claude -p)가 elicitation을 선언해놓고
+  // 즉시 {action:'cancel'}로 답한다 — 명시적 선택이 아니므로 거부로 읽지 않고 기존 경로로 폴백한다.
+  it('명시 선택 없이 닫힘(action:cancel) → 거부가 아니라 기존 경로(제안 큐)로 폴백', async () => {
+    const propose = jest.fn().mockResolvedValue('p-fallback-cancel');
     const c = await elicitingClient(makeDeps({ propose }), () => ({ action: 'cancel' }));
     const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
-    expect(propose).not.toHaveBeenCalled();
+    expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    expect(out).toContain('p-fallback-cancel');
+    await c.close();
+  });
+
+  it('명시 선택 없이 닫힘 + wiki_write(즉시 게시) → 게시하지 않는다(애매함은 안전 쪽)', async () => {
+    const write = jest.fn();
+    const c = await elicitingClient(makeDeps({ write }), () => ({ action: 'cancel' }));
+    const out = await callText(c, 'wiki_write', { title: 'T', content: 'C' });
+    expect(write).not.toHaveBeenCalled();
     expect(out.toLowerCase()).toContain('declined');
     await c.close();
+  });
+
+  // ★회귀 수정의 핵심 경로: 앱의 두뇌가 부른 호출(=상주 프로세스 트리)엔 묻지 않고 제안을 만든다.
+  it('앱 내부 호출(ENGRAM_RESIDENT) → 묻지 않고 제안 생성(앱 승인함이 승인 주체)', async () => {
+    process.env[APP_RESIDENT_ENV] = '1';
+    try {
+      const asked: unknown[] = [];
+      const propose = jest.fn().mockResolvedValue('p-app');
+      const c = await elicitingClient(makeDeps({ propose }), (p) => {
+        asked.push(p);
+        return { action: 'cancel' };
+      });
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(asked).toHaveLength(0);
+      expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+      expect(out).toContain('p-app');
+      await c.close();
+    } finally {
+      delete process.env[APP_RESIDENT_ENV];
+    }
   });
 
   it('응답 지연(타임아웃) → 멈추지 않고 기존 경로로 폴백해 제안 생성', async () => {

@@ -1,10 +1,14 @@
 import {
+  confirmSettingChange,
   confirmWikiSave,
   declinedText,
   disableElicitation,
   isElicitationDisabled,
+  isEngramAppCall,
   saveConfirmParams,
   saveConfirmMessage,
+  APP_CHANNEL_ENV,
+  APP_RESIDENT_ENV,
   DEFAULT_ELICIT_TIMEOUT_MS,
   ELICIT_OFF_ENV,
   ELICIT_TIMEOUT_ENV,
@@ -75,9 +79,54 @@ describe('confirmWikiSave — 승인/거부', () => {
     await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('decline');
   });
 
-  it('action:cancel(대화상자 닫음) → decline', async () => {
+  // ★2026-07-25 실사고: 헤드리스 claude -p는 elicitation.form을 **선언은 하면서** 요청이 오면
+  // 6ms 만에 {action:'cancel'}로 답한다(사람이 없으니 대화상자를 띄울 수 없다). 'cancel'은 MCP
+  // 규약상 "명시적 선택 없이 닫힘"이라 사람의 거부 의사가 아니다 — 저장이 통째로 막혔다.
+  it('action:cancel(명시 선택 없음) → propose는 unavailable(제안 큐로 폴백)', async () => {
     const s = fakeServer(caps, jest.fn().mockResolvedValue({ action: 'cancel' }));
-    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('decline');
+    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('unavailable');
+  });
+
+  it('action:cancel + wiki_write(즉시 게시) → decline(애매하면 절대 게시 안 함)', async () => {
+    const s = fakeServer(caps, jest.fn().mockResolvedValue({ action: 'cancel' }));
+    await expect(confirmWikiSave(s, { ...REQ, op: 'write' }, {})).resolves.toBe('decline');
+  });
+});
+
+// ★회귀 수정(2026-07-25): 엔그램 앱의 두뇌(claude -p 헤드리스)도 MCP 클라이언트다. 그쪽엔 대화상자에
+// 답할 사람이 없고, 승인 주체는 이미 **앱의 승인함(제안 큐)** 이다 — 게이트를 하나 더 끼우면 이중
+// 게이트가 되어 앱에서의 모든 저장이 막힌다. 그래서 앱 내부 호출이면 아예 묻지 않는다.
+describe('앱 내부 호출 판별 — 승인 주체가 앱 승인함일 때는 묻지 않는다', () => {
+  const caps = { elicitation: { form: {} } };
+
+  it('ENGRAM_RESIDENT(상주 앱 프로세스 트리) → 앱 내부 호출', () => {
+    expect(isEngramAppCall({ [APP_RESIDENT_ENV]: '1' })).toBe(true);
+  });
+
+  it('ENGRAM_CHANNEL_ID(그 턴의 채널 정체성) → 앱 내부 호출', () => {
+    expect(isEngramAppCall({ [APP_CHANNEL_ENV]: 'chan-42' })).toBe(true);
+  });
+
+  it('표식이 없거나 공백뿐 → 외부 클라이언트', () => {
+    expect(isEngramAppCall({})).toBe(false);
+    expect(isEngramAppCall({ [APP_RESIDENT_ENV]: '  ', [APP_CHANNEL_ENV]: '' })).toBe(false);
+  });
+
+  it('앱 내부 호출이면 elicitInput을 아예 호출하지 않고 unavailable(제안 큐로 진행)', async () => {
+    const s = fakeServer(caps);
+    await expect(confirmWikiSave(s, REQ, { [APP_RESIDENT_ENV]: '1' })).resolves.toBe('unavailable');
+    await expect(confirmWikiSave(s, { ...REQ, op: 'write' }, { [APP_CHANNEL_ENV]: 'c1' })).resolves.toBe('unavailable');
+    expect(s.elicitInput).not.toHaveBeenCalled();
+  });
+
+  // ★설정 변경은 규칙이 정반대다(위험 설정) — 못 물어보면 거부. 앱 내부 호출이라고 게이트를
+  // 건너뛰면 "말로 승인 우회 스위치 켜기"가 열린다. 그래서 여기엔 이 판별을 적용하지 않는다.
+  it('설정 변경 게이트는 앱 내부 호출이어도 그대로 묻는다(정반대 규칙 유지)', async () => {
+    const elicit = jest.fn().mockResolvedValue({ action: 'cancel' });
+    const s = fakeServer(caps, elicit);
+    const req = { key: 'wikiRemote', from: '', to: 'git@x', reason: 'remote' };
+    await expect(confirmSettingChange(s, req, { [APP_RESIDENT_ENV]: '1' })).resolves.toBe('decline');
+    expect(elicit).toHaveBeenCalledTimes(1);
   });
 });
 
