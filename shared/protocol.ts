@@ -124,4 +124,8 @@ export type ServerFrame =
   | { t: 'adminSettings'; settings: AdminSettings }
   | { t: 'roster'; list: RosterEntry[] }
   // 두뇌 활동 표시(Task 1): 대기 중 실시간 진행 라벨 — 휘발성(저장 안 함, 브로드캐스트만).
-  | { t: 'activity'; channelId: string; label: string };
+  | { t: 'activity'; channelId: string; label: string }
+  // 답변 실시간 스트리밍: 생성 중인 답의 "증분" 텍스트 — activity와 똑같이 휘발성(저장 안 함,
+  // 브로드캐스트만). 누적 전체가 아니라 증분이라 렌더러가 이어붙인다. 최종 확정은 항상 'msg' 프레임이고
+  // 렌더러는 그 시점에 누적 버퍼를 버린다(중복 표시 금지). 서버가 짧은 간격으로 코얼레싱해서 보낸다.
+  | { t: 'delta'; channelId: string; text: string };

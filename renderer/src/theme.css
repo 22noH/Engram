@@ -161,6 +161,15 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .typing { color:var(--dim); font-size:12.5px; margin:2px 0 10px 4px; }
 .typing .dots::after { content:'…'; animation:pulse 1.2s infinite; }
 @keyframes pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
+/* 답변 실시간 스트리밍(목업 승인) — 확정 전 임시 말풍선. .msg/.body를 그대로 재사용해 확정 메시지가
+   들어설 때 자리·톤이 튀지 않게 한다(추가로 얹는 건 깜빡이는 커서와 그 아래 도구 줄뿐). */
+.msg.streaming .body { border-style:dashed; border-color:var(--accent-line); }
+.msg.streaming .caret { display:inline-block; width:2px; height:1.05em; margin-left:2px;
+                        vertical-align:text-bottom; background:var(--accent);
+                        animation:caretBlink 1.05s step-end infinite; }
+@keyframes caretBlink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+/* 도구 줄은 말풍선 바로 아래에 붙는다(기본 .typing의 위/아래 여백을 이 문맥에서만 좁힌다). */
+.msg.streaming .typing { margin:5px 0 0 2px; }
 details.thread { margin:-4px 0 10px 16px; }
 details.thread summary { color:var(--accent); font-size:12px; cursor:pointer; }
 details.thread .msg { max-width:100%; }

@@ -234,3 +234,76 @@ it('activity 콜백이 던져도 상주는 죽지 않는다(never-throw 격리)'
   bindMessenger(port as any, orch as any, { warn() {} });
   await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} }); // throw하면 테스트가 실패로 드러남
 });
+
+// 답변 실시간 스트리밍: activity(4번째 인자)와 정확히 같은 결로 delta(5번째 인자)가 관통한다.
+// 차이는 하나 — 토큰 단위 폭주를 막기 위해 브리지가 코얼레서를 끼운다(짧은 간격으로 모아 1프레임).
+describe('답변 실시간 스트리밍 — delta 관통·코얼레싱', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('port.delta 지원 어댑터면 채널에 바인딩된 delta fn을 handleMention 5번째 인자로 넘긴다(코얼레싱 후 1프레임)', async () => {
+    const port = new FakeMessenger();
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        delta?.('안');
+        delta?.('녕');
+        jest.advanceTimersByTime(100); // 코얼레싱 간격 경과 → 한 번에 흘러나간다
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    expect(port.deltas).toEqual([{ channelId: 'c1', text: '안녕' }]);
+  });
+
+  it('port.delta 미지원 어댑터면 handleMention에 delta=undefined가 넘어간다(회귀 0 — Discord 등)', async () => {
+    const port = new FakeMessenger();
+    (port as any).delta = undefined; // 명시적으로 미지원 흉내
+    let captured: unknown = 'unset';
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => { captured = delta; },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    expect(captured).toBeUndefined();
+  });
+
+  it('턴이 끝나면 아직 안 나간 델타 버퍼는 버려진다(최종 msg가 확정 — 중복 표시 금지)', async () => {
+    const port = new FakeMessenger();
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        delta?.('꼬리 조각'); // 간격이 지나기 전에 턴이 끝난다
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    jest.advanceTimersByTime(1000);
+    expect(port.deltas).toEqual([]);
+  });
+
+  it('handleMention이 던져도 델타 버퍼는 정리된다(실패 경로 누수 0)', async () => {
+    const port = new FakeMessenger();
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        delta?.('조각');
+        throw new Error('boom');
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    jest.advanceTimersByTime(1000);
+    expect(port.deltas).toEqual([]);
+  });
+
+  it('delta 콜백이 던져도 상주는 죽지 않는다(never-throw 격리)', async () => {
+    const port = new FakeMessenger();
+    (port as any).delta = () => { throw new Error('ws boom'); };
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        delta?.('조각');
+        jest.advanceTimersByTime(100); // flush가 던지면 여기서 테스트가 실패로 드러난다
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+  });
+});

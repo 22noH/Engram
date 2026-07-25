@@ -252,6 +252,28 @@ describe('두뇌 활동 표시(Task 1) — activity 관통·toolsUsed 동봉', (
     expect(calls).toEqual([{ text: '답', toolsUsed: ['web_search', 'fetch_url'] }]);
   });
 
+  // 답변 실시간 스트리밍: handleMention 5번째 인자(delta)가 route→reader.handle의 onChunk(2번째 인자)로
+  // 그대로 관통해야 두뇌가 흘리는 텍스트 델타가 UI까지 간다. activity와 같은 결(additive 위치 인자).
+  it('handleMention에 넘긴 delta가 reader.handle의 onChunk(2번째 인자)로 전달된다', async () => {
+    const seen: string[] = [];
+    const reader = {
+      handle: async (_msg: any, onChunk: any) => { onChunk?.('안'); onChunk?.('녕'); return '안녕'; },
+    };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {}, undefined, undefined, (t) => { seen.push(t); });
+    expect(seen).toEqual(['안', '녕']);
+  });
+
+  it('delta 미전달(기존 4인자 이하 호출)이면 reader.handle의 onChunk도 undefined다(회귀 0)', async () => {
+    let captured: unknown = 'unset';
+    const reader = {
+      handle: async (_msg: any, onChunk: any) => { captured = onChunk; return '답'; },
+    };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {});
+    expect(captured).toBeUndefined();
+  });
+
   it('도구를 안 쓰면 post에 빈 배열이 실린다(빈 배열 폐기는 self.adapter/chat-store 몫)', async () => {
     const reader = {
       handle: async (_msg: any, _onChunk: any, _onSources: any, _askUser: any, _activity: any, onToolsUsed: any) => {

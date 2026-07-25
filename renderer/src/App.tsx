@@ -90,6 +90,10 @@ export default function App() {
   // 동일 키 공간) — 'msg' 프레임의 기존 name 역조회(connId+channelId→논리 이름)와 같은 방식으로 채운다.
   // 없으면(아직 activity 안 옴/이미 클리어됨) 렌더 쪽이 T.thinking(기본 문구)으로 폴백한다.
   const [activityLabels, setActivityLabels] = useState<Map<string, string>>(new Map());
+  // 답변 실시간 스트리밍 — awaiting 중 흘러들어오는 답변 증분(delta 프레임, 휘발). 키·수명은 activityLabels와
+  // 완전히 동일(같은 키 공간, 같은 클리어 지점). 서버가 보내는 건 증분이라 여기서 이어붙인다. 최종 'msg'가
+  // 오면 통째로 버리고 확정 메시지가 그 자리를 대신한다(중복 표시 금지).
+  const [streamTexts, setStreamTexts] = useState<Map<string, string>>(new Map());
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
   const [palFilter, setPalFilter] = useState<string | null>(null); // null=닫힘
   const [palIdx, setPalIdx] = useState(0);                          // 선택 인덱스(방향키)
@@ -193,6 +197,8 @@ export default function App() {
           setAwaiting((prev) => { const n = new Set(prev); n.delete(name); return n; });
           // Task 2(brain-activity) — 답 도착 시 그 채널의 활동 라벨도 같이 지운다(다음 대기는 기본 문구부터).
           setActivityLabels((prev) => { if (!prev.has(name)) return prev; const n = new Map(prev); n.delete(name); return n; });
+          // 답변 실시간 스트리밍 — 확정 메시지가 왔으니 누적 델타 버퍼는 버린다(같은 답이 두 번 보이면 안 됨).
+          setStreamTexts((prev) => { if (!prev.has(name)) return prev; const n = new Map(prev); n.delete(name); return n; });
           // Task 4(여러 줄 입력+생성 중지) — 답(중단 안내 포함)이 왔으니 중지 버튼 잠금도 같이 푼다.
           setStopping((prev) => { if (!prev.has(name)) return prev; const n = new Set(prev); n.delete(name); return n; });
         }
@@ -204,6 +210,13 @@ export default function App() {
       const name = channelsByConnRef.current[connId]?.find((c) => c.id === f.channelId)?.name;
       if (name && awaiting.has(name)) {
         setActivityLabels((prev) => new Map(prev).set(name, f.label));
+      }
+    } else if (f.t === 'delta') {
+      // 답변 실시간 스트리밍 — activity와 똑같은 휘발 규칙: 그 채널이 지금 awaiting 중일 때만 이어붙인다.
+      // 이미 답이 와서 awaiting이 풀렸으면(늦게 도착한 델타) 조용히 무시(잔재가 다음 턴으로 새지 않게).
+      const name = channelsByConnRef.current[connId]?.find((c) => c.id === f.channelId)?.name;
+      if (name && awaiting.has(name)) {
+        setStreamTexts((prev) => new Map(prev).set(name, (prev.get(name) ?? '') + f.text));
       }
     } else if (f.t === 'historyCleared') {
       // Task 4(clear-compact) — 그 채널 transcript를 즉시 비우고(모달·시스템 메시지 없음) 실행취소 토스트를 띄운다.
@@ -464,6 +477,8 @@ export default function App() {
   const stopCurrent = () => {
     if (!currentName || stopping.has(currentName)) return; // 중복 클릭 방지(중단 안내 도착 전까지 잠금)
     setStopping((p) => new Set(p).add(currentName));
+    // 답변 실시간 스트리밍 — 중지했으면 흐르던 텍스트도 즉시 정리한다(중단 안내 메시지가 확정을 대신한다).
+    setStreamTexts((p) => { if (!p.has(currentName)) return p; const n = new Map(p); n.delete(currentName); return n; });
     fanoutToName(currentName, (channelId) => ({ t: 'stopGeneration', channelId }));
   };
 
@@ -499,11 +514,14 @@ export default function App() {
       awaitTimers.current.delete(name);
       setAwaiting((p) => { const n = new Set(p); n.delete(name); return n; });
       setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
+      setStreamTexts((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
       setStopping((p) => { if (!p.has(name)) return p; const n = new Set(p); n.delete(name); return n; });
     }, 180000));
     setAwaiting((p) => new Set(p).add(name));
     // Task 2(brain-activity) — 새 대기 시작 시 이전 라벨 잔재를 지운다(다음 activity가 올 때까지 기본 문구).
     setActivityLabels((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
+    // 답변 실시간 스트리밍 — 새 턴이 시작됐으니 이전 턴의 델타 잔재도 같이 지운다(라벨과 같은 결).
+    setStreamTexts((p) => { if (!p.has(name)) return p; const n = new Map(p); n.delete(name); return n; });
     // Task 4(여러 줄 입력+생성 중지) — 새 턴이 시작됐으니 이전 턴의 중지 버튼 잠금 잔재도 지운다.
     setStopping((p) => { if (!p.has(name)) return p; const n = new Set(p); n.delete(name); return n; });
   };
@@ -903,11 +921,26 @@ export default function App() {
                       onExpandHtml={codePanelGate ? expandHtml : undefined} />
                   ));
                 })()}
-                {currentName && awaiting.has(currentName) && (
+                {currentName && awaiting.has(currentName) && (() => {
                   // Task 2(brain-activity) — activity 프레임이 오면 그 라벨로 실시간 치환("생각 중" → "웹
                   // 검색 중 · web_search" 등), 없으면 기존 기본 문구.
-                  <div className="typing"><span>{activityLabels.get(currentName) ?? T.thinking}</span><span className="dots" /></div>
-                )}
+                  const label = activityLabels.get(currentName);
+                  const streamed = streamTexts.get(currentName) ?? '';
+                  const typing = <div className="typing"><span>{label ?? T.thinking}</span><span className="dots" /></div>;
+                  // 답변 실시간 스트리밍(목업 승인) — 델타가 하나라도 왔으면 "생각 중" 자리에 흐르는 답변
+                  // 텍스트 + 깜빡이는 커서를, 그 아래에 도구 활동 줄을 같이 보여준다. 델타가 없으면 기존
+                  // 인디케이터 그대로(회귀 0 — delta 프레임을 안 보내는 서버/어댑터는 이 분기에 못 들어온다).
+                  // 본문은 평문(pre-wrap)으로 그린다: 미완성 마크다운을 조각마다 파싱하면 코드펜스·표가
+                  // 열렸다 닫혔다 하며 깜빡인다. 확정 메시지(Message)가 마크다운 렌더를 담당한다.
+                  if (!streamed) return typing;
+                  return (
+                    <div className="msg streaming">
+                      <div className="who">{T.engram}</div>
+                      <div className="body">{streamed}<span className="caret" /></div>
+                      {label && typing}
+                    </div>
+                  );
+                })()}
               </div>
               {clearToast && clearToast.connId === connState.defaultConnId && clearToast.channelId === defaultChan?.id && (
                 <div id="clearToast">

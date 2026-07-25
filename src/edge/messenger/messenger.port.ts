@@ -36,6 +36,10 @@ export interface MessengerPort {
   // Task 1(brain-activity): 옵셔널 — 실시간 활동 라벨(예: "웹 검색 중 · web_search")을 그 채널에만
   // 브로드캐스트. 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0).
   activity?(channelId: string, label: string): void;
+  // 답변 실시간 스트리밍: 옵셔널 — 생성 중인 답의 증분 텍스트를 그 채널에만 브로드캐스트. activity와
+  // 동일하게 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0). 코얼레싱은
+  // 호출부(messenger-bridge)가 하므로 어댑터는 받은 조각을 그대로 프레임 1개로 내보내면 된다.
+  delta?(channelId: string, text: string): void;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

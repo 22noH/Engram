@@ -2,6 +2,7 @@ import { MessengerPort } from './messenger.port';
 import { CoreMessage } from '../core-message';
 import { ChannelPolicy, allows } from '../../agent-layer/channel-policy';
 import { t } from '../../agent-layer/i18n';
+import { createDeltaCoalescer } from './delta-coalescer';
 import type { Action, Message } from '../../../shared/protocol';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 import 회피·테스트 용이).
@@ -14,6 +15,9 @@ export interface MentionHandler {
     threadKey?: string,
     // activity(brain-activity Task 1): 대기 중 실시간 라벨 발화 — port.activity 미지원 어댑터면 undefined.
     activity?: (label: string) => void,
+    // delta(답변 실시간 스트리밍): 생성 중인 답의 증분 텍스트 발화 — port.delta 미지원 어댑터면 undefined.
+    // activity와 정확히 같은 결(additive 위치 인자, 미지원=undefined로 no-op 흡수).
+    delta?: (text: string) => void,
   ): Promise<void>;
   // 관찰 끼어들기(6c-1) — 옵셔널(구식 스텁 호환).
   observe?(msg: CoreMessage, post: (text: string) => Promise<void>): Promise<void>;
@@ -37,6 +41,14 @@ export function bindMessenger(
     const activity = port.activity
       ? (label: string): void => { try { port.activity!(e.channelId, label); } catch { /* 격리 */ } }
       : undefined;
+    // 답변 실시간 스트리밍: activity와 같은 결로 port.delta 지원 어댑터(self.adapter)에서만 만든다.
+    // 다만 두뇌 onChunk는 토큰마다 오므로 그대로 프레임을 쏘면 폭주 — 코얼레서를 끼워 짧은 간격으로
+    // 모아 보낸다. 턴이 끝나면(성공·실패 무관) 반드시 stop()으로 타이머·버퍼를 정리한다(누수 0,
+    // 최종 msg가 확정이라 꼬리 조각은 버린다).
+    const coalescer = port.delta
+      ? createDeltaCoalescer((text: string): void => { try { port.delta!(e.channelId, text); } catch { /* 격리 */ } })
+      : undefined;
+    const delta = coalescer ? (text: string): void => coalescer.push(text) : undefined;
     try {
       // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answeredQuestion이 있으면(=answersId 답장 재트리거,
       // ask_user 도구 경로) 브레인 프롬프트가 될 text 앞에 원본 질문 문맥을 붙인다. 없으면 e.text 그대로
@@ -60,10 +72,13 @@ export function bindMessenger(
         post,
         threadKey,
         activity,
+        delta,
       );
     } catch (err) {
       logger.warn(`멘션 처리 실패: ${String(err)}`, 'Messenger');
       try { await post(t('mentionHandleFailed')); } catch { /* post도 실패하면 포기 */ }
+    } finally {
+      coalescer?.stop();
     }
   });
 

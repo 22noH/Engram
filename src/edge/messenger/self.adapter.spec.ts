@@ -144,6 +144,14 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general')).toEqual([]);
   });
 
+  it('delta(channelId, text)가 실시간 delta 프레임으로 브로드캐스트되고 jsonl에는 저장되지 않는다(휘발, 답변 실시간 스트리밍)', async () => {
+    sm.delta!('general', '안녕하');
+    const frame = await nextFrame(client);
+    expect(frame).toEqual({ t: 'delta', channelId: 'general', text: '안녕하' });
+    // activity와 동일 — 저장 금지(대화 기록에 흔적 0).
+    expect(store.history('general')).toEqual([]);
+  });
+
   it('send에 answersId가 실리면 저장 메시지에 answersId가 붙고 onMention이 정상 트리거된다(Task 2)', async () => {
     const events: MentionEvent[] = [];
     sm.onMention(async (e) => { events.push(e); });

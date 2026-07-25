@@ -274,11 +274,14 @@ export class Orchestrator {
   // post 콜백 모델: ack·진행·결과·상태를 여러 번 게시. collaborate는 백그라운드로 detach.
   // activity(brain-activity Task 1): additive — bridge가 port.activity 지원 어댑터에서만 만들어 넘긴다.
   // 미지원 어댑터·재주입(resumeInterrupted 등 3인자 호출)은 undefined(reader-agent까지 no-op으로 흡수, 회귀 0).
+  // delta(답변 실시간 스트리밍): additive 5번째 — activity와 같은 결로 bridge가 port.delta 지원 어댑터에서만
+  // 만들어 넘긴다. route()의 onChunk 자리로 그대로 흘러 reader-agent→brain.complete의 스트리밍 콜백이 된다.
   async handleMention(
     msg: CoreMessage,
     post: PostFn,
     threadKey: string = msg.userId,
     activity?: (label: string) => void,
+    delta?: (text: string) => void,
   ): Promise<void> {
     // Task 4(여러 줄 입력+생성 중지): 이 턴 전용 AbortController를 등록(threadKey 키) — self.adapter의
     // stopGeneration 프레임이 cancel(threadKey)/cancelByChannel(channelId)로 이걸 abort시킨다. 종료(성공·
@@ -288,7 +291,7 @@ export class Orchestrator {
     const ctrl = new AbortController();
     this.abortRegistry.set(threadKey, ctrl);
     try {
-      await this.handleMentionCore(msg, post, threadKey, activity, ctrl.signal);
+      await this.handleMentionCore(msg, post, threadKey, activity, delta, ctrl.signal);
     } finally {
       if (this.abortRegistry.get(threadKey) === ctrl) this.abortRegistry.delete(threadKey);
     }
@@ -314,6 +317,7 @@ export class Orchestrator {
     post: PostFn,
     threadKey: string,
     activity: ((label: string) => void) | undefined,
+    delta: ((text: string) => void) | undefined,
     signal: AbortSignal,
   ): Promise<void> {
     const trimmed = msg.text.trim();
@@ -428,7 +432,7 @@ export class Orchestrator {
       await this.postReplyOrInterrupted(
         await this.route(
           { text: trimmed.slice('ask '.length), userId: msg.userId },
-          undefined,
+          delta, // 답변 실시간 스트리밍: onChunk 자리 — 미주입(delta undefined)이면 기존과 바이트 동일(회귀 0)
           this.askUserFor(post),
           activity,
           (names) => { toolsUsed = names; },
@@ -493,7 +497,8 @@ export class Orchestrator {
     }
     let toolsUsed: string[] = [];
     await this.postReplyOrInterrupted(
-      await this.route(msg, undefined, this.askUserFor(post), activity, (names) => { toolsUsed = names; }, signal),
+      // 답변 실시간 스트리밍: delta가 route의 onChunk 자리 — 미주입이면 기존과 바이트 동일(회귀 0).
+      await this.route(msg, delta, this.askUserFor(post), activity, (names) => { toolsUsed = names; }, signal),
       post,
       signal,
       undefined,

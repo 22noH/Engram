@@ -9,6 +9,8 @@ export class FakeMessenger implements MessengerPort {
   // Task 1(brain-activity): 브리지가 port.activity 유무로 activity fn을 빌드하므로 여기 구현해둬야
   // bindMessenger의 그 분기를 테스트로 확인할 수 있다(추가만 — 안 부르는 기존 테스트는 그대로 통과).
   readonly activities: Array<{ channelId: string; label: string }> = [];
+  // 답변 실시간 스트리밍: activities와 같은 이유(브리지가 port.delta 유무로 delta fn을 빌드한다).
+  readonly deltas: Array<{ channelId: string; text: string }> = [];
 
   onMention(handler: (e: MentionEvent) => Promise<void>): void {
     this.handler = handler;
@@ -26,6 +28,9 @@ export class FakeMessenger implements MessengerPort {
   }
   activity(channelId: string, label: string): void {
     this.activities.push({ channelId, label });
+  }
+  delta(channelId: string, text: string): void {
+    this.deltas.push({ channelId, text });
   }
   async start(): Promise<void> {}
   async stop(): Promise<void> {}

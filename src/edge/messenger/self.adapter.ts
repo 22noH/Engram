@@ -792,6 +792,12 @@ export class SelfMessenger implements MessengerPort {
     this.broadcastToChannel(channelId, { t: 'activity', channelId, label });
   }
 
+  // 답변 실시간 스트리밍: activity와 같은 휘발 브로드캐스트 — store.appendMessage를 거치지 않는다
+  // (저장 금지, 확정은 오직 reply()의 'msg' 프레임). 코얼레싱은 messenger-bridge가 이미 했다.
+  delta(channelId: string, text: string): void {
+    this.broadcastToChannel(channelId, { t: 'delta', channelId, text });
+  }
+
   // Phase 16a: 관리자가 계정을 정지/삭제할 때 그 계정의 연결 소켓을 즉시 끊는다.
   kickUser(userId: string): void {
     for (const [ws, acc] of this.users) {
