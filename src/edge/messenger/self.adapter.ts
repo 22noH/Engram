@@ -1,8 +1,8 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ServerFrame, Action, Message, EffortLevel } from '../../../shared/protocol';
+import type { ServerFrame, Action, Message, EffortLevel, PermMode } from '../../../shared/protocol';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
-import { ChatStore, isEffortLevel } from './chat-store';
+import { ChatStore, isEffortLevel, isPermMode } from './chat-store';
 import type { ChatChannel } from './chat-store';
 import { ChatConfig } from './chat.config';
 import { DEFAULT_USER } from '../../pal/path-resolver';
@@ -469,6 +469,19 @@ export class SelfMessenger implements MessengerPort {
           this.broadcastChannels();
           return;
         }
+        case 'setChannelPermMode': {
+          // 권한 모드(permMode): setChannelEffort와 동일 권한 게이트(canAdminChannel)·동일 계약.
+          // null=해제(→전역 설정 폴백), 허용값(PERM_MODES) 밖·비문자열은 조용히 무시. 검증은
+          // chat-store의 isPermMode 하나로(목록 단일 소스).
+          if (typeof f.id === 'string' && (f.permMode === null || isPermMode(f.permMode))) {
+            const ch = this.store.listChannels().find((c) => c.id === f.id);
+            if (this.canAdminChannel(ws, ch)) {
+              this.store.setChannelPermMode(f.id, f.permMode as PermMode | null);
+            }
+          }
+          this.broadcastChannels();
+          return;
+        }
         case 'clearHistory': {
           // clear-compact Task 3: setChannelBrain과 동일 게이트(canAdminChannel). 채널 대화 jsonl만
           // 건드린다(위키/RAG 무관 — Task 1 chat-store.clearChannel이 백업 rename으로 보장).
@@ -772,6 +785,7 @@ export class SelfMessenger implements MessengerPort {
       ...(ch.mode === 'code' ? { mode: 'code' as const, repoPath: ch.repoPath } : {}),
       ...(ch.brain ? { brain: ch.brain } : {}), // 스펙 §3.2: 채널의 brain을 이벤트에 실어나름(미설정 채널=회귀 0)
       ...(ch.effort ? { effort: ch.effort } : {}), // 노력(effort): brain과 같은 결(미설정 채널=필드 자체 없음)
+      ...(ch.permMode ? { permMode: ch.permMode } : {}), // 권한 모드: effort와 같은 결(미설정=전역 설정 폴백)
       ...(answeredQuestion ? { answeredQuestion } : {}), // 최종 리뷰 픽스: 답이 답한 질문(있을 때만)
       ...(attachmentsWithPath.length ? { attachments: attachmentsWithPath } : {}), // Task 3: 첨부 있을 때만
     };

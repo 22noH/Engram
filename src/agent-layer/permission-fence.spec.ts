@@ -190,3 +190,79 @@ describe('commandMode / assertCommandAllowed (Phase 8b-2)', () => {
     expect(() => fence.assertCommandAllowed('npm test')).toThrow(); // 지정 목록에 npm 없음
   });
 });
+
+// ─── 채널 권한 모드(코드 채널별) ────────────────────────────────────────────────
+// 핵심: 게이트가 "부팅 시 읽은 전역 설정"이 아니라 "이번 턴에 넘어온 모드"를 본다.
+// mode 미지정(undefined) = 전역 설정 그대로(=기존 동작, 회귀 0).
+describe('permMode(채널 권한 모드) — 턴 단위 주입', () => {
+  it('plan(계획만): 파일 쓰기도 명령도 전부 거부', async () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-plan-'));
+    try {
+      const fence = new PermissionFence(tmpFence(null)); // 전역=auto(가장 느슨) — 그래도 plan이 이긴다
+      await fence.load();
+      expect(() => fence.assertWritable(path.join(proj, 'a.ts'), 'plan')).toThrow();
+      expect(() => fence.assertCodingWrite(path.join(proj, 'a.ts'), [proj], 'plan')).toThrow();
+      expect(fence.shellEnabled('plan')).toBe(false);
+      expect(() => fence.assertCommandAllowed('npm test', 'plan')).toThrow();
+    } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+  });
+
+  it('files(파일만): 파일 쓰기는 되고 명령 실행은 거부', async () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-files-'));
+    try {
+      const fence = new PermissionFence(tmpFence(null));
+      await fence.load();
+      expect(() => fence.assertCodingWrite(path.join(proj, 'a.ts'), [proj], 'files')).not.toThrow();
+      expect(fence.shellEnabled('files')).toBe(false);
+      expect(() => fence.assertCommandAllowed('npm test', 'files')).toThrow();
+    } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+  });
+
+  it('restricted(제한): 승인된 명령만 — 전역이 auto여도 목록 밖은 거부', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'auto' } }));
+    await fence.load();
+    expect(fence.shellEnabled('restricted')).toBe(true);
+    expect(() => fence.assertCommandAllowed('npm test', 'restricted')).not.toThrow();
+    expect(() => fence.assertCommandAllowed('curl http://x', 'restricted')).toThrow();
+    expect(() => fence.assertCommandAllowed('npm test && curl x', 'restricted')).toThrow('연산자');
+  });
+
+  it('auto(자동): 전역이 off여도 이번 턴은 아무 명령이나 통과(부팅캐시 아님)', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'off' } }));
+    await fence.load();
+    expect(fence.shellEnabled()).toBe(false);           // 전역 폴백은 여전히 off
+    expect(fence.shellEnabled('auto')).toBe(true);      // 이번 턴은 auto
+    expect(() => fence.assertCommandAllowed('rm -rf /tmp/x', 'auto')).not.toThrow();
+  });
+
+  it('bypass(권한 무시): writePaths 울타리·프로젝트 스코프 밖도 허용', async () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-bp-'));
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-bp-out-'));
+    try {
+      const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [proj], denyPaths: [] } }));
+      await fence.load();
+      // 기본(모드 미지정)이면 울타리 밖 → 거부
+      expect(() => fence.assertCodingWrite(path.join(other, 'a.ts'), [proj])).toThrow();
+      // 권한 무시면 같은 경로가 허용된다
+      expect(() => fence.assertWritable(path.join(other, 'a.ts'), 'bypass')).not.toThrow();
+      expect(() => fence.assertCodingWrite(path.join(other, 'a.ts'), [proj], 'bypass')).not.toThrow();
+      expect(() => fence.assertCommandAllowed('anything --x', 'bypass')).not.toThrow();
+    } finally { fs.rmSync(proj, { recursive: true, force: true }); fs.rmSync(other, { recursive: true, force: true }); }
+  });
+
+  it('bypass여도 하드 백스톱(자기 저장소·시스템·denyPaths)은 못 뚫는다', () => {
+    const f = new PermissionFence('x', 'C:/engram-repo');
+    (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: ['C:/nope'] } };
+    expect(() => f.assertWritable('C:/engram-repo/src/x.ts', 'bypass')).toThrow('자기 저장소');
+    expect(() => f.assertWritable('C:/Windows/System32', 'bypass')).toThrow('시스템 폴더');
+    expect(() => f.assertWritable('C:/nope/x', 'bypass')).toThrow('denyPaths');
+  });
+
+  it('모드 미지정이면 전역 설정 그대로(회귀 0)', async () => {
+    const fence = new PermissionFence(tmpFence({ default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commandMode: 'allowlist' } }));
+    await fence.load();
+    expect(fence.shellEnabled(undefined)).toBe(true);
+    expect(() => fence.assertCommandAllowed('npm test', undefined)).not.toThrow();
+    expect(() => fence.assertCommandAllowed('curl x', undefined)).toThrow();
+  });
+});

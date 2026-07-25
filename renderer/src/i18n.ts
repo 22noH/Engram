@@ -1,4 +1,4 @@
-import type { EffortLevel } from '../../shared/protocol';
+import type { EffortLevel, PermMode } from '../../shared/protocol';
 import { ko } from './config';
 
 // "기본"/"Default" 기본 문구 — default(엔그램 선택기)·brainDefault(채널 두뇌 드롭다운)가 공유(중복 방지, 리뷰 지적).
@@ -213,6 +213,28 @@ export const T = {
   }[l]),
   effortFaster: ko ? '더 빠르게' : 'Faster',
   effortSmarter: ko ? '더 스마트하게' : 'Smarter',
+  // 권한 모드 배지 — 코드 채널 전용(Chat·Team은 같은 자리에 응답 모드 배지가 그대로 있다).
+  // "어디까지 알아서 할지". 미설정 채널은 서버 기본값(자동)으로 보인다.
+  permModeTitle: ko ? '권한 모드' : 'Permission mode',
+  permModeHeader: ko ? '권한 모드 — 어디까지 알아서 할지' : 'Permission mode — how far to go on its own',
+  permModeName: (m: PermMode) => ({
+    plan: ko ? '계획만' : 'Plan only',
+    files: ko ? '파일만' : 'Files only',
+    restricted: ko ? '제한' : 'Restricted',
+    auto: ko ? '자동' : 'Auto',
+    bypass: ko ? '권한 무시' : 'Bypass permissions',
+  }[m]),
+  permModeDesc: (m: PermMode) => ({
+    plan: ko ? '읽고 분석해서 계획만 세웁니다. 파일 수정·명령 실행 없음' : 'Reads and plans only — no file edits, no commands',
+    files: ko ? '파일은 고치되 명령은 실행하지 않습니다' : 'Edits files, but never runs commands',
+    restricted: ko ? '승인된 명령 목록만 실행합니다 (설정에서 목록 관리)' : 'Runs only approved commands (managed in settings)',
+    auto: ko ? '아무 명령이나 실행합니다' : 'Runs any command',
+    bypass: ko ? '폴더 밖 파일까지 수정 허용 — 위험' : 'Allows edits outside the project folder — risky',
+  }[m]),
+  // ⚠️ 되돌리기 어려운 위험 설정이라 선택 시 한 번 확인한다.
+  permBypassConfirm: ko
+    ? '권한 무시를 켜면 프로젝트 폴더 밖 파일까지 수정할 수 있어요. 계속할까요?'
+    : 'Bypassing permissions lets it edit files outside the project folder. Continue?',
   // ─── 코드 채널 상단 줄(⑂ 브랜치 +추가 −삭제 [PR 생성]) ──────────────────────
   gitBranchTitle: ko ? '현재 브랜치' : 'Current branch',
   gitDetached: ko ? '분리된 HEAD' : 'Detached HEAD',

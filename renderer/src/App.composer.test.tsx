@@ -177,6 +177,84 @@ describe('B3. 노력 배지(코드 채널 전용)', () => {
   });
 });
 
+// 코드 채널 권한 모드(목업 승인) — 코드 채널에서만 왼쪽 배지가 "응답 모드" 대신 "권한 모드"가 된다.
+// Chat·Team은 기존 응답 모드 그대로(회귀 0).
+describe('B3-2. 권한 모드 배지(코드 채널 전용)', () => {
+  it('chat 채널은 기존 응답 모드 배지 그대로 — 권한 모드 배지는 없다', async () => {
+    await openApp([CHAT]);
+    expect(q('.respondBadge')).toBeInTheDocument();
+    expect(q('.permBadge')).toBeNull();
+  });
+
+  it('코드 채널은 권한 모드 배지로 바뀐다(응답 모드 배지 없음)', async () => {
+    await openApp([CODE], { code: true });
+    expect(q('.permBadge')).toBeInTheDocument();
+    expect(q('.respondBadge')).toBeNull();
+  });
+
+  it('미설정 채널 라벨은 기본값 "자동"', async () => {
+    await openApp([CODE], { code: true });
+    expect(q('.permBadge')?.textContent).toContain(T.permModeName('auto'));
+  });
+
+  it('채널에 실린 permMode 값을 라벨로 보여준다', async () => {
+    await openApp([{ ...CODE, permMode: 'plan' }], { code: true });
+    expect(q('.permBadge')?.textContent).toContain(T.permModeName('plan'));
+  });
+
+  it('클릭하면 5개 모드와 설명이 뜬다', async () => {
+    await openApp([CODE], { code: true });
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    for (const m of ['plan', 'files', 'restricted', 'auto', 'bypass'] as const) {
+      expect(screen.getByText(T.permModeName(m))).toBeInTheDocument();
+      expect(screen.getByText(T.permModeDesc(m))).toBeInTheDocument();
+    }
+  });
+
+  it('모드 선택 → setChannelPermMode 프레임을 보낸다', async () => {
+    const ws = await openApp([CODE], { code: true });
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    act(() => { fireEvent.click(screen.getByText(T.permModeName('files'))); });
+    await waitFor(() => expect(frames(ws).some(
+      (f) => f.t === 'setChannelPermMode' && f.id === 'w-code' && f.permMode === 'files',
+    )).toBe(true));
+  });
+
+  it('"권한 무시"는 danger 표시 + 확인 대화를 거친다 — 거부하면 프레임을 안 보낸다', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const ws = await openApp([CODE], { code: true });
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    expect(q('.cbadgeMenu .item.danger')?.textContent).toContain(T.permModeName('bypass'));
+    act(() => { fireEvent.click(screen.getByText(T.permModeName('bypass'))); });
+    expect(confirmSpy).toHaveBeenCalledWith(T.permBypassConfirm);
+    expect(frames(ws).some((f) => f.t === 'setChannelPermMode')).toBe(false);
+  });
+
+  it('"권한 무시"를 확인하면 그때 프레임이 나간다', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const ws = await openApp([CODE], { code: true });
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    act(() => { fireEvent.click(screen.getByText(T.permModeName('bypass'))); });
+    await waitFor(() => expect(frames(ws).some(
+      (f) => f.t === 'setChannelPermMode' && f.permMode === 'bypass',
+    )).toBe(true));
+  });
+
+  it('권한 무시가 아닌 모드는 확인 대화 없이 바로 적용된다', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    const ws = await openApp([{ ...CODE, permMode: 'bypass' }], { code: true });
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    act(() => { fireEvent.click(screen.getByText(T.permModeName('auto'))); });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(frames(ws).some((f) => f.t === 'setChannelPermMode' && f.permMode === 'auto')).toBe(true));
+  });
+
+  it('원격 연결에서도 보인다(서버 설정이 아니라 채널 설정)', async () => {
+    await openApp([CODE], { code: true, remote: true });
+    expect(q('.permBadge')).toBeInTheDocument();
+  });
+});
+
 describe('B4. 원격 연결이면 모델·노력 배지를 숨긴다', () => {
   it('원격(비루프백 엔드포인트) — 모델 배지 없음, 연결 배지는 그대로', async () => {
     await openApp([CHAT], { remote: true });

@@ -342,6 +342,60 @@ describe('ChatStore.setChannelEffort — 채널별 노력 저장(brain과 동일
   });
 });
 
+describe('ChatStore.setChannelPermMode — 채널별 권한 모드(effort와 동일 관례)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-permmode-'));
+    store = new ChatStore(dir);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('설정→영속 재로드에 남는다', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    expect(store.setChannelPermMode(ch.id, 'plan')).toBe(true);
+    expect(new ChatStore(dir).listChannels().find((c) => c.id === ch.id)?.permMode).toBe('plan');
+  });
+
+  it('null 해제→필드 자체 삭제(전역 설정 폴백으로 되돌아감)', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    store.setChannelPermMode(ch.id, 'bypass');
+    expect(store.setChannelPermMode(ch.id, null)).toBe(true);
+    expect(new ChatStore(dir).listChannels().find((c) => c.id === ch.id)?.permMode).toBeUndefined();
+  });
+
+  it('허용값(plan/files/restricted/auto/bypass)이 아니면 false·미변경', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    store.setChannelPermMode(ch.id, 'files');
+    expect(store.setChannelPermMode(ch.id, 'yolo' as any)).toBe(false);
+    expect(store.listChannels().find((c) => c.id === ch.id)?.permMode).toBe('files');
+  });
+
+  it('없는 채널 id는 false', () => {
+    expect(store.setChannelPermMode('nope', 'auto')).toBe(false);
+  });
+
+  it('로드 정규화: 오염된 permMode는 드롭한다', () => {
+    fs.writeFileSync(
+      path.join(dir, 'channels.json'),
+      JSON.stringify([
+        { id: 'a', name: 'a', respondMode: 'all', permMode: 7 },
+        { id: 'b', name: 'b', respondMode: 'all', permMode: 'yolo' },
+        { id: 'c', name: 'c', respondMode: 'all', permMode: 'bypass' },
+      ]),
+    );
+    const chs = new ChatStore(dir).listChannels();
+    expect(chs.find((c) => c.id === 'a')?.permMode).toBeUndefined();
+    expect(chs.find((c) => c.id === 'b')?.permMode).toBeUndefined();
+    expect(chs.find((c) => c.id === 'c')?.permMode).toBe('bypass');
+  });
+
+  it('permMode 없는 기존 채널 로드는 무변경(회귀 0 — 전역 설정 폴백)', () => {
+    fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([{ id: 'general', name: 'general', respondMode: 'all' }]));
+    expect(new ChatStore(dir).listChannels()[0].permMode).toBeUndefined();
+  });
+});
+
 // Minor 1(최종 리뷰): listChannels 정규화는 필드 화이트리스트라 ChatChannel에 필드를 늘리고 여기
 // 손대지 않으면 조용히 소실된다 — 전 필드가 채워진 채널이 listChannels→save→listChannels를
 // 왕복해도 그대로 남는지 지키는 가드.
@@ -363,6 +417,7 @@ describe('ChatStore listChannels 정규화 왕복(Minor 1 가드)', () => {
       memberIds: ['user-1', 'user-2'],
       brain: 'claude-opus',
       effort: 'xhigh' as const,
+      permMode: 'restricted' as const,
     };
     fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([full]));
     const store = new ChatStore(dir);

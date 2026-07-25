@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Persona } from './persona-registry';
+import type { PermMode } from '../../shared/protocol';
 
 export interface FenceConfig {
   default: 'deny';
@@ -33,6 +34,16 @@ function systemDirs(): string[] {
 }
 const SYSTEM_DENY = systemDirs();
 
+// 권한 모드 → 명령 실행 정책. 채널 권한 모드가 이번 턴에 주입되면 전역 commandMode 대신 이 표를 쓴다
+// (부팅 시 캐시한 값이 아니라 "이번 턴의 값"이 이긴다 — 채널별 모드가 재시작 없이 즉시 먹히는 근거).
+const PERM_TO_COMMAND: Record<PermMode, 'auto' | 'allowlist' | 'off'> = {
+  plan: 'off',        // 계획만 — 파일도 못 쓰고 명령도 못 씀
+  files: 'off',       // 파일만 — 파일은 쓰되 명령은 못 씀
+  restricted: 'allowlist',
+  auto: 'auto',
+  bypass: 'auto',     // 권한 무시는 자동 이상(파일 울타리까지 해제)
+};
+
 // 도구 권한 울타리(설계 §8). 새 권한엔진 ❌ — 네이티브 권한 플래그를 산출만. default-deny.
 @Injectable()
 export class PermissionFence {
@@ -46,6 +57,9 @@ export class PermissionFence {
   // 명령 실행(테스트·빌드)은 에이전트가 아니라 VerificationGate(Engram)가 직접 한다(§8.1).
   // Bash 자율 허용은 OS 샌드박스 붙인 후속(감독/샌드박스 모드)으로 보류.
   static readonly CODING_TOOLS = ['Edit', 'Write', 'Read', 'Glob', 'Grep'];
+
+  // 권한 모드 plan(계획만)용 읽기 전용 toolset — CODING_TOOLS에서 쓰기 도구(Edit/Write)만 뺀 것.
+  static readonly READONLY_TOOLS = ['Read', 'Glob', 'Grep'];
 
   // 백스톱 검사: 자기 repo·시스템·config denyPaths 중 하나라도 포함이면 true.
   private isDenied(p: string): boolean {
@@ -98,8 +112,9 @@ export class PermissionFence {
   // 자기수정·자기파괴 차단: Engram repo는 engramRoot 하드코딩 + denyPaths에도 등록 가능.
   // 쓰기 가능 검증(자동 권한 스펙). 백스톱(자기 repo·시스템) 무조건 거부 →
   // writePaths 지정 시 엄격 allowlist, 비어 있으면 자동모드(백스톱 밖 = 허용, 명시 타깃 = 동의).
-  assertWritable(targetPath: string): void {
-    // 하드 백스톱(설정 무관): Engram 자기 저장소 + 시스템 폴더는 절대 수정 불가.
+  // 하드 백스톱(설정·모드 무관): Engram 자기 저장소 + 시스템 폴더 + denyPaths. "권한 무시(bypass)"도
+  // 이 셋은 못 뚫는다 — 자기수정·시스템 파괴는 사용자가 켤 수 있는 선택지가 아니다.
+  private assertBackstops(targetPath: string): void {
     if (this.engramRoot && PermissionFence.isWithin(targetPath, this.engramRoot)) {
       throw new Error(`Engram 자기 저장소는 수정 불가(자기수정 차단): ${targetPath}`);
     }
@@ -109,6 +124,17 @@ export class PermissionFence {
     if (this.cfg.allow.denyPaths.some((d) => PermissionFence.isWithin(targetPath, d))) {
       throw new Error(`쓰기 금지 경로(denyPaths): ${targetPath}`);
     }
+  }
+
+  // mode: 이번 턴의 채널 권한 모드(코드 채널별). 미지정=전역 설정 그대로(기존 동작, 회귀 0).
+  //  - plan   : 파일 쓰기 자체가 금지
+  //  - bypass : writePaths 울타리 해제(백스톱은 유지)
+  assertWritable(targetPath: string, mode?: PermMode): void {
+    if (mode === 'plan') {
+      throw new Error(`계획만(plan) 모드에선 파일을 수정할 수 없습니다: ${targetPath}`);
+    }
+    this.assertBackstops(targetPath);
+    if (mode === 'bypass') return; // 권한 무시: 사용자가 명시적으로 울타리를 푼 상태
     // writePaths가 지정되면 엄격 allowlist 모드. 비어있으면 자동모드 = 백스톱 밖 허용(명시 타깃 = 동의).
     if (
       this.cfg.allow.writePaths.length > 0 &&
@@ -120,16 +146,20 @@ export class PermissionFence {
 
   // 자동 코딩 권한 플래그(자동모드). 페르소나 grant 무관 표준 toolset + 백스톱 밖 타깃 스코프.
   // permission-mode(acceptEdits)는 CodingSpecialist가 덧붙인다.
-  codingAutoFlags(writePaths: string[]): string[] {
-    const flags = ['--allowedTools', PermissionFence.CODING_TOOLS.join(',')];
+  // mode='plan'이면 CLI 두뇌에도 쓰기 도구를 안 준다 — CLI는 codeGuard가 아니라 이 플래그로만
+  // 통제되므로(--allowedTools), 여기서 걸러야 "계획만"이 CLI 경로에서도 실제로 지켜진다.
+  codingAutoFlags(writePaths: string[], mode?: PermMode): string[] {
+    const tools = mode === 'plan' ? PermissionFence.READONLY_TOOLS : PermissionFence.CODING_TOOLS;
+    const flags = ['--allowedTools', tools.join(',')];
     for (const w of writePaths.filter((p) => !this.isDenied(p))) flags.push('--add-dir', w);
     return flags;
   }
 
   // API 코딩 루프용 쓰기 판정(스펙 §5.1): 백스톱 + 프로젝트 쓰기 스코프. 막히면 throw.
   // CLI는 --add-dir로 스코프를 강제하지만 API 두뇌는 이 판정을 주입받아(codeGuard) 쓴다.
-  assertCodingWrite(targetPath: string, projectWritePaths: string[]): void {
-    this.assertWritable(targetPath); // 백스톱(자기repo·시스템·denyPaths) + cfg writePaths
+  assertCodingWrite(targetPath: string, projectWritePaths: string[], mode?: PermMode): void {
+    this.assertWritable(targetPath, mode); // 백스톱(자기repo·시스템·denyPaths) + cfg writePaths
+    if (mode === 'bypass') return;         // 권한 무시: 프로젝트 쓰기 스코프도 해제(폴더 밖 수정 허용)
     if (
       projectWritePaths.length > 0 &&
       !projectWritePaths.some((w) => PermissionFence.isWithin(targetPath, w))
@@ -138,16 +168,30 @@ export class PermissionFence {
     }
   }
 
+  // 이번 턴에 적용할 명령 정책. 채널 권한 모드가 있으면 그것이 이기고(턴 단위), 없으면 전역 설정
+  // (permissions.json allow.commandMode — 부팅 시 load된 값)으로 폴백한다.
+  private commandPolicy(mode?: PermMode): 'auto' | 'allowlist' | 'off' {
+    if (mode) return PERM_TO_COMMAND[mode];
+    return this.cfg.allow.commandMode ?? 'auto';
+  }
+
   // 셸 켜짐 여부(off면 Bash 도구 미노출). CodingSpecialist가 cmdGuard 주입 판단에 사용.
-  shellEnabled(): boolean {
-    return (this.cfg.allow.commandMode ?? 'auto') !== 'off';
+  // mode: 이번 턴의 채널 권한 모드(미지정=전역 설정 폴백).
+  shellEnabled(mode?: PermMode): boolean {
+    return this.commandPolicy(mode) !== 'off';
   }
 
   // 명령 판정(스펙 §6.3). auto=무조건 통과, off=거부, allowlist=연산자 거부+실행파일 목록 검사.
-  assertCommandAllowed(command: string): void {
-    const mode = this.cfg.allow.commandMode ?? 'auto';
+  // mode: 이번 턴의 채널 권한 모드(미지정=전역 설정 폴백).
+  assertCommandAllowed(command: string, permMode?: PermMode): void {
+    const mode = this.commandPolicy(permMode);
     if (mode === 'auto') return;
-    if (mode === 'off') throw new Error('셸이 비활성화됨(commandMode: off)');
+    if (mode === 'off') {
+      // 사유를 갈라 보여준다: 채널 권한 모드로 꺼진 건지, 전역 설정으로 꺼진 건지가 고치는 방법이 다르다.
+      if (permMode === 'plan') throw new Error(`계획만(plan) 모드에선 명령을 실행할 수 없습니다: ${command}`);
+      if (permMode === 'files') throw new Error(`파일만(files) 모드에선 명령을 실행할 수 없습니다: ${command}`);
+      throw new Error('셸이 비활성화됨(commandMode: off)');
+    }
     // 셸 연산자·개행 거부(단일 명령만). Bash 도구는 shell:true라 개행(\n)도 POSIX에선 명령 구분자 → 반드시 차단.
     if (/[&|;<>`\r\n]|\$\(/.test(command)) throw new Error(`allowlist 모드에선 셸 연산자 금지: ${command}`);
     const exe = command.trim().split(/\s+/)[0];

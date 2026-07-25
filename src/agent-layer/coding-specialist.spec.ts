@@ -1,4 +1,21 @@
 import { CodingSpecialist, CODING_RULES_DEFAULT } from './coding-specialist';
+import { PermissionFence } from './permission-fence';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+// 진짜 PermissionFence로 모드별 차단을 실증하기 위한 헬퍼(permission-fence.spec.ts와 동일 결).
+function fencePath(cfg: any): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-cs-fence-'));
+  const p = path.join(dir, 'permissions.json');
+  if (cfg) fs.writeFileSync(p, JSON.stringify(cfg));
+  return p;
+}
+let sharedTmp: string | undefined;
+function tmpDir(): string {
+  if (!sharedTmp) sharedTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-cs-proj-')).replace(/\\/g, '/');
+  return sharedTmp;
+}
 
 describe('CodingSpecialist', () => {
   const registry = { get: (n: string) => n === 'Dev' ? { name: 'Dev', brain: 'claude', tools: ['Bash','Edit','Write'], prompt: 'You code.' } : undefined } as any;
@@ -116,5 +133,88 @@ describe('CodingSpecialist', () => {
     const spec = new CodingSpecialist(registry, fence, () => brain as any, logger);
     const out = await spec.work('Dev', { id: 'tk1', area: 'src/a', instruction: '로그인 고쳐', status: 'PENDING', attempts: 0, gate: null }, project);
     expect(out).toBe('작업함');
+  });
+
+  // ─── 채널 권한 모드(permMode) 관통 ────────────────────────────────────────────
+  // 게이트가 "부팅 시 캐시한 전역값"이 아니라 "이번 턴에 넘어온 모드"를 보는지 — 주입 인자로 실증.
+  describe('permMode 관통', () => {
+    const ticket = { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING', attempts: 0, gate: null } as any;
+
+    it('permMode를 shellEnabled·codeGuard·cmdGuard 판정에 그대로 넘긴다', async () => {
+      const seen: any = { shell: [], code: [], cmd: [] };
+      const fence2 = {
+        codingAutoFlags: () => ['--allowedTools', 'Edit'],
+        assertCodingWrite: (t: string, s: string[], m?: string) => { seen.code.push([t, s, m]); },
+        shellEnabled: (m?: string) => { seen.shell.push(m); return true; },
+        assertCommandAllowed: (c: string, m?: string) => { seen.cmd.push([c, m]); },
+      } as any;
+      const captured: any = {};
+      const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+      const spec = new CodingSpecialist(registry, fence2, () => brain as any, logger);
+      await spec.work('Dev', ticket, project, undefined, undefined, 'restricted');
+      expect(seen.shell).toEqual(['restricted']);
+      captured.opts.codeGuard('C:/proj/a.ts');
+      captured.opts.cmdGuard('npm test');
+      expect(seen.code).toEqual([['C:/proj/a.ts', ['C:/proj'], 'restricted']]);
+      expect(seen.cmd).toEqual([['npm test', 'restricted']]);
+    });
+
+    it('files(파일만): 진짜 fence로 — 파일 쓰기는 통과, 명령 실행 도구는 아예 미노출', async () => {
+      const fence2 = new PermissionFence(fencePath(null)); // 전역 = auto(가장 느슨)
+      await fence2.load();
+      const captured: any = {};
+      const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+      const spec = new CodingSpecialist(registry, fence2 as any, () => brain as any, logger);
+      const proj = { targetPath: tmpDir(), writePaths: [] } as any;
+      await spec.work('Dev', ticket, proj, undefined, undefined, 'files');
+      expect(captured.opts.cmdGuard).toBeUndefined(); // 명령 실행 = 거부(도구 자체가 안 붙는다)
+      expect(() => captured.opts.codeGuard(`${proj.targetPath}/a.ts`)).not.toThrow(); // 파일 수정은 허용
+    });
+
+    it('plan(계획만): 진짜 fence로 — 파일 쓰기도 거부 + CLI 플래그에 쓰기 도구 없음', async () => {
+      const fence2 = new PermissionFence(fencePath(null));
+      await fence2.load();
+      const captured: any = {};
+      const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+      const spec = new CodingSpecialist(registry, fence2 as any, () => brain as any, logger);
+      const proj = { targetPath: tmpDir(), writePaths: [] } as any;
+      await spec.work('Dev', ticket, proj, undefined, undefined, 'plan');
+      expect(captured.opts.cmdGuard).toBeUndefined();
+      expect(() => captured.opts.codeGuard(`${proj.targetPath}/a.ts`)).toThrow(/계획만/);
+      const args: string[] = captured.opts.extraArgs;
+      expect(args.join(',')).not.toContain('Edit');         // CLI 두뇌에도 쓰기 도구 미노출
+      expect(args.join(',')).not.toContain('Write');
+      expect(args).not.toContain('acceptEdits');            // 자동 편집 승인도 안 붙인다
+      expect(args.join(',')).toContain('Read');             // 읽기는 된다
+    });
+
+    it('bypass(권한 무시): 진짜 fence로 — 프로젝트 쓰기 스코프 밖도 허용', async () => {
+      const fence2 = new PermissionFence(fencePath(null));
+      await fence2.load();
+      const captured: any = {};
+      const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+      const spec = new CodingSpecialist(registry, fence2 as any, () => brain as any, logger);
+      const proj = { targetPath: tmpDir(), writePaths: [tmpDir()] } as any;
+      const outside = `${tmpDir()}/outside/a.ts`;
+      await spec.work('Dev', ticket, proj, undefined, undefined, 'bypass');
+      expect(() => captured.opts.codeGuard(outside)).not.toThrow();
+      expect(typeof captured.opts.cmdGuard).toBe('function'); // 명령도 자동
+    });
+
+    it('permMode 미지정이면 기존 동작 그대로(전역 설정 폴백, 회귀 0)', async () => {
+      const seen: any[] = [];
+      const fence2 = {
+        codingAutoFlags: () => [],
+        assertCodingWrite: (t: string, s: string[], m?: string) => { seen.push(m); },
+        shellEnabled: (m?: string) => { seen.push(m); return false; },
+        assertCommandAllowed: () => {},
+      } as any;
+      const captured: any = {};
+      const brain = { complete: (_p: string, _c: any, opts: any) => { captured.opts = opts; return Promise.resolve({ text: 'ok', costUsd: 0, isError: false }); } };
+      const spec = new CodingSpecialist(registry, fence2, () => brain as any, logger);
+      await spec.work('Dev', ticket, project);
+      captured.opts.codeGuard('C:/proj/a.ts');
+      expect(seen).toEqual([undefined, undefined]); // 어느 게이트에도 모드가 안 붙는다
+    });
   });
 });

@@ -33,6 +33,11 @@ const MESSAGES: Record<string, Entry> = {
   criteriaMet: { en: () => '✓ Acceptance criteria met — done', ko: () => '✓ 완성조건 충족 — 완료' },
   criteriaMetStored: { en: () => 'Acceptance criteria met — awaiting human merge', ko: () => '완성조건 충족 — 사람 머지 대기' },
   startCodingConfirm: { en: () => 'Start autonomous coding?', ko: () => '자율 코딩을 시작할까요?' },
+  // 권한 모드 plan(계획만): 이 채널은 읽고 계획만 세우기로 돼 있어 구현 진입을 막았을 때의 안내.
+  planOnlyBlocked: {
+    en: () => "This channel is in Plan-only mode — I can read and plan, but not change files or run commands. Switch the mode in the composer badge to go ahead.",
+    ko: () => '이 채널은 계획만 모드예요 — 읽고 계획은 세우지만 파일 수정·명령 실행은 안 해요. 진행하려면 입력창의 모드 배지에서 바꿔주세요.',
+  },
   // Action labels (send 값은 코드에 그대로, label만 여기)
   startImplementationLabel: { en: () => 'Start implementation', ko: () => '구현 시작' },
   cancelLabel: { en: () => 'Cancel', ko: () => '취소' },

@@ -396,6 +396,24 @@ describe('SelfMessenger 프로토콜 확장', () => {
     expect(events[0].effort).toBe('xhigh');
   });
 
+  it('권한 모드가 설정된 채널 send는 mention 이벤트에 permMode를 싣는다(effort와 동일 관례)', async () => {
+    const ch = store.createChannel('coding-perm', 'code')!;
+    store.setChannelPermMode(ch.id, 'files');
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect(events[0].permMode).toBe('files');
+  });
+
+  it('권한 모드 미설정 채널 send는 mention 이벤트에 permMode 필드가 아예 없다(회귀 0)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect('permMode' in events[0]).toBe(false);
+  });
+
   it('노력 미설정 채널 send는 mention 이벤트에 effort 필드가 아예 없다(회귀 0)', async () => {
     const events: MentionEvent[] = [];
     sm.onMention(async (e) => { events.push(e); });
@@ -513,6 +531,30 @@ describe('setChannelBrain(Task 3)', () => {
     client.send(JSON.stringify({ t: 'setChannelEffort', id: ch.id, effort: 'turbo' }));
     const f = await nextFrame(client);
     expect(f.list.find((c: { id: string; effort?: string }) => c.id === ch.id)?.effort).toBeUndefined();
+  });
+
+  // 권한 모드(permMode): setChannelEffort와 같은 프레임 관례(필드 이름 id)·같은 권한 게이트·같은 브로드캐스트.
+  it('setChannelPermMode 프레임이 채널 권한 모드를 저장하고 channels 브로드캐스트에 실린다', async () => {
+    const ch = store.createChannel('coding-p1', 'code')!;
+    client.send(JSON.stringify({ t: 'setChannelPermMode', id: ch.id, permMode: 'plan' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { id: string; permMode?: string }) => c.id === ch.id)?.permMode).toBe('plan');
+  });
+
+  it('permMode: null은 해제(필드 삭제 → 전역 설정 폴백)', async () => {
+    const ch = store.createChannel('coding-p2', 'code')!;
+    store.setChannelPermMode(ch.id, 'bypass');
+    client.send(JSON.stringify({ t: 'setChannelPermMode', id: ch.id, permMode: null }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; permMode?: string }) => c.id === ch.id)?.permMode).toBeUndefined();
+  });
+
+  it('permMode 허용값 밖(오타·비문자열)은 조용히 무시', async () => {
+    const ch = store.createChannel('coding-p3', 'code')!;
+    client.send(JSON.stringify({ t: 'setChannelPermMode', id: ch.id, permMode: 'yolo' }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; permMode?: string }) => c.id === ch.id)?.permMode).toBeUndefined();
   });
 
   it('channels 요청 응답에도 brainNames·defaultBrain이 동봉된다', async () => {

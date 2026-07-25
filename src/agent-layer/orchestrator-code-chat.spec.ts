@@ -128,7 +128,8 @@ it('[구현 시작] 누르면 startProposal로 escalate', async () => {
     { text: '구현 시작', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
   );
   // 5번째 인자는 요청 한정 채널 두뇌(Task 2, 스펙 §3.2) — channelBrain 미주입이면 codeBrain 그대로 전달.
-  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙이기', 'c1', expect.any(Function), expect.anything());
+  // 6번째는 이 턴의 채널 권한 모드(permMode) — 채널에 값이 없으면 undefined(=전역 설정 폴백).
+  expect(spyProposal).toHaveBeenCalledWith('C:/repo/app', '로그인 붙이기', 'c1', expect.any(Function), expect.anything(), undefined);
   expect((orch as any).pending.get('c1')).toBeUndefined(); // proposeReady 소비됨
 });
 

@@ -363,6 +363,16 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
                     white-space:nowrap; }
 .cbadgeMenu .item:hover { background:var(--hover); }
 .cbadgeMenu .item.sel { background:var(--accent-soft); font-weight:600; }
+/* 권한 모드 팝오버(코드 채널) — 항목마다 이름 + 설명 한 줄. 기존 토큰만 사용. */
+.cbadgeMenu.permPop { min-width:300px; }
+.permHead { font-size:11px; color:var(--dim); padding:4px 10px 6px; }
+.cbadgeMenu .item.permItem { white-space:normal; }
+.permName { font-size:13px; color:var(--text); }
+.permDesc { font-size:11px; color:var(--dim); margin-top:2px; line-height:1.5; }
+.permSep { height:1px; background:var(--line); margin:5px 2px; }
+.cbadgeMenu .item.danger .permName { color:var(--danger); }
+.cbadge.permBadge.danger { border-color:var(--danger); color:var(--danger); }
+
 /* 노력 슬라이더 팝오버 — 좌 "더 빠르게" ↔ 우 "더 스마트하게" 5단계. */
 .cbadgeMenu.effortPop { min-width:240px; padding:10px 12px 8px; }
 .effortEnds { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-bottom:6px; }

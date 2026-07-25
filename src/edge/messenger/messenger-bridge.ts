@@ -76,6 +76,8 @@ export function bindMessenger(
           ...(e.brain ? { brain: e.brain } : {}),
           // 노력(effort): 채널에 저장된 값을 그대로 넘긴다 — 실제 적용값은 orchestrator가 정한다(단일 지점).
           ...(e.effort ? { effort: e.effort } : {}),
+          // 권한 모드(permMode): effort와 동일 — 채널 저장값을 그대로 넘기고 적용 판단은 orchestrator.
+          ...(e.permMode ? { permMode: e.permMode } : {}),
           // Task 3(chat-attachments): additive 관통 — 미첨부 send는 기존과 바이트 동일(회귀 0).
           ...(e.attachments && e.attachments.length ? { attachments: e.attachments } : {}),
         },

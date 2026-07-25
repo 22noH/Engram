@@ -11,6 +11,7 @@ import { Synthesizer } from './synthesizer';
 import { Semaphore } from '../brain/semaphore';
 import { TurnBudget } from './turn-budget';
 import { BrainProvider, BRAIN, EffortLevel } from '../brain/brain.port';
+import type { PermMode } from '../../shared/protocol';
 import { parseJsonBlock } from './parse-json-block';
 import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
@@ -320,6 +321,25 @@ export class Orchestrator {
     return msg.mode === 'code' ? (msg.effort ?? 'high') : 'high';
   }
 
+  // 권한 모드(permMode) 단일 결정 지점 — resolveTurnEffort와 같은 결. 코드 채널만 채널에 저장된 값을
+  // 쓰고(Chat·Team은 설정 UI가 없으니 값이 섞여 들어와도 무시), 값이 없으면 undefined를 그대로 흘린다.
+  // undefined = "이 턴엔 모드 주입 없음" → PermissionFence가 전역 설정(permissions.json
+  // allow.commandMode)으로 폴백한다(기존 동작 보존 = 회귀 0).
+  // ⚠️ 중요: 이 값은 턴마다 새로 계산돼 코딩 실행부(codeRun→CodingSpecialist.work→fence 게이트)까지
+  // 인자로 흘러간다. 부팅 시 fence.load()가 캐시한 값이 아니라 이 인자가 이번 턴의 판정을 지배하므로
+  // 채널 모드 변경이 재시작 없이 즉시 먹힌다(전역 coding 설정의 appliesAfterRestart 함정 회피).
+  private resolveTurnPermMode(msg: CoreMessage): PermMode | undefined {
+    return msg.mode === 'code' ? msg.permMode : undefined;
+  }
+
+  // 계획만(plan) 모드면 구현 진입을 막고 안내를 게시한다(true=막음). 코딩으로 들어가는 문이 여러 개라
+  // (제안 버튼·승인·code/resume 명령) 판단을 여기 한 곳으로 모은다. plan이 아니면 아무 것도 안 한다.
+  private async denyIfPlanOnly(permMode: PermMode | undefined, post: PostFn): Promise<boolean> {
+    if (permMode !== 'plan') return false;
+    await post(t('planOnlyBlocked'));
+    return true;
+  }
+
   private async handleMentionCore(
     msg: CoreMessage,
     post: PostFn,
@@ -334,6 +354,8 @@ export class Orchestrator {
     // 이 턴에 적용할 노력(단일 결정 지점) — 아래 답변 경로(route·answerInCode)로만 흘린다.
     // 분류(classify)·코딩 루프 등 내부 호출엔 안 싣는다(그쪽은 별도 예산 정책, 회귀 0).
     const effort = this.resolveTurnEffort(msg);
+    // 이 턴에 적용할 권한 모드(단일 결정 지점) — 아래 코딩 진입 경로 전부가 이 지역 변수를 공유한다.
+    const permMode = this.resolveTurnPermMode(msg);
 
     // 상태 조회: 이 스레드의 진행/최근 작업 보고.
     if (trimmed === '상태' || trimmed === 'status') {
@@ -353,21 +375,24 @@ export class Orchestrator {
           const n = parseInt(trimmed, 10);
           if (n < 1 || n > p.candidates.length) { await post(t('chooseFromRange', p.candidates.length)); return; }
           this.pending.delete(threadKey);
-          await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post, brain);
+          if (await this.denyIfPlanOnly(permMode, post)) return;
+          await this.startProposal(p.candidates[n - 1], p.goal, threadKey, post, brain, permMode);
           return;
         }
         // 비숫자·비취소 → 이 스레드의 모호선택을 포기(스테일 방지), 아래 일반 처리로 흐름.
         this.pending.delete(threadKey);
       } else if (p.kind === 'approve' && (trimmed === '승인' || trimmed === 'approve')) {
         this.pending.delete(threadKey);
+        if (await this.denyIfPlanOnly(permMode, post)) return;
         await this.approveProject(p.projectId);
-        this.launchCoding(p.projectId, p.path, threadKey, post, 0, brain);
+        this.launchCoding(p.projectId, p.path, threadKey, post, 0, brain, permMode);
         return;
       } else if (p.kind === 'proposeReady') {
         if (trimmed === '구현 시작' || trimmed === '승인' || trimmed === 'approve') {
           this.pending.delete(threadKey);
+          if (await this.denyIfPlanOnly(permMode, post)) return;
           if (!(await this.channelGate('coding', msg.userId, post))) return;
-          await this.startProposal(p.repoPath, p.goal, threadKey, post, brain);
+          await this.startProposal(p.repoPath, p.goal, threadKey, post, brain, permMode);
           return;
         }
         // 비매칭 → 스테일 제안 버리고 아래 일반 흐름으로(disambiguate와 동일 패턴)
@@ -380,8 +405,9 @@ export class Orchestrator {
       const sp = rest.indexOf(' ');
       const repoRef = sp < 0 ? rest : rest.slice(0, sp);
       const goal = sp < 0 ? '' : rest.slice(sp + 1);
+      if (await this.denyIfPlanOnly(permMode, post)) return;
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startCoding(repoRef, goal, threadKey, post, brain);
+      await this.startCoding(repoRef, goal, threadKey, post, brain, permMode);
       return;
     }
     // 예약(스케줄) 관리 명령
@@ -410,8 +436,9 @@ export class Orchestrator {
     if (trimmed.startsWith('resume ')) {
       const parts = trimmed.slice('resume '.length).trim().split(/\s+/);
       const attempt = /^\d+$/.test(parts[1] ?? '') ? parseInt(parts[1], 10) : 0;
+      if (await this.denyIfPlanOnly(permMode, post)) return;
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post, brain);
+      await this.resumeCoding(parts[0] ?? '', attempt, threadKey, post, brain, permMode);
       return;
     }
     // 협업 재시도 재주입(6b-3-2). 형식: retry <attempt> <팀CSV> <질문> — 불일치면 일반 흐름으로.
@@ -482,6 +509,10 @@ export class Orchestrator {
       } catch { /* 적재 실패는 답변에 영향 없음 */ }
       if (question) {
         await post(replyText || questionFallbackText(question), undefined, question);
+      } else if (goal && permMode === 'plan') {
+        // 계획만(plan): 두뇌가 구현을 제안해도 [구현 시작] 버튼·pending을 걸지 않는다. 답(=계획)은
+        // 그대로 보여주고 실행으로 넘어가는 문만 닫는다 — 사용자가 배지에서 모드를 올리면 열린다.
+        await post(replyText);
       } else if (goal && this.fence && this.projects) {
         this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
         await post(replyText, [{ label: t('startImplementationLabel'), send: '구현 시작' }]);
@@ -601,7 +632,7 @@ export class Orchestrator {
   }
 
   // 멘션 코딩 진입: repo 해소 → 0/1/N 분기. brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain).
-  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
+  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode): Promise<void> {
     const matches = this.resolveRepoPaths(repoRef);
     if (matches.length === 0) {
       await post(t('repoNotFound', repoRef));
@@ -616,7 +647,7 @@ export class Orchestrator {
       await post(t('multipleReposFound', matches.map((m, i) => `${i + 1}. ${m}`).join('\n')), actions);
       return;
     }
-    await this.startProposal(matches[0], goal, threadKey, post, brain);
+    await this.startProposal(matches[0], goal, threadKey, post, brain, permMode);
   }
 
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
@@ -662,9 +693,10 @@ export class Orchestrator {
   }
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기. brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
-  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
+  // permMode: 이 턴의 채널 권한 모드 — 쓰기 검증(bypass면 울타리 밖 폴더도 통과)에 그대로 넘긴다.
+  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode): Promise<void> {
     if (!this.fence || !this.projects) { await post(t('codingNotReady')); return; }
-    try { this.fence.assertWritable(targetPath); }
+    try { this.fence.assertWritable(targetPath, permMode); }
     catch { await post(t('pathProtected')); return; }
     const cfg = await this.proposeProject(targetPath, goal, brain);
     this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
@@ -680,12 +712,13 @@ export class Orchestrator {
 
   // codeRun을 백그라운드로 detach(6b-1 패턴). 진행만 중계, 코드 에이전트 onChunk는 미게시.
   // brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain) — codeRun·CodingSpecialist.work까지 전달.
-  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0, brain?: BrainProvider): void {
+  // permMode: 이 턴의 채널 권한 모드 — codeRun을 거쳐 CodingSpecialist의 게이트까지 그대로 흘러간다.
+  private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0, brain?: BrainProvider, permMode?: PermMode): void {
     const tracked = this.tracker.start(threadKey, { question: t('codingTaskLabel', targetPath), team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         await post(t('codingStarted'));
-        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); }, brain });
+        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); }, brain, ...(permMode ? { permMode } : {}) });
         this.tracker.finish(threadKey, tracked.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
@@ -730,7 +763,7 @@ export class Orchestrator {
   // 예약된 코딩 재개 실행: 존재·승인 확인 → runState 복원(STUCK이 남긴 paused) → 백그라운드 재실행.
   // brain: 요청 한정 채널 두뇌(재주입 메시지가 실어온 것 — self.adapter가 매 이벤트에 최신 채널 brain을
   // 첨부하므로 사용자의 "resume" 답장이나 예약 발사 둘 다 이 경로로 흐른다. 미지정=기존 codeBrain).
-  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn, brain?: BrainProvider): Promise<void> {
+  private async resumeCoding(projectId: string, attempt: number, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode): Promise<void> {
     if (!this.projects) { await post(t('codingNotReady')); return; }
     const project = await this.projects.get(projectId);
     if (!project) { await post(t('projectNotFound')); return; }
@@ -738,7 +771,7 @@ export class Orchestrator {
     // ponytail: runState는 전역 스위치(N=1 가정) — 재개가 engram pause로 멈춘 다른 코딩까지 풀 수 있다. N>1이면 프로젝트별 run-state로.
     this.setRunState('running');
     await post(t('resuming', project.targetPath, attempt));
-    this.launchCoding(projectId, project.targetPath, threadKey, post, attempt, brain);
+    this.launchCoding(projectId, project.targetPath, threadKey, post, attempt, brain, permMode);
   }
 
   // 재시작 생존(Phase 10b): 부팅 시 호출. RUNNING 코딩 레코드를 각자 채널로 재개(승인된 프로젝트만 —
@@ -1005,9 +1038,11 @@ export class Orchestrator {
 
   // 코딩 루프(설계 §4). 유일 배정구(seam #1). run-state로 stop·stuck·budget 통합(§6).
   // opts.brain: 요청 한정 채널 두뇌(스펙 §3.2) — decompose·CodingSpecialist.work에 전달. 미지정=기존 codeBrain.
+  // opts.permMode: 이 턴의 채널 권한 모드(코드 채널별) — 아래 쓰기 재검증과 CodingSpecialist.work의
+  //   게이트(codeGuard/cmdGuard)까지 그대로 흘린다. 미지정=전역 설정 폴백(회귀 0).
   async codeRun(
     projectId: string,
-    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string; brain?: BrainProvider } = {},
+    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string; brain?: BrainProvider; permMode?: PermMode } = {},
   ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
     if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
@@ -1019,7 +1054,8 @@ export class Orchestrator {
     if (!project.approved) throw new Error(`완성조건 미승인 — engram code 승인 먼저: ${projectId}`);
 
     // 심층 방어: codeRun 진입 시점에도 쓰기 권한 재검증(proposeProject 이후 설정 변경 대비).
-    this.fence.assertWritable(project.targetPath);
+    // 이번 턴의 권한 모드를 함께 넘긴다 — plan이면 여기서 막히고, bypass면 울타리 밖 타깃도 통과한다.
+    this.fence.assertWritable(project.targetPath, opts.permMode);
 
     await this.codingGit.ensureBranch(project.targetPath, project.branch);
     const session = await this.tasks!.createCoding({
@@ -1051,7 +1087,7 @@ export class Orchestrator {
         try {
           report(t('codingTicket', ticket.area));
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'RUNNING', attempts: ticket.attempts + 1 });
-          const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk, opts.brain);
+          const summary = await this.coder!.work(this.pickPersona(project), ticket, project, opts.onChunk, opts.brain, opts.permMode);
           budgetSpent += 1; // ponytail: 호출 수 근사. 실토큰 회계는 후속(§14).
           report(t('gateRunning', ticket.area));
           const result = await this.gate!.run(project.targetPath, project.gate);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { EffortLevel } from '../../../shared/protocol';
+import type { EffortLevel, PermMode } from '../../../shared/protocol';
 import { T } from '../i18n';
 
 // 입력바 2행의 배지 3종(목업 승인 2026-07-25) — 응답 모드 / 모델(채널 두뇌) / 노력.
@@ -73,6 +73,48 @@ export function ModelBadge({ brain, brainNames, defaultBrain, onChange }: {
             <div key={name} className={'item' + (brain === name ? ' sel' : '')}
               onClick={() => { onChange(name); setOpen(false); }}>{name}</div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 권한 모드 — 코드 채널에서만 응답 모드 배지 자리를 대신한다(게이트는 App). 느슨해지는 순서로 나열하고
+// 마지막 "권한 무시"만 구분선 아래 danger로 뗀다(목업 승인). 서버는 채널에 값이 없으면 전역 설정으로
+// 폴백하므로, 여기 미설정 표시는 서버 기본값과 같은 'auto'다.
+const PERM_MODES: PermMode[] = ['plan', 'files', 'restricted', 'auto'];
+
+export function PermModeBadge({ permMode, onChange }: {
+  permMode: PermMode;
+  onChange: (m: PermMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss(open, () => setOpen(false));
+  // 되돌리기 어려운 위험 설정(폴더 밖 수정 허용)은 확인 한 번을 거친다 — 거부하면 아무 일도 안 한다.
+  const pick = (m: PermMode): void => {
+    if (m === 'bypass' && !window.confirm(T.permBypassConfirm)) return;
+    onChange(m);
+    setOpen(false);
+  };
+  const item = (m: PermMode) => (
+    <div key={m} className={'item permItem' + (permMode === m ? ' sel' : '') + (m === 'bypass' ? ' danger' : '')}
+      onClick={() => pick(m)}>
+      <div className="permName">{T.permModeName(m)}</div>
+      <div className="permDesc">{T.permModeDesc(m)}</div>
+    </div>
+  );
+  return (
+    <div className="cbadgeWrap" ref={ref}>
+      <button type="button" className={'cbadge permBadge' + (permMode === 'bypass' ? ' danger' : '')}
+        title={T.permModeTitle} onClick={() => setOpen((o) => !o)}>
+        {T.permModeName(permMode)} ▾
+      </button>
+      {open && (
+        <div className="cbadgeMenu permPop">
+          <div className="permHead">{T.permModeHeader}</div>
+          {PERM_MODES.map(item)}
+          <div className="permSep" />
+          {item('bypass')}
         </div>
       )}
     </div>

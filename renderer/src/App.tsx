@@ -13,7 +13,7 @@ import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_I
 import { FolderEmpty } from './components/FolderEmpty';
 import { CodePanel, CodePanelIcons, loadCodeTab, saveCodeTab, type CodeTab } from './components/CodePanel';
 import { EngramSelector } from './components/EngramSelector';
-import { RespondModeBadge, ModelBadge, EffortBadge } from './components/ComposerBadges';
+import { RespondModeBadge, ModelBadge, EffortBadge, PermModeBadge } from './components/ComposerBadges';
 import { MicButton } from './components/MicButton';
 import { GitBranchBar } from './components/GitBranchBar';
 import { ManageEngrams } from './components/ManageEngrams';
@@ -429,6 +429,8 @@ export default function App() {
       ...(any?.brain ? { brain: any.brain } : {}),
       // 입력바 노력 배지가 현재 값을 읽는 자리(코드 채널만 의미 있음 — 미설정이면 서버 기본 high).
       ...(any?.effort ? { effort: any.effort } : {}),
+      // 입력바 권한 모드 배지가 읽는 자리(코드 채널만 — 미설정이면 서버가 전역 설정으로 폴백).
+      ...(any?.permMode ? { permMode: any.permMode } : {}),
     };
   });
   // 입력바 2행 배지(응답 모드·모델·노력)가 읽는 현재 논리 채널. 사이드바와 같은 합성값을 쓴다
@@ -1085,11 +1087,19 @@ export default function App() {
                 </div>
                 <div className="composerRow composerTools">
                   <div className="composerLeft">
-                    {/* 응답 모드 — 기존 채널 ⋯메뉴의 setRespondMode를 배지로 노출(같은 프레임·같은 팬아웃). */}
-                    <RespondModeBadge
-                      mode={curChan?.respondMode ?? 'all'}
-                      onChange={(m) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setRespondMode', id, mode: m })); }}
-                    />
+                    {/* 코드 채널은 이 자리가 "권한 모드"(어디까지 알아서 할지), Chat·Team은 기존 "응답 모드"
+                        그대로. 서버는 채널에 값이 없으면 전역 설정으로 폴백하므로 미설정 표시는 'auto'. */}
+                    {mode === 'code' ? (
+                      <PermModeBadge
+                        permMode={curChan?.permMode ?? 'auto'}
+                        onChange={(m) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setChannelPermMode', id, permMode: m })); }}
+                      />
+                    ) : (
+                      <RespondModeBadge
+                        mode={curChan?.respondMode ?? 'all'}
+                        onChange={(m) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setRespondMode', id, mode: m })); }}
+                      />
+                    )}
                     <button type="button" className="attachBtn" title={T.attachTitle}
                       onClick={() => fileInputRef.current?.click()}>＋</button>
                     <MicButton onText={insertIntoInput} />

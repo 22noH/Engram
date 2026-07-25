@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { Action, AttachmentMeta, QuestionItem, EffortLevel } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, QuestionItem, EffortLevel, PermMode } from '../../../shared/protocol';
 import type { AttachmentStore } from './attachment-store';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
@@ -36,6 +36,10 @@ export interface ChatChannel {
   // 노력(effort): 채널별 추론 노력. brain과 같은 자리·같은 관례로 여기 저장한다(새 저장소 없음).
   // 코드 채널에서만 의미가 있고 누락=서버 기본(high). 적용 규칙 판단은 orchestrator 몫.
   effort?: EffortLevel;
+  // 권한 모드(permMode): 채널별 "어디까지 알아서 할지". effort·brain과 같은 자리·같은 관례로 여기
+  // 저장한다(새 저장소 없음). 코드 채널에서만 의미가 있고 누락=전역 설정(permissions.json
+  // allow.commandMode) 폴백. 적용 규칙 판단은 orchestrator·PermissionFence 몫.
+  permMode?: PermMode;
 }
 
 // EffortLevel의 런타임 검증용 목록. shared/protocol.ts는 "런타임 값 0"을 지키는 타입 전용 파일이라
@@ -44,6 +48,13 @@ export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', '
 
 export function isEffortLevel(v: unknown): v is EffortLevel {
   return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v);
+}
+
+// PermMode의 런타임 검증용 목록 — EFFORT_LEVELS와 같은 이유로 여기 한 곳에만 둔다.
+export const PERM_MODES: readonly PermMode[] = ['plan', 'files', 'restricted', 'auto', 'bypass'];
+
+export function isPermMode(v: unknown): v is PermMode {
+  return typeof v === 'string' && (PERM_MODES as readonly string[]).includes(v);
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
@@ -186,6 +197,7 @@ export class ChatStore {
             if (Array.isArray(c.memberIds)) normalized.memberIds = c.memberIds;
             if (typeof c.brain === 'string' && c.brain.trim().length > 0) normalized.brain = c.brain;
             if (isEffortLevel(c.effort)) normalized.effort = c.effort; // 오염값(비문자열·미허용)은 드롭
+            if (isPermMode(c.permMode)) normalized.permMode = c.permMode; // 오염값 드롭(=전역 설정 폴백)
             return normalized;
           });
       }
@@ -253,6 +265,22 @@ export class ChatStore {
     } else {
       if (!isEffortLevel(effort)) return false;
       ch.effort = effort;
+    }
+    this.save(list);
+    return true;
+  }
+
+  // 권한 모드(permMode) 설정. setChannelEffort와 동일한 계약: null=해제(필드 삭제→전역 설정 폴백),
+  // 허용값 밖=false·미변경, 없는 채널=false.
+  setChannelPermMode(id: string, permMode: PermMode | null): boolean {
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    if (permMode === null) {
+      delete ch.permMode;
+    } else {
+      if (!isPermMode(permMode)) return false;
+      ch.permMode = permMode;
     }
     this.save(list);
     return true;

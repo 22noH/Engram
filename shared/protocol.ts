@@ -13,6 +13,16 @@ export interface Action {
 // 지키므로(위 주석) 검증용 배열은 여기 두지 않는다 — chat-store.ts의 EFFORT_LEVELS가 그 역할.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+// 권한 모드(코드 채널별) — "어디까지 알아서 할지". EffortLevel과 같은 결로 계층 중립인 여기 한 곳에만
+// 두고(런타임 값 0 원칙 유지) 검증용 배열은 chat-store.ts의 PERM_MODES가 갖는다.
+//  - plan       계획만: 읽고 분석만. 파일 수정·명령 실행 없음
+//  - files      파일만: 파일 수정은 하되 명령은 실행 안 함
+//  - restricted 제한: 승인된 명령 목록만 실행(permissions.json allow.commands / 내장 기본목록)
+//  - auto       자동: 아무 명령이나 실행(현재 기본값)
+//  - bypass     권한 무시: 파일 쓰기 울타리까지 해제(폴더 밖 수정 허용) — 위험
+// 하드 백스톱(Engram 자기 저장소·시스템 폴더·denyPaths)은 bypass에서도 절대 안 풀린다.
+export type PermMode = 'plan' | 'files' | 'restricted' | 'auto' | 'bypass';
+
 export interface Channel {
   id: string;
   name: string;
@@ -26,6 +36,9 @@ export interface Channel {
   // 노력(effort): 이 채널이 쓸 추론 노력 수준. 코드 채널만 사용자가 고를 수 있고(미설정=high),
   // Chat·Team 채널은 서버가 항상 high로 고정하므로 값이 있어도 무시된다.
   effort?: EffortLevel;
+  // 권한 모드(permMode): 이 채널이 쓸 권한 모드. 코드 채널만 사용자가 고를 수 있고(미설정=전역 설정
+  // permissions.json allow.commandMode 폴백), Chat·Team 채널은 값이 있어도 무시된다.
+  permMode?: PermMode;
 }
 
 export interface Message {
@@ -86,6 +99,9 @@ export type ClientFrame =
   // 노력(effort): 이 채널의 노력 수준을 바꾼다(null=해제→서버 기본 high). setChannelBrain과 같은
   // 권한 게이트·같은 필드 이름 관례(id). 코드 채널에서만 의미가 있다.
   | { t: 'setChannelEffort'; id: string; effort: EffortLevel | null }
+  // 권한 모드(permMode): 이 채널의 권한 모드를 바꾼다(null=해제→전역 설정 폴백). setChannelEffort와
+  // 같은 권한 게이트(canAdminChannel)·같은 필드 이름 관례(id). 코드 채널에서만 의미가 있다.
+  | { t: 'setChannelPermMode'; id: string; permMode: PermMode | null }
   | { t: 'clearHistory'; id: string }
   | { t: 'undoClear'; id: string }
   | { t: 'dropClearBackup'; id: string }
