@@ -158,3 +158,81 @@ it('proposeReady 중 비매칭 메시지는 제안을 버리고 일반 대화로
   expect((orch as any).pending.get('c1')).toBeUndefined(); // 스테일 제안 정리
   expect(posts[posts.length - 1].text).toContain('그건 이래'); // 대화로 응답
 });
+
+// 코드 채널 스트리밍(2026-07-25): 실시간 스트리밍이 코드 채널만 빠져 있었다. 사용자가 실제로 오래
+// 기다리는 곳이 코드 채널이라 여기가 제일 아쉬웠다 — answerInCode의 complete에 onChunk를 배선한다.
+// 확정 전 원시 펜스(ask_user/engram:propose)가 새는 문제는 messenger-bridge의 펜스 가드가 막는다.
+describe('코드 채널 — 답변 실시간 스트리밍·노력(effort)', () => {
+  // brain.complete가 받은 (onChunk, opts)를 캡처하는 orchestrator.
+  function makeSpyOrch(brainText: string) {
+    const seen: { chunks: string[]; opts?: any } = { chunks: [] };
+    const brain = {
+      complete: async (_p: string, onChunk?: (t: string) => void, opts?: any) => {
+        seen.opts = opts;
+        for (const c of brainText.split('')) onChunk?.(c);
+        return { text: brainText, costUsd: 0, isError: false };
+      },
+    } as any;
+    const conversations = { append: async () => {}, recent: async () => [] } as any;
+    const o = new Orchestrator(
+      null as any, conversations, logger, null as any,
+      null as any, null as any, null as any, null as any,
+      {} as any, null as any, null as any, null as any, null as any,
+      brain, { assertWritable() {} } as any, null as any, { all: () => [] } as any, null as any,
+    );
+    return { o, seen };
+  }
+
+  it('handleMention의 delta가 codeBrain.complete의 onChunk로 관통한다', async () => {
+    const { o, seen } = makeSpyOrch('되는데요');
+    const { post } = collect();
+    const streamed: string[] = [];
+    await o.handleMention(
+      { text: '이거 왜 이래?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' },
+      post, 'c1', undefined, (t) => { streamed.push(t); },
+    );
+    expect(streamed.join('')).toBe('되는데요');
+    expect(seen.chunks).toEqual([]); // 캡처용 필드 — 스트림은 delta로만 나간다
+  });
+
+  it('delta 미전달(기존 3인자 호출)이면 complete의 onChunk도 undefined다(회귀 0)', async () => {
+    let captured: unknown = 'unset';
+    const brain = {
+      complete: async (_p: string, onChunk?: any) => { captured = onChunk; return { text: '답', costUsd: 0, isError: false }; },
+    } as any;
+    const conversations = { append: async () => {}, recent: async () => [] } as any;
+    const o = new Orchestrator(
+      null as any, conversations, logger, null as any,
+      null as any, null as any, null as any, null as any,
+      {} as any, null as any, null as any, null as any, null as any,
+      brain, { assertWritable() {} } as any, null as any, { all: () => [] } as any, null as any,
+    );
+    const { post } = collect();
+    await o.handleMention({ text: 'q', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+    expect(captured).toBeUndefined();
+  });
+
+  it('코드 채널에 저장된 노력이 없으면 high로 내려간다', async () => {
+    const { o, seen } = makeSpyOrch('답');
+    const { post } = collect();
+    await o.handleMention({ text: 'q', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+    expect(seen.opts?.effort).toBe('high');
+  });
+
+  it('코드 채널에 저장된 노력이 있으면 그 값이 내려간다', async () => {
+    const { o, seen } = makeSpyOrch('답');
+    const { post } = collect();
+    await o.handleMention(
+      { text: 'q', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app', effort: 'max' } as any, post, 'c1',
+    );
+    expect(seen.opts?.effort).toBe('max');
+  });
+
+  it('노력을 실어도 기존 extraArgs(읽기전용 도구·add-dir)는 그대로다(회귀 0)', async () => {
+    const { o, seen } = makeSpyOrch('답');
+    const { post } = collect();
+    await o.handleMention({ text: 'q', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+    expect(seen.opts?.extraArgs).toEqual(['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', 'C:/repo/app']);
+    expect(seen.opts?.cwd).toBe('C:/repo/app');
+  });
+});

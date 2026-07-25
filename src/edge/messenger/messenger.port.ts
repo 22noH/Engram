@@ -1,7 +1,7 @@
 // 앞단 중립 메신저 포트(설계 §9 / Phase 6a). 어댑터(Discord 등)가 구현하고,
 // 코어는 채널 ID·답신 핸들 등 메신저 특유의 것을 모른다(CoreMessage 중립성 연장).
 
-import type { Action, AttachmentMeta, Message } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, Message, EffortLevel } from '../../../shared/protocol';
 
 // 답신 경로 — 어댑터별 불투명 핸들. 코어를 통과하지 않고 어댑터↔bridge만 주고받는다.
 export type ReplyTarget = unknown;
@@ -15,6 +15,9 @@ export interface MentionEvent {
   mode?: 'chat' | 'code'; // Phase 10: 어댑터가 채널 모드를 실어줌(Discord는 미설정=chat).
   repoPath?: string;      // Phase 10: Code 채널 바인딩 경로.
   brain?: string;         // 채널별 두뇌(스펙 §3.2): 어댑터가 채널의 brain 이름을 실어줌. 미첨부=기본(Discord는 비범위).
+  // 노력(effort): brain과 같은 결 — 어댑터가 채널에 저장된 값을 실어준다(미설정 채널=미첨부, 회귀 0).
+  // "이 턴에 실제로 쓸 값"은 여기가 아니라 orchestrator.resolveTurnEffort가 정한다(코드 채널만 저장값 사용).
+  effort?: EffortLevel;
   // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answersId 답장의 재트리거일 때, 어댑터가 원본 카드의
   // 질문(questionFallbackText 렌더링)을 실어준다. 카드가 없거나(펜스텍스트 경로처럼 대화이력에서
   // 자연히 보임) 일반 send면 미첨부 — 기존 이벤트와 바이트 동일(회귀 0).

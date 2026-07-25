@@ -213,6 +213,45 @@ describe('ClaudeCliBrain', () => {
     expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Bash']));
   });
 
+  // 노력(effort): claude CLI의 --effort <low|medium|high|xhigh|max>. 채널별로 정해진 값이
+  // CompleteOpts.effort로 내려오면 args에 붙인다. --allowedTools와 같은 중복 회피 규칙.
+  it('opts.effort가 있으면 --effort <값>을 args에 붙인다', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q', undefined, { effort: 'xhigh' });
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    const i = args.indexOf('--effort');
+    expect(i).toBeGreaterThan(-1);
+    expect(args[i + 1]).toBe('xhigh');
+  });
+
+  it('opts.effort 미지정이면 --effort를 아예 안 붙인다(회귀 0)', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain(PROFILE);
+    const p = brain.complete('q');
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    expect(args).not.toContain('--effort');
+  });
+
+  it('프로필/호출이 --effort를 직접 주면 중복으로 안 붙인다(사용자 의도 우선)', async () => {
+    const child = fakeChild();
+    (spawn as unknown as jest.Mock).mockReturnValue(child);
+    const brain = new ClaudeCliBrain({ ...PROFILE, extraArgs: ['--effort', 'max'] });
+    const p = brain.complete('q', undefined, { effort: 'low' });
+    child.emit('close', 0);
+    await p;
+    const args = (spawn as unknown as jest.Mock).mock.calls[0][1] as string[];
+    expect(args.filter((a) => a === '--effort')).toHaveLength(1);
+    expect(args).toEqual(expect.arrayContaining(['--effort', 'max']));
+    expect(args).not.toContain('low');
+  });
+
   it('--allowedTools 미지정 프로필이면 WebSearch,WebFetch를 기본 주입한다', async () => {
     const child = fakeChild();
     (spawn as unknown as jest.Mock).mockReturnValue(child);

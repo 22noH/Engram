@@ -480,6 +480,7 @@
       brainCap: '기본 모델이 모든 채팅에 답합니다 — 다른 모델은 채팅에서 이름으로 부를 수 있어요.',
       addGroup: '추가', regGroup: '등록된 모델',
       fName: '이름', fModel: '모델', fBaseUrl: '베이스 URL', fApiKey: 'API 키',
+      modelDefaultOpt: '기본',
       fMaxTokens: '최대 토큰', fSearch: '웹 검색', fSearchKey: '검색 API 키',
       fUsdIn: '입력 $ / 100만 토큰', fUsdOut: '출력 $ / 100만 토큰',
       schedEmpty: '예약이 없어요',
@@ -548,6 +549,7 @@
       brainCap: 'The default model answers every chat — others can be called by name.',
       addGroup: 'Add', regGroup: 'Registered models',
       fName: 'Name', fModel: 'Model', fBaseUrl: 'Base URL', fApiKey: 'API key',
+      modelDefaultOpt: 'Default',
       fMaxTokens: 'Max tokens', fSearch: 'Web search', fSearchKey: 'Search API key',
       fUsdIn: '$ / M input tokens', fUsdOut: '$ / M output tokens',
       schedEmpty: 'No schedules',
@@ -780,9 +782,31 @@
       const nameInput = document.createElement('input');
       nameInput.className = 'mono';
       nameInput.value = b.key;
-      const modelInput = document.createElement('input');
-      modelInput.className = 'mono';
-      modelInput.value = b.model;
+      // 모델: claude-cli는 별칭 셀렉트(빈 값=기본 / opus / sonnet / haiku). 별칭이라 버전 숫자를
+      // 노출하지 않고도 항상 최신 모델이 잡힌다 — 자유 입력이면 뭘 넣어야 할지 알 수 없었다.
+      // 다른 provider(anthropic-api/openai-api 등)는 모델명이 자유라 기존 텍스트 입력 그대로.
+      const modelInput = b.provider === 'claude-cli'
+        ? (() => {
+            const sel = document.createElement('select');
+            const aliases = [['', t.modelDefaultOpt], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']];
+            // 이미 별칭 밖의 값(예전에 직접 넣은 모델 ID)이 저장돼 있으면 그것도 항목으로 남긴다 —
+            // 안 그러면 셀렉트가 첫 항목으로 떨어져 저장 시 사용자 설정이 조용히 지워진다.
+            if (b.model && !aliases.some(([v]) => v === b.model)) aliases.push([b.model, b.model]);
+            for (const [value, label] of aliases) {
+              const opt = document.createElement('option');
+              opt.value = value;
+              opt.textContent = label;
+              if ((b.model || '') === value) opt.selected = true;
+              sel.appendChild(opt);
+            }
+            return sel;
+          })()
+        : (() => {
+            const inp = document.createElement('input');
+            inp.className = 'mono';
+            inp.value = b.model;
+            return inp;
+          })();
       const baseUrlInput = document.createElement('input');
       baseUrlInput.className = 'mono';
       baseUrlInput.value = b.baseUrl;

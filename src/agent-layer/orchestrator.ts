@@ -10,7 +10,7 @@ import { SpecialistAgent } from './specialist-agent';
 import { Synthesizer } from './synthesizer';
 import { Semaphore } from '../brain/semaphore';
 import { TurnBudget } from './turn-budget';
-import { BrainProvider, BRAIN } from '../brain/brain.port';
+import { BrainProvider, BRAIN, EffortLevel } from '../brain/brain.port';
 import { parseJsonBlock } from './parse-json-block';
 import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
@@ -312,6 +312,14 @@ export class Orchestrator {
     return this.cancel(channelId);
   }
 
+  // 노력(effort) 단일 결정 지점. 채널 설정(msg.effort)을 그대로 믿지 않고 채널 모드로 한 번 더 가른다:
+  //  - 코드 채널: 채널에 저장된 값(사용자가 채널마다 고른다). 미설정이면 high.
+  //  - Chat·Team 채널: 항상 high 고정(설정 UI 자체가 없다 — 저장값이 섞여 들어와도 여기서 덮어쓴다).
+  // 여기 한 곳만 고치면 reader(chat)·answerInCode(code) 양쪽이 같이 바뀐다.
+  private resolveTurnEffort(msg: CoreMessage): EffortLevel {
+    return msg.mode === 'code' ? (msg.effort ?? 'high') : 'high';
+  }
+
   private async handleMentionCore(
     msg: CoreMessage,
     post: PostFn,
@@ -323,6 +331,9 @@ export class Orchestrator {
     const trimmed = msg.text.trim();
     // 이 요청 한정 두뇌(스펙 §3.2) — 아래 코딩/분류 경로 전부가 이 지역 변수를 공유한다.
     const brain = this.resolveMsgBrain(msg);
+    // 이 턴에 적용할 노력(단일 결정 지점) — 아래 답변 경로(route·answerInCode)로만 흘린다.
+    // 분류(classify)·코딩 루프 등 내부 호출엔 안 싣는다(그쪽은 별도 예산 정책, 회귀 0).
+    const effort = this.resolveTurnEffort(msg);
 
     // 상태 조회: 이 스레드의 진행/최근 작업 보고.
     if (trimmed === '상태' || trimmed === 'status') {
@@ -431,7 +442,7 @@ export class Orchestrator {
       let toolsUsed: string[] = [];
       await this.postReplyOrInterrupted(
         await this.route(
-          { text: trimmed.slice('ask '.length), userId: msg.userId },
+          { text: trimmed.slice('ask '.length), userId: msg.userId, effort },
           delta, // 답변 실시간 스트리밍: onChunk 자리 — 미주입(delta undefined)이면 기존과 바이트 동일(회귀 0)
           this.askUserFor(post),
           activity,
@@ -453,7 +464,10 @@ export class Orchestrator {
         await post(t('noRepoFolder'));
         return;
       }
-      const { reply, goal, question } = await this.answerInCode(msg, threadKey, brain);
+      // 코드 채널 스트리밍(2026-07-25): delta를 그대로 넘겨 두뇌 답이 첫 글자부터 흐른다. 확정 전
+      // 원시 펜스(ask_user/engram:propose)는 messenger-bridge의 펜스 가드가 델타 단계에서 걸러낸다
+      // — 저장·확정 텍스트는 여전히 아래 extract* 결과가 권위(가드는 표시용).
+      const { reply, goal, question } = await this.answerInCode(msg, threadKey, brain, delta, effort);
       // ask-user(실사고 2026-07-25): 코드 채널만 extractAskUser가 빠져 있어 두뇌가 되물어도 카드가
       // 안 뜨고 펜스 JSON이 채팅·대화기록에 날것으로 박혔다. 미배선 사유였던 "[구현 시작] 버튼과 경합"은
       // 잘못된 전제 — 되묻는 턴은 구현 제안이 아니라 애초에 경합이 없다. 질문이 있으면 질문이 이기고
@@ -498,7 +512,8 @@ export class Orchestrator {
     let toolsUsed: string[] = [];
     await this.postReplyOrInterrupted(
       // 답변 실시간 스트리밍: delta가 route의 onChunk 자리 — 미주입이면 기존과 바이트 동일(회귀 0).
-      await this.route(msg, delta, this.askUserFor(post), activity, (names) => { toolsUsed = names; }, signal),
+      // effort는 resolveTurnEffort가 정한 이 턴의 확정값(Chat=항상 high).
+      await this.route({ ...msg, effort }, delta, this.askUserFor(post), activity, (names) => { toolsUsed = names; }, signal),
       post,
       signal,
       undefined,
@@ -607,7 +622,15 @@ export class Orchestrator {
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
   // 조회만 한다 — 게시·pending은 호출 분기(Step 6)가 결정. 읽기전용이라 게이트 없음(질문=chat 동급).
   // brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
-  private async answerInCode(msg: CoreMessage, threadKey: string, brain?: BrainProvider): Promise<{ reply: string; goal?: string; question?: AskUserPayload }> {
+  // onChunk(코드 채널 스트리밍): 있으면 두뇌가 흘리는 텍스트 조각을 그대로 중계한다(미주입=기존과 바이트 동일).
+  // effort(노력): resolveTurnEffort가 정한 이 턴의 확정값 — 미주입이면 CompleteOpts에 필드 자체가 안 생긴다.
+  private async answerInCode(
+    msg: CoreMessage,
+    threadKey: string,
+    brain?: BrainProvider,
+    onChunk?: (text: string) => void,
+    effort?: EffortLevel,
+  ): Promise<{ reply: string; goal?: string; question?: AskUserPayload }> {
     const useBrain = brain ?? this.codeBrain;
     if (!useBrain || !msg.repoPath) return { reply: t('answerUnavailable') };
 
@@ -625,9 +648,10 @@ export class Orchestrator {
     });
     // 읽기전용 도구 + --add-dir로 레포 읽기 보장(헤드리스 claude가 cwd 밖을 막을 수 있음).
     // 읽기전용은 이 allowedTools에 쓰기 도구가 없음에 의존한다 — 프로필(brains.json)이 Edit/Write를 직접 주면 깨질 수 있음(기본 프로필 extraArgs는 비어 안전).
-    const r = await useBrain.complete(prompt, undefined, {
+    const r = await useBrain.complete(prompt, onChunk, {
       cwd: msg.repoPath,
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
+      ...(effort ? { effort } : {}),
     });
     if (r.isError) return { reply: brainErrorHint(r.raw) };
     // 질문 블록을 먼저 떼어낸 뒤 제안 마커를 판정한다(순서 중요 — 실사고 2026-07-25): ask_user가

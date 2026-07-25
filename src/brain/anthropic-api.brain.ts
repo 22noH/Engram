@@ -36,6 +36,8 @@ export class AnthropicApiBrain implements BrainProvider {
     this.sem = new Semaphore(profile.concurrency);
   }
 
+  // TODO(effort): opts.effort는 지금 무시한다 — claude CLI의 --effort와 달리 Messages API엔 대응 인수가
+  // 없어 thinking.budget_tokens로 환산해야 하고, 환산표는 모델별로 달라 별도 작업으로 뺀다(회귀 0 유지).
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return this.sem.run(async () => {
       // 코딩(opts.cwd)엔 쓰기 판정(codeGuard, agent-layer 주입)이 필수 — 없으면 무방비 쓰기라 거부(스펙 §6.2·불변식 4).

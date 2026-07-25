@@ -80,12 +80,16 @@ export class ClaudeCliBrain implements BrainProvider {
       // 프로필이 직접 --allowedTools를 지정하면 사용자 의도 우선(중복 안 붙임).
       const extra = [...this.profile.extraArgs, ...(opts?.extraArgs ?? [])];
       const hasAllowed = extra.includes('--allowedTools');
+      // 노력(effort): --allowedTools와 같은 결 — 프로필/호출이 --effort를 직접 주면 사용자 의도가
+      // 우선이라 중복으로 안 붙인다. opts.effort 미주입이면 인수 자체가 안 생긴다(회귀 0).
+      const hasEffort = extra.includes('--effort');
       const args = [
         '-p', prompt,
         '--output-format', 'stream-json',
         '--verbose',
         ...(this.profile.model ? ['--model', this.profile.model] : []),
         ...(hasAllowed ? [] : ['--allowedTools', buildAllowedTools()]),
+        ...(opts?.effort && !hasEffort ? ['--effort', opts.effort] : []),
         ...extra,
       ];
       const child = spawn(this.profile.cli, args, {

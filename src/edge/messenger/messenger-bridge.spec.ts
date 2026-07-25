@@ -307,3 +307,40 @@ describe('답변 실시간 스트리밍 — delta 관통·코얼레싱', () => {
     await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
   });
 });
+
+// 스트리밍 펜스 가드 배선: 델타는 가드 → 코얼레서 순으로 흐른다. 가드 단위 규칙은
+// stream-fence-guard.spec.ts가 못 박고, 여기선 "브리지가 실제로 그 순서로 끼웠는가"만 본다.
+describe('답변 실시간 스트리밍 — 펜스 가드 배선', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('```ask_user 블록은 델타 프레임에 한 글자도 실리지 않는다', async () => {
+    const port = new FakeMessenger();
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        for (const c of '답이에요.\n```ask_user\n{"questions":[{"q":"?"}]}\n```\n끝'.split('')) delta?.(c);
+        jest.advanceTimersByTime(100);
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    const joined = port.deltas.map((d) => d.text).join('');
+    expect(joined).not.toContain('ask_user');
+    expect(joined).not.toContain('questions');
+    expect(joined).toContain('답이에요.');
+  });
+
+  it('일반 코드블록(```html)은 그대로 흐른다(인라인 미리보기 회귀 0)', async () => {
+    const port = new FakeMessenger();
+    const src = '보세요\n```html\n<p>hi</p>\n```\n';
+    const orch = {
+      handleMention: async (_m: any, _p: any, _tk: any, _a: any, delta?: (text: string) => void) => {
+        for (const c of src.split('')) delta?.(c);
+        jest.advanceTimersByTime(100);
+      },
+    };
+    bindMessenger(port as any, orch as any, { warn() {} });
+    await port.emit({ text: 'q', channelId: 'c1', authorId: 'u', target: {} });
+    expect(port.deltas.map((d) => d.text).join('')).toBe(src);
+  });
+});

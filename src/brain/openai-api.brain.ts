@@ -42,6 +42,8 @@ export class OpenAiApiBrain implements BrainProvider {
     this.sem = new Semaphore(profile.concurrency);
   }
 
+  // TODO(effort): opts.effort는 지금 무시한다 — OpenAI 호환 API마다 reasoning_effort 지원 여부·허용값이
+  // 제각각(로컬 llama.cpp/Ollama는 아예 없음)이라, 매핑은 별도 작업으로 뺀다(회귀 0 유지).
   complete(prompt: string, onChunk?: (text: string) => void, opts?: CompleteOpts): Promise<BrainResult> {
     return this.sem.run(async () => {
       // 코딩(opts.cwd)엔 쓰기 판정(codeGuard, agent-layer 주입)이 필수 — 없으면 무방비 쓰기라 거부(스펙 §6.2·불변식 4).

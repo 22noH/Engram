@@ -8,6 +8,11 @@ export interface Action {
   confirm?: string;
 }
 
+// 노력(effort) 수준 — claude CLI의 `--effort <level>` 허용값과 1:1. 계층 중립인 여기 한 곳에만 두고
+// 두뇌 계층(src/brain/brain.port.ts)이 재수출해 쓴다(값이 갈라지지 않게). 이 파일은 런타임 값 0을
+// 지키므로(위 주석) 검증용 배열은 여기 두지 않는다 — chat-store.ts의 EFFORT_LEVELS가 그 역할.
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface Channel {
   id: string;
   name: string;
@@ -18,6 +23,9 @@ export interface Channel {
   visibility?: 'public' | 'private'; // Phase 16c: 비공개 = 초대된 사람만
   memberIds?: string[];   // Phase 16c: 비공개 채널 입장 허용 계정 id
   brain?: string;         // Task 3: 채널이 쓰는 두뇌 이름. 미설정=기본 두뇌.
+  // 노력(effort): 이 채널이 쓸 추론 노력 수준. 코드 채널만 사용자가 고를 수 있고(미설정=high),
+  // Chat·Team 채널은 서버가 항상 high로 고정하므로 값이 있어도 무시된다.
+  effort?: EffortLevel;
 }
 
 export interface Message {
@@ -75,6 +83,9 @@ export type ClientFrame =
   | { t: 'setRepoPath'; id: string; repoPath: string }
   | { t: 'setRespondMode'; id: string; mode: 'all' | 'mention' }
   | { t: 'setChannelBrain'; id: string; brain: string | null }
+  // 노력(effort): 이 채널의 노력 수준을 바꾼다(null=해제→서버 기본 high). setChannelBrain과 같은
+  // 권한 게이트·같은 필드 이름 관례(id). 코드 채널에서만 의미가 있다.
+  | { t: 'setChannelEffort'; id: string; effort: EffortLevel | null }
   | { t: 'clearHistory'; id: string }
   | { t: 'undoClear'; id: string }
   | { t: 'dropClearBackup'; id: string }

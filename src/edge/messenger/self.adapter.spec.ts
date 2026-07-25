@@ -386,6 +386,24 @@ describe('SelfMessenger 프로토콜 확장', () => {
     expect(events[0].brain).toBe('qwen');
   });
 
+  it('노력이 설정된 채널 send는 mention 이벤트에 effort를 싣는다(brain과 동일 관례)', async () => {
+    const ch = store.createChannel('coding-effort', 'code')!;
+    store.setChannelEffort(ch.id, 'xhigh');
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: ch.id, text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect(events[0].effort).toBe('xhigh');
+  });
+
+  it('노력 미설정 채널 send는 mention 이벤트에 effort 필드가 아예 없다(회귀 0)', async () => {
+    const events: MentionEvent[] = [];
+    sm.onMention(async (e) => { events.push(e); });
+    client.send(JSON.stringify({ t: 'send', channelId: 'general', text: '@Engram 안녕' }));
+    await nextFrame(client);
+    expect('effort' in events[0]).toBe(false);
+  });
+
   it('브레인 미설정 채널 send는 mention 이벤트에 brain 필드가 아예 없다(미설정 채널=회귀 0)', async () => {
     const events: MentionEvent[] = [];
     sm.onMention(async (e) => { events.push(e); });
@@ -471,6 +489,30 @@ describe('setChannelBrain(Task 3)', () => {
     client.send(JSON.stringify({ t: 'setChannelBrain', id: ch.id, brain: 123 }));
     const f = await nextFrame(client);
     expect(f.list.find((c: { id: string; brain?: string }) => c.id === ch.id)?.brain).toBeUndefined();
+  });
+
+  // 노력(effort): setChannelBrain과 같은 프레임 관례(필드 이름 id)·같은 권한 게이트·같은 브로드캐스트.
+  it('setChannelEffort 프레임이 채널 노력을 저장하고 channels 브로드캐스트에 실린다', async () => {
+    const ch = store.createChannel('coding-e1', 'code')!;
+    client.send(JSON.stringify({ t: 'setChannelEffort', id: ch.id, effort: 'max' }));
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+    expect(f.list.find((c: { id: string; effort?: string }) => c.id === ch.id)?.effort).toBe('max');
+  });
+
+  it('effort: null은 해제(필드 삭제)', async () => {
+    const ch = store.createChannel('coding-e2', 'code')!;
+    store.setChannelEffort(ch.id, 'low');
+    client.send(JSON.stringify({ t: 'setChannelEffort', id: ch.id, effort: null }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; effort?: string }) => c.id === ch.id)?.effort).toBeUndefined();
+  });
+
+  it('허용값 밖(오타·비문자열)은 조용히 무시', async () => {
+    const ch = store.createChannel('coding-e3', 'code')!;
+    client.send(JSON.stringify({ t: 'setChannelEffort', id: ch.id, effort: 'turbo' }));
+    const f = await nextFrame(client);
+    expect(f.list.find((c: { id: string; effort?: string }) => c.id === ch.id)?.effort).toBeUndefined();
   });
 
   it('channels 요청 응답에도 brainNames·defaultBrain이 동봉된다', async () => {

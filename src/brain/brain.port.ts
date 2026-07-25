@@ -1,4 +1,8 @@
-import type { QuestionItem } from '../../shared/protocol';
+import type { QuestionItem, EffortLevel } from '../../shared/protocol';
+
+// 노력 수준(claude --help 확인값: low·medium·high·xhigh·max). 정의는 계층 중립인 shared/protocol.ts
+// 한 곳에만 두고 여기서 재수출한다 — 두뇌·엣지·렌더러가 같은 유니온을 본다.
+export type { EffortLevel };
 
 // 교체 가능한 두뇌 포트(설계 §7.5). Phase 1 어댑터 = ClaudeCliBrain 1개.
 export interface BrainResult {
@@ -39,6 +43,12 @@ export interface CompleteOpts {
   // 내부 타임아웃 AbortController에 이 signal을 연동(abort 전파, addEventListener+cleanup). claude-cli는
   // 이 signal의 abort로 spawn된 자식을 kill. 미주입(기존 압도적 다수 호출부)이면 회귀 0.
   signal?: AbortSignal;
+  // 노력(effort): 이 호출에 쓸 추론 노력 수준. claude CLI의 `--effort <level>`과 1:1(허용값도 CLI와 동일).
+  // 채널별로 정해진 값이 orchestrator 한 지점에서 결정돼 여기까지 관통한다(코드 채널=저장값, 그 외=high).
+  // 미주입이면 어떤 두뇌도 아무 인수를 안 붙인다(회귀 0).
+  // TODO: anthropic-api·openai-api는 지금 이 필드를 무시한다 — thinking 예산(budget_tokens)/reasoning
+  // effort 매핑은 두뇌마다 단위가 달라 별도 작업으로 뺀다.
+  effort?: EffortLevel;
 }
 
 export interface BrainProvider {

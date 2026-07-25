@@ -395,6 +395,28 @@ describe('ReaderAgent 여러 줄 입력+생성 중지(Task 4, signal 관통)', (
     await reader.handle(msg, undefined, undefined, undefined, undefined, undefined, ctrl.signal);
     expect(seenOpts?.signal).toBe(ctrl.signal);
   });
+
+  // 노력(effort): 값 결정은 orchestrator 한 지점에서 하고, reader는 CoreMessage에 실려온 값을
+  // CompleteOpts로 옮기기만 한다(정책 판단 0 — 여기서 기본값을 또 정하면 결정 지점이 둘로 갈린다).
+  it('msg.effort가 있으면 CompleteOpts.effort로 그대로 관통한다', async () => {
+    let seenOpts: CompleteOpts | undefined;
+    const brain: BrainProvider = {
+      complete: async (_p, _c, opts) => { seenOpts = opts; return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle({ ...msg, effort: 'xhigh' });
+    expect(seenOpts?.effort).toBe('xhigh');
+  });
+
+  it('msg.effort가 없으면 opts 자체가 안 실린다(회귀 0)', async () => {
+    let seenOpts: CompleteOpts | undefined = { cwd: 'sentinel' };
+    const brain: BrainProvider = {
+      complete: async (_p, _c, opts) => { seenOpts = opts; return { text: 'ok', costUsd: 0, isError: false }; },
+    };
+    const reader = new ReaderAgent(rag, brain, logger);
+    await reader.handle(msg);
+    expect(seenOpts).toBeUndefined();
+  });
 });
 
 describe('ReaderAgent 채널 두뇌 해소(Task 2, 스펙 §3.2)', () => {

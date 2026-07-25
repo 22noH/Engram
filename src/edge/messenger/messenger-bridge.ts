@@ -3,6 +3,7 @@ import { CoreMessage } from '../core-message';
 import { ChannelPolicy, allows } from '../../agent-layer/channel-policy';
 import { t } from '../../agent-layer/i18n';
 import { createDeltaCoalescer } from './delta-coalescer';
+import { createStreamFenceGuard } from './stream-fence-guard';
 import type { Action, Message } from '../../../shared/protocol';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 import 회피·테스트 용이).
@@ -48,7 +49,14 @@ export function bindMessenger(
     const coalescer = port.delta
       ? createDeltaCoalescer((text: string): void => { try { port.delta!(e.channelId, text); } catch { /* 격리 */ } })
       : undefined;
-    const delta = coalescer ? (text: string): void => coalescer.push(text) : undefined;
+    // 펜스 가드는 코얼레서 "앞"에 선다: 확정 전 원시 JSON(```ask_user/```engram:propose)이 화면에 새지
+    // 않게 델타 단계에서 미리 걸러야 하고, 코얼레서는 이미 걸러진 표시용 텍스트만 모으면 되기 때문이다.
+    // (반대 순서면 가드가 조각 경계를 다시 붙여야 해 상태기계가 두 겹이 된다.) 최종 msg 프레임이 여전히
+    // 권위라 가드가 버린 조각은 표시에서만 사라진다 — 저장·확정 텍스트엔 영향 0.
+    const guard = coalescer ? createStreamFenceGuard() : undefined;
+    const delta = coalescer && guard
+      ? (text: string): void => { const out = guard.push(text); if (out) coalescer.push(out); }
+      : undefined;
     try {
       // 최종 리뷰 픽스(ask-user 답↔질문 상관관계): answeredQuestion이 있으면(=answersId 답장 재트리거,
       // ask_user 도구 경로) 브레인 프롬프트가 될 text 앞에 원본 질문 문맥을 붙인다. 없으면 e.text 그대로
@@ -66,6 +74,8 @@ export function bindMessenger(
           text, userId: e.channelId,
           ...(e.mode ? { mode: e.mode, repoPath: e.repoPath } : {}),
           ...(e.brain ? { brain: e.brain } : {}),
+          // 노력(effort): 채널에 저장된 값을 그대로 넘긴다 — 실제 적용값은 orchestrator가 정한다(단일 지점).
+          ...(e.effort ? { effort: e.effort } : {}),
           // Task 3(chat-attachments): additive 관통 — 미첨부 send는 기존과 바이트 동일(회귀 0).
           ...(e.attachments && e.attachments.length ? { attachments: e.attachments } : {}),
         },

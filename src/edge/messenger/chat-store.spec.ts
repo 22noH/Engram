@@ -287,6 +287,61 @@ describe('ChatStore.setChannelBrain (Task 1)', () => {
   });
 });
 
+// 노력(effort)는 채널 두뇌(brain)와 같은 자리·같은 관례로 채널 설정에 저장한다(새 저장소 만들지 않음).
+describe('ChatStore.setChannelEffort — 채널별 노력 저장(brain과 동일 관례)', () => {
+  let dir: string;
+  let store: ChatStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-effort-'));
+    store = new ChatStore(dir);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('설정→영속 재로드에 남는다', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    expect(store.setChannelEffort(ch.id, 'xhigh')).toBe(true);
+    expect(new ChatStore(dir).listChannels().find((c) => c.id === ch.id)?.effort).toBe('xhigh');
+  });
+
+  it('null 해제→필드 자체 삭제', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    store.setChannelEffort(ch.id, 'max');
+    expect(store.setChannelEffort(ch.id, null)).toBe(true);
+    expect(new ChatStore(dir).listChannels().find((c) => c.id === ch.id)?.effort).toBeUndefined();
+  });
+
+  it('허용값(low/medium/high/xhigh/max)이 아니면 false·미변경', () => {
+    const ch = store.createChannel('code-ch', 'code')!;
+    store.setChannelEffort(ch.id, 'high');
+    expect(store.setChannelEffort(ch.id, 'turbo' as any)).toBe(false);
+    expect(store.listChannels().find((c) => c.id === ch.id)?.effort).toBe('high');
+  });
+
+  it('없는 채널 id는 false', () => {
+    expect(store.setChannelEffort('nope', 'high')).toBe(false);
+  });
+
+  it('로드 정규화: 오염된 effort는 드롭한다', () => {
+    fs.writeFileSync(
+      path.join(dir, 'channels.json'),
+      JSON.stringify([
+        { id: 'a', name: 'a', respondMode: 'all', effort: 123 },
+        { id: 'b', name: 'b', respondMode: 'all', effort: 'turbo' },
+        { id: 'c', name: 'c', respondMode: 'all', effort: 'max' },
+      ]),
+    );
+    const chs = new ChatStore(dir).listChannels();
+    expect(chs.find((c) => c.id === 'a')?.effort).toBeUndefined();
+    expect(chs.find((c) => c.id === 'b')?.effort).toBeUndefined();
+    expect(chs.find((c) => c.id === 'c')?.effort).toBe('max');
+  });
+
+  it('effort 없는 기존 채널 로드는 무변경(회귀 0)', () => {
+    fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([{ id: 'general', name: 'general', respondMode: 'all' }]));
+    expect(new ChatStore(dir).listChannels()[0].effort).toBeUndefined();
+  });
+});
+
 // Minor 1(최종 리뷰): listChannels 정규화는 필드 화이트리스트라 ChatChannel에 필드를 늘리고 여기
 // 손대지 않으면 조용히 소실된다 — 전 필드가 채워진 채널이 listChannels→save→listChannels를
 // 왕복해도 그대로 남는지 지키는 가드.
@@ -307,6 +362,7 @@ describe('ChatStore listChannels 정규화 왕복(Minor 1 가드)', () => {
       visibility: 'private' as const,
       memberIds: ['user-1', 'user-2'],
       brain: 'claude-opus',
+      effort: 'xhigh' as const,
     };
     fs.writeFileSync(path.join(dir, 'channels.json'), JSON.stringify([full]));
     const store = new ChatStore(dir);

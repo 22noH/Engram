@@ -290,6 +290,54 @@ describe('두뇌 활동 표시(Task 1) — activity 관통·toolsUsed 동봉', (
   });
 });
 
+// 노력(effort) 관통: "어떤 값을 쓸지"는 orchestrator 한 지점(resolveTurnEffort)에서만 정한다.
+// 규칙 — 코드 채널=채널에 저장된 값(미설정이면 high), Chat·Team 채널=항상 high 고정(설정 불가).
+// 여기선 Chat 경로(route→reader.handle)만 본다. 코드 채널은 orchestrator-code-chat.spec.ts.
+describe('노력(effort) 관통 — Chat 채널은 항상 high 고정', () => {
+  function orcWithReader(reader: any) {
+    const brain = { complete: async () => ({ text: '{"kind":"chat","team":[]}', costUsd: 0, isError: false }) } as any;
+    const conversations = { append: async () => {} } as any;
+    return new Orchestrator(
+      reader, conversations, logger, null as any,
+      null as any, null as any, null as any, null as any,
+      null as any, null as any, null as any, null as any, null as any,
+      brain, null as any, null as any, null as any,
+    );
+  }
+
+  it('Chat 채널이면 reader.handle이 받는 msg.effort가 high다', async () => {
+    let seen: unknown;
+    const reader = { handle: async (msg: any) => { seen = msg.effort; return '답'; } };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1' }, async () => {});
+    expect(seen).toBe('high');
+  });
+
+  it('Chat 채널은 채널에 저장된 값이 있어도 high로 덮어쓴다(설정 불가 — 규칙 단일 지점)', async () => {
+    let seen: unknown;
+    const reader = { handle: async (msg: any) => { seen = msg.effort; return '답'; } };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'q', userId: 'c1', effort: 'low' } as any, async () => {});
+    expect(seen).toBe('high');
+  });
+
+  it('escape hatch(ask ...) 경로도 같은 규칙을 탄다', async () => {
+    let seen: unknown;
+    const reader = { handle: async (msg: any) => { seen = msg.effort; return '답'; } };
+    const o = orcWithReader(reader);
+    await o.handleMention({ text: 'ask 뭐야', userId: 'c1' }, async () => {});
+    expect(seen).toBe('high');
+  });
+
+  it('route()를 직접 부르는 경로(CLI 게이트웨이 등)엔 effort가 안 실린다(회귀 0)', async () => {
+    let seen: unknown = 'unset';
+    const reader = { handle: async (msg: any) => { seen = msg.effort; return '답'; } };
+    const o = orcWithReader(reader);
+    await o.route({ text: 'q', userId: 'c1' });
+    expect(seen).toBeUndefined();
+  });
+});
+
 // Task 4(여러 줄 입력+생성 중지): handleMention이 threadKey별 AbortController를 만들어(1) reader.handle까지
 // signal을 관통시키고(2) cancel/cancelByChannel로 중단시킬 수 있으며(3) 이미 중단된 채 route()가 돌아오면
 // 그 텍스트 대신 짧은 중단 안내를 post한다(4) 종료 후엔 레지스트리에서 빠져 cancel이 false를 돌려준다.

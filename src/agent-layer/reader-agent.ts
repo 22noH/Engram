@@ -146,13 +146,17 @@ export class ReaderAgent {
             } catch { /* 격리 — UI 콜백 실패가 답변 흐름을 끊으면 안 됨 */ }
           }
         : undefined;
-      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length || onTool || signal
+      // 노력(effort): 값 결정은 orchestrator의 resolveTurnEffort 한 지점 — 여기선 msg에 실려온 확정값을
+      // CompleteOpts로 옮기기만 한다(기본값을 여기서 또 정하면 결정 지점이 둘로 갈린다). 미설정이면
+      // 다른 필드들과 같은 결로 opts 자체가 안 생긴다(회귀 0).
+      const completeOpts: CompleteOpts | undefined = handle || askUser || images.length || onTool || signal || msg.effort
         ? {
             ...(handle ? { delegate: handle } : {}),
             ...(askUser ? { askUser } : {}),
             ...(images.length ? { images } : {}),
             ...(onTool ? { onTool } : {}),
             ...(signal ? { signal } : {}),
+            ...(msg.effort ? { effort: msg.effort } : {}),
           }
         : undefined;
       const result = await brain.complete(

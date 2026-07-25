@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { Action, AttachmentMeta, QuestionItem } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, QuestionItem, EffortLevel } from '../../../shared/protocol';
 import type { AttachmentStore } from './attachment-store';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
@@ -33,6 +33,17 @@ export interface ChatChannel {
   visibility?: 'public' | 'private';   // Phase 16c: 비공개 = 초대된 사람만
   memberIds?: string[];                // Phase 16c: 비공개 채널 입장 허용 계정 id
   brain?: string;                      // Task 1: 채널이 사용할 뇌(모델) 선택. 누락=기본값.
+  // 노력(effort): 채널별 추론 노력. brain과 같은 자리·같은 관례로 여기 저장한다(새 저장소 없음).
+  // 코드 채널에서만 의미가 있고 누락=서버 기본(high). 적용 규칙 판단은 orchestrator 몫.
+  effort?: EffortLevel;
+}
+
+// EffortLevel의 런타임 검증용 목록. shared/protocol.ts는 "런타임 값 0"을 지키는 타입 전용 파일이라
+// 값은 여기 한 곳에만 둔다(self.adapter의 프레임 검증도 이걸 재사용 — 목록이 갈라지지 않게).
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+export function isEffortLevel(v: unknown): v is EffortLevel {
+  return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v);
 }
 
 // channelId는 클라이언트 유래(신뢰 경계) — 파일명에 쓰기 전 검증.
@@ -174,6 +185,7 @@ export class ChatStore {
             if (c.visibility === 'public' || c.visibility === 'private') normalized.visibility = c.visibility;
             if (Array.isArray(c.memberIds)) normalized.memberIds = c.memberIds;
             if (typeof c.brain === 'string' && c.brain.trim().length > 0) normalized.brain = c.brain;
+            if (isEffortLevel(c.effort)) normalized.effort = c.effort; // 오염값(비문자열·미허용)은 드롭
             return normalized;
           });
       }
@@ -225,6 +237,22 @@ export class ChatStore {
       const trimmed = brain.trim();
       if (!trimmed) return false;
       ch.brain = trimmed;
+    }
+    this.save(list);
+    return true;
+  }
+
+  // 노력(effort) 설정. setChannelBrain과 동일한 계약: null=해제(필드 삭제), 허용값 밖=false·미변경,
+  // 없는 채널=false.
+  setChannelEffort(id: string, effort: EffortLevel | null): boolean {
+    const list = this.listChannels();
+    const ch = list.find((c) => c.id === id);
+    if (!ch) return false;
+    if (effort === null) {
+      delete ch.effort;
+    } else {
+      if (!isEffortLevel(effort)) return false;
+      ch.effort = effort;
     }
     this.save(list);
     return true;

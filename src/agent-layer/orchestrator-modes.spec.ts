@@ -31,8 +31,10 @@ it('Code 모드 메시지는 classify를 건너뛰고 대화 답변으로 간다
   );
   expect(spyClassify).not.toHaveBeenCalled();
   // 3번째 인자는 요청 한정 채널 두뇌(Task 2, 스펙 §3.2) — channelBrain 미주입이면 codeBrain 그대로 전달.
+  // 4번째는 코드 채널 스트리밍의 onChunk(delta 미전달이면 undefined), 5번째는 이 턴의 노력(코드 채널
+  // 저장값 없으면 high) — 둘 다 additive.
   expect(spyAnswer).toHaveBeenCalledWith(
-    expect.objectContaining({ mode: 'code', repoPath: 'C:/repo/app' }), 'c1', expect.anything(),
+    expect.objectContaining({ mode: 'code', repoPath: 'C:/repo/app' }), 'c1', expect.anything(), undefined, 'high',
   );
 });
 
