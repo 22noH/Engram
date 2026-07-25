@@ -6,11 +6,17 @@ on:
   # v* 태그를 밀면 데스크톱 릴리스(desktop-release.yml)와 함께 npm도 게시된다.
   push:
     tags: ['v*']
-  # 태그 없이 손으로 돌리고 싶을 때(예: 게시만 재시도).
+  # 태그 없이 손으로 돌리고 싶을 때(예: 게시만 재시도). version을 주면 그 숫자로 게시한다 —
+  # 태그는 이미 밀었는데 게시만 실패한 경우(v0.0.15 실사고) 태그를 다시 만들지 않고 복구하는 길.
   workflow_dispatch:
+    inputs:
+      version:
+        description: '게시할 버전(비우면 package.json 값 그대로). 예: 0.0.15'
+        required: false
 
 permissions:
-  contents: read
+  # write인 이유: 게시 후 main에 버전 파일을 되돌려 커밋한다(아래 Sync 단계). read면 그 push가 403.
+  contents: write
   id-token: write # ← OIDC 신뢰 게시의 핵심. 없으면 인증 실패한다.
 
 jobs:
@@ -28,12 +34,16 @@ jobs:
       - run: npm install -g npm@latest
 
       - run: npm ci
+      # 콘솔은 자체 package.json을 가진 별도 워크스페이스다 — 루트 npm ci로는 설치되지 않는다.
+      # 이게 빠져서 v0.0.15 첫 게시가 console:build의 타입 정의 누락으로 실패했다(실사고 2026-07-25).
+      # desktop-release.yml엔 처음부터 있던 단계인데 이 워크플로에만 없었다.
+      - run: npm ci --prefix console
 
       # 태그가 버전의 단일 출처(사용자 결정): v0.0.15를 밀면 그 숫자가 package.json·plugin.json에
-      # 적용된다. 사람이 미리 버전을 올릴 필요 없음. 수동 실행(workflow_dispatch)이면 파일 값 그대로.
-      - name: Apply version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: node scripts/apply-tag-version.js "$GITHUB_REF_NAME"
+      # 적용된다. 사람이 미리 버전을 올릴 필요 없음. 수동 실행은 version 입력이 있으면 그 값을 쓴다.
+      - name: Apply version
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
+        run: node scripts/apply-tag-version.js "${{ inputs.version || github.ref_name }}"
 
       # 앱·npm·플러그인 버전은 항상 같아야 한다. 위 단계가 셋을 맞추므로 여기선 확인만.
       - run: npm run version:check
@@ -64,15 +74,17 @@ jobs:
       # 머물러 나중에 "지금 배포된 게 몇 버전이지?"가 헷갈린다. 실패해도 릴리스는 이미 끝났으므로
       # 워크플로를 빨갛게 만들지 않는다(continue-on-error).
       - name: Sync version files back to main
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         continue-on-error: true
+        env:
+          APPLY_REF: ${{ inputs.version || github.ref_name }}
         run: |
           VER=$(node -p "require('./package.json').version")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main --depth=1
           git checkout -B main origin/main
-          node scripts/apply-tag-version.js "$GITHUB_REF_NAME"
+          node scripts/apply-tag-version.js "$APPLY_REF"
           if git diff --quiet -- package.json plugin/.claude-plugin/plugin.json; then
             echo "main already at $VER — nothing to sync"
             exit 0
