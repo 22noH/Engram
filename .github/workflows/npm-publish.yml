@@ -29,6 +29,9 @@ jobs:
 
       - run: npm ci
 
+      # 앱·npm·플러그인 버전은 항상 같아야 한다(사용자 결정). 손으로 고쳐 어긋나면 여기서 멈춘다.
+      - run: npm run version:check
+
       # package.json의 files가 dist·console/dist를 싣는다 — 둘 다 최신이어야 한다.
       - run: npm run build
       - run: npm run console:build

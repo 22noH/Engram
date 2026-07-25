@@ -46,7 +46,9 @@
     "desktop:build": "npm run renderer:build && npm run console:build && nest build && electron-builder",
     "console:install": "npm --prefix console install",
     "console:build": "npm --prefix console run build",
-    "console:test": "npm --prefix console test"
+    "console:test": "npm --prefix console test",
+    "version": "node scripts/sync-versions.js && git add plugin/.claude-plugin/plugin.json",
+    "version:check": "node scripts/sync-versions.js --check"
   },
   "build": {
     "appId": "dev.engram.desktop",
