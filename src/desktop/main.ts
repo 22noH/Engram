@@ -1,5 +1,5 @@
 // Electron 껍데기(스펙 §3): 트레이 상주 + 설정창 + 자식(상주 main.js) 감독. 로직은 테스트된 모듈에 위임.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray, utilityProcess } from 'electron';
 import { execFileSync } from 'child_process';
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
@@ -9,6 +9,10 @@ import { readStatus } from './status';
 import { Backoff, STABLE_UPTIME_MS, WARN_AFTER } from './backoff';
 import { claudeInstallCommand, resolveClaude, claudeCliEnvOverride, spawnRunner } from './claude-detect';
 import { addOllamaProfile, detectOllama } from './ollama';
+import { addCodexProfile, codexInstallCommand, detectCodex } from './codex';
+import {
+  AuthNotifyGate, checkCliAuth, CliAuthPayload, CliAuthProvider, defaultCliProvider, spawnAuthRunner, toAuthPayload,
+} from './cli-auth';
 import { saveAnthropicApiKey } from './api-brain';
 import { listBrains, setDefaultBrain, removeBrainProfile, slugFromModel, listBrainDetails, updateBrainProfile, BrainPatch } from './brains-file';
 import { listMcpServersFile, addMcpServer, removeMcpServer, mirrorClaudeMcp } from './mcp-file';
@@ -99,7 +103,14 @@ const T = {
   quit: () => (ko() ? '종료' : 'Quit'),
   warnTip: () => (ko() ? 'Engram — 재시작 반복 실패 (로그 확인)' : 'Engram — restarts failing repeatedly (check logs)'),
   updateTo: (v: string) => (ko() ? `v${v}로 업데이트 (재시작)` : `Update to v${v} (restart)`),
+  authTitle: (cli: string) => (ko() ? `Engram — ${cli} 로그인 필요` : `Engram — ${cli} sign-in required`),
+  authBody: () => (ko()
+    ? '로그인이 만료돼 답변을 만들 수 없어요. 클릭하면 해결 방법을 보여드립니다.'
+    : 'Your sign-in expired, so answers cannot be generated. Click to see how to fix it.'),
 };
+
+// CLI 두뇌 표시 이름(알림 제목용).
+const CLI_LABEL: Record<CliAuthProvider, string> = { 'claude-cli': 'Claude CLI', 'codex-cli': 'Codex CLI' };
 
 // ---- 자식(상주) 감독 ----
 // 크래시 증거 캡처(실사고 2026-07-24: 새 설치 머신에서 자식이 부팅 ~46초 뒤 무단 사망을 반복하는데
@@ -234,6 +245,57 @@ function createTray(): void {
   tray = new Tray(trayIcon());
   tray.on('double-click', () => openChat());
   updateTray();
+}
+
+// ---- CLI 로그인 상태 선제 확인(cli-auth.ts에 판정 위임) ----
+// 목적: 사용자가 질문한 뒤에야 "로그인 필요"를 발견하는 일을 없앤다. 현재 기본 두뇌가 CLI 두뇌
+// (claude-cli·codex-cli)일 때만 확인한다 — api 두뇌면 완전 무동작(회귀 0).
+// 판정은 전부 cli-auth.ts(단위 테스트됨). 여기는 배선만: 시점(부팅 1회+30분)·알림·IPC 브로드캐스트.
+const CLI_AUTH_INTERVAL_MS = 30 * 60 * 1000;
+let cliAuth: CliAuthPayload | null = null;
+const cliAuthGate = new AuthNotifyGate();
+// 실행 경로 캐시(성공한 것만) — 나중에 설치한 사용자를 영구 미설치로 낙인찍지 않는다.
+const cliCommandCache: Partial<Record<CliAuthProvider, string>> = {};
+
+async function cliCommandFor(provider: CliAuthProvider): Promise<string | null> {
+  const cached = cliCommandCache[provider];
+  if (cached) return cached;
+  const r = provider === 'claude-cli'
+    ? await resolveClaude(spawnRunner, process.env, process.platform)
+    : await detectCodex(spawnRunner, process.env, process.platform);
+  if (!r.installed) return null; // 미설치 = 로그인 여부 판단 불가(경고 안 함)
+  cliCommandCache[provider] = r.command;
+  return r.command;
+}
+
+async function refreshCliAuth(): Promise<CliAuthPayload | null> {
+  const provider = defaultCliProvider(listBrains(configDir));
+  const before = cliAuth;
+  if (!provider) {
+    cliAuth = null;
+  } else {
+    const command = await cliCommandFor(provider);
+    cliAuth = toAuthPayload(command
+      ? await checkCliAuth(provider, command, spawnAuthRunner())
+      : { provider, state: 'unknown' });
+  }
+  // 바뀔 때만 push(같은 상태를 30분마다 다시 밀지 않는다). 창은 둘 다 배너/상태줄을 갖는다.
+  if (before?.provider !== cliAuth?.provider || before?.state !== cliAuth?.state) {
+    for (const w of [chatWin, settingsWin]) w?.webContents.send('engram:cli-auth-changed', cliAuth);
+  }
+  if (cliAuth && cliAuthGate.shouldNotify(cliAuth, Date.now())) notifyCliAuth(cliAuth);
+  return cliAuth;
+}
+
+// 트레이 알림(창이 없어도 보인다). 클릭하면 설정창을 열어 상태·해결 방법을 보여준다.
+// 빈도 제한(같은 사유 하루 1회)은 AuthNotifyGate가 이미 판단한 뒤에 들어온다.
+function notifyCliAuth(p: CliAuthPayload): void {
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: T.authTitle(CLI_LABEL[p.provider]), body: T.authBody() });
+    n.on('click', () => openSettings());
+    n.show();
+  } catch { /* 알림 실패가 앱을 막지 않게 */ }
 }
 
 // ---- 설정창 ----
@@ -444,6 +506,18 @@ function registerIpc(): void {
   ipcMain.handle('engram:add-ollama', (_e, model: string, name: string, setDefault: boolean) => {
     addOllamaProfile(configDir, model, name, setDefault);
   });
+  // Codex 원클릭 등록(설정 → 모델). 감지 실패면 설치 안내 명령을 함께 돌려준다.
+  ipcMain.handle('engram:detect-codex', async () => ({
+    ...(await detectCodex(spawnRunner, process.env, process.platform)),
+    installCommand: codexInstallCommand(),
+  }));
+  ipcMain.handle('engram:add-codex', (_e, name: string, cli: string, setDefault: boolean) => {
+    addCodexProfile(configDir, name, cli, setDefault);
+  });
+  // CLI 로그인 상태: 조회(캐시된 최신 판정) / 강제 재확인("다시 확인" 버튼). 렌더러 배너는
+  // engram:cli-auth-changed push로 갱신된다. 기본 두뇌가 CLI가 아니면 항상 null(무동작).
+  ipcMain.handle('engram:cli-auth-state', () => cliAuth);
+  ipcMain.handle('engram:cli-auth-refresh', () => refreshCliAuth());
   ipcMain.handle('engram:save-token', (_e, token: string) => {
     saveDiscordToken(configDir, token);
   });
@@ -606,5 +680,9 @@ if (!gotLock) {
     if (cliOverride) childEnv.ENGRAM_BRAIN_CLI = cliOverride;
     startChild();
     for (const b of loadLocalBrains(configDir)) startLocalBrain(b); // + 로컬 두뇌 재기동(재시작 감독 없음 — ponytail)
+    // CLI 로그인 상태: 시작 1회 + 30분마다. 타이머는 unref — 이것 때문에 프로세스가 살아있지 않게.
+    void refreshCliAuth();
+    const authTimer = setInterval(() => { void refreshCliAuth(); }, CLI_AUTH_INTERVAL_MS);
+    authTimer.unref?.();
   });
 }

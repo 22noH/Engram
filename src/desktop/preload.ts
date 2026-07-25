@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 // 설정창(renderer)이 쓰는 최소 API. 파일 쓰기·감지는 전부 메인 프로세스가 수행(스펙 §4).
 contextBridge.exposeInMainWorld('engram', {
@@ -7,6 +7,17 @@ contextBridge.exposeInMainWorld('engram', {
   detectOllama: () => ipcRenderer.invoke('engram:detect-ollama'),
   addOllama: (model: string, name: string, setDefault: boolean) =>
     ipcRenderer.invoke('engram:add-ollama', model, name, setDefault),
+  detectCodex: () => ipcRenderer.invoke('engram:detect-codex'),
+  addCodex: (name: string, cli: string, setDefault: boolean) =>
+    ipcRenderer.invoke('engram:add-codex', name, cli, setDefault),
+  // CLI 두뇌 로그인 상태(선제 알림) — 설정창 상태 줄 + "다시 확인" 버튼.
+  cliAuthState: () => ipcRenderer.invoke('engram:cli-auth-state'),
+  cliAuthRefresh: () => ipcRenderer.invoke('engram:cli-auth-refresh'),
+  onCliAuthChanged: (cb: (s: unknown) => void) => {
+    const listener = (_e: IpcRendererEvent, s: unknown): void => cb(s);
+    ipcRenderer.on('engram:cli-auth-changed', listener);
+    return () => ipcRenderer.removeListener('engram:cli-auth-changed', listener);
+  },
   removeBrain: (key: string) => ipcRenderer.invoke('engram:remove-brain', key),
   slugModel: (model: string) => ipcRenderer.invoke('engram:slug-model', model),
   saveToken: (token: string) => ipcRenderer.invoke('engram:save-token', token),

@@ -58,6 +58,23 @@ contextBridge.exposeInMainWorld('engramDesktop', {
     return () => ipcRenderer.removeListener('engram:stt-progress', listener);
   },
 
+  // CLI 두뇌 로그인 상태(선제 알림). 렌더러 배너용 계약만 — 배너 UI는 렌더러 담당.
+  // cliAuthState: 현재 판정({ provider:'claude-cli'|'codex-cli', state:'logged-in'|'logged-out'|'unknown',
+  //   detail?: string, fixCommand: string }) | null. null = 기본 두뇌가 CLI가 아님 = 배너 없음.
+  //   state가 'logged-out'일 때만 경고한다('unknown'은 판단 불가 — 절대 경고하지 말 것).
+  //   fixCommand는 복사용 명령(claude = 실행 후 /login 입력, codex = codex login).
+  cliAuthState: (): Promise<{ provider: string; state: string; detail?: string; fixCommand: string } | null> =>
+    ipcRenderer.invoke('engram:cli-auth-state'),
+  // "다시 확인" — 즉시 재확인하고 갱신된 판정을 돌려준다.
+  cliAuthRefresh: (): Promise<{ provider: string; state: string; detail?: string; fixCommand: string } | null> =>
+    ipcRenderer.invoke('engram:cli-auth-refresh'),
+  // 상태가 바뀔 때만 push된다(주기 확인 30분). 해제 함수를 돌려준다.
+  onCliAuthChanged: (cb: (s: { provider: string; state: string; detail?: string; fixCommand: string } | null) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, s: { provider: string; state: string; detail?: string; fixCommand: string } | null): void => cb(s);
+    ipcRenderer.on('engram:cli-auth-changed', listener);
+    return () => ipcRenderer.removeListener('engram:cli-auth-changed', listener);
+  },
+
   // 자동 업데이트 상태(사용자 요청 2026-07-24): 현재 버전 표시 + 다운로드된 새 버전 배너/버튼.
   updateState: (): Promise<{ current: string; pending: string | null }> => ipcRenderer.invoke('engram:update-state'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('engram:install-update'),

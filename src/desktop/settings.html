@@ -22,6 +22,7 @@
       --danger: #8a4a3a;
       --alive: #56d364;
       --dead: #f26d6d;
+      --warn: #c9702f;
       --radius: 12px;
     }
     @media (prefers-color-scheme: dark) {
@@ -38,6 +39,7 @@
         --pre-bg: #161816;
         --hover: rgba(255,255,255,.05);
         --danger: #c78a7a;
+        --warn: #e0a26a;
       }
     }
     * { box-sizing: border-box; }
@@ -157,6 +159,9 @@
 
     .ok { color: var(--alive); }
     .bad { color: var(--dead); }
+    /* 주의(경고는 아님) — CLI 로그인이 풀린 상태. 빨강(.bad=고장)과 구분되는 주황. */
+    .warnc { color: var(--warn); }
+    .dim { color: var(--dim); font-size: 12px; }
     code {
       font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px;
       background: var(--code-bg); border: 1px solid var(--line);
@@ -227,7 +232,19 @@
       <code id="install-cmd"></code>
       <button id="btn-copy-install" data-t="copyCmd"></button>
     </div>
+    <!-- CLI 로그인 상태 상시 표시(선제 알림). 기본 두뇌가 CLI 두뇌일 때만 보인다 — api 두뇌면 숨김(무동작). -->
+    <!-- nowrap + min-width:0 — 버튼이 아래 줄로 떨어지지 않게(문구가 길면 문구가 접힌다) -->
+    <div class="row" id="cli-auth-row" hidden style="margin-top:6px;flex-wrap:nowrap">
+      <span id="cli-auth" style="flex:1 1 auto;min-width:0"></span>
+      <button id="btn-auth-copy" hidden data-t="copyCmd" style="flex:none"></button>
+      <button id="btn-auth-recheck" data-t="recheck" style="flex:none"></button>
+    </div>
     <div id="ollama" style="margin-top:10px"></div>
+    <div id="codex" style="margin-top:10px"></div>
+    <div class="row" id="codex-install" hidden>
+      <code id="codex-install-cmd"></code>
+      <button id="btn-copy-codex" data-t="copyCmd"></button>
+    </div>
 
     <div class="grp-h" data-t="regGroup"></div>
     <div class="grp" id="brain-details"></div>
@@ -242,6 +259,13 @@
         <label style="font-size:13px"><input type="checkbox" id="ollama-default" /> <span data-t="setDefault"></span></label>
         <button class="primary" id="btn-ollama" data-t="addBrain"></button>
       </div>
+      <!-- Codex 원클릭 등록: 감지된 실행 경로를 그대로 brains.json에 넣는다(손편집 불필요). -->
+      <div class="li" id="codex-add" hidden>
+        <span class="mono dim" id="codex-path"></span>
+        <input id="codex-name" class="mono" style="width:150px;margin-left:auto" />
+        <label style="font-size:13px"><input type="checkbox" id="codex-default" /> <span data-t="setDefault"></span></label>
+        <button class="primary" id="btn-codex" data-t="addCodex"></button>
+      </div>
       <div class="li" id="api-add">
         <input id="apikey" type="password" placeholder="sk-ant-…" />
         <label style="font-size:13px"><input type="checkbox" id="api-default" /> <span data-t="setDefault"></span></label>
@@ -249,6 +273,7 @@
       </div>
     </div>
     <div class="cap" id="ollama-name-hint" hidden></div>
+    <div class="cap" id="codex-note" hidden></div>
     <div class="cap" id="api-note"></div>
 
     <div class="grp" style="margin-top:16px">
@@ -420,6 +445,8 @@
     const $ = (id) => document.getElementById(id);
 
     let nameDirty = false;
+    let codexNameDirty = false;
+    let codexCommand = null; // detect()가 찾은 codex 실행 경로(등록 시 그대로 brains.json에 들어간다)
     let brainKeys = [];
     let brainDetailsList = [];
     let editingKey = null;
@@ -428,6 +455,12 @@
       const name = $('ollama-name').value.trim();
       $('btn-ollama').disabled = !name;
       $('btn-ollama').textContent = brainKeys.includes(name) ? t.overwrite : t.addBrain;
+    }
+    // Codex 추가 버튼: 이름이 이미 있으면 "덮어쓰기"로 미리 알린다(Ollama 추가와 동일 규칙).
+    function updateCodexButton() {
+      const name = $('codex-name').value.trim();
+      $('btn-codex').disabled = !name || !codexCommand;
+      $('btn-codex').textContent = brainKeys.includes(name) ? t.overwrite : t.addCodex;
     }
 
     // 영어 기본, 시스템 언어가 한국어면 한국어 (메인 프로세스 트레이 메뉴와 같은 판정).
@@ -442,10 +475,16 @@
       beatNone: '아직 없음 — 시작 직후에는 잠시 뒤 표시돼요',
       modelReady: '준비됨', modelPending: '미준비 — 첫 질문 때 자동으로 내려받아요',
       restart: '재시작', refresh: '새로고침', showLogs: '최근 로그 보기', logEmpty: '(로그 없음)',
-      claudeOk: 'claude CLI 감지됨', claudeSignIn: '로그인은 터미널에서 claude 실행',
+      claudeOk: 'claude CLI 감지됨',
       claudeMissing: 'claude CLI를 찾을 수 없어요 — 아래 명령으로 설치하세요', copyCmd: '명령 복사', copied: '복사됨',
       ollamaOk: 'Ollama 실행 중', models: '개 모델',
       ollamaMissing: 'Ollama가 실행 중이 아니에요 — 로컬 LLM을 쓰려면 ollama.com에서 설치하세요',
+      authIn: '로그인됨', authOut: '로그인 안 됨', authUnknown: '로그인 상태를 알 수 없어요',
+      authFixClaude: 'claude 실행 → /login 입력', authFixCodex: 'codex login 실행',
+      authChecking: '로그인 확인 중…', recheck: '다시 확인',
+      codexOk: 'Codex CLI 감지됨', codexMissing: 'Codex CLI를 찾을 수 없어요 — 아래 명령으로 설치하세요',
+      addCodex: 'Codex 추가',
+      codexNote: '추가하면 채팅에서 이름으로 부를 수 있고, Claude 하네스가 필요할 때 Codex에게 하위 에이전트처럼 일을 맡길 수도 있어요.',
       setDefault: '기본 모델로 사용', addBrain: '로컬 모델 추가', added: '추가됨 — 재시작하면 적용돼요',
       saveKey: '저장',
       apiKeyNote: 'Anthropic API 키 — claude CLI 없이 모델을 씁니다. 엔그램 하네스 모델도 코딩(파일 편집·명령 실행)이 됩니다. 코딩을 claude CLI가 할지 엔그램이 할지는 아래 "기본 모델"로 정해요.',
@@ -511,10 +550,16 @@
       beatNone: 'none yet — appears shortly after startup',
       modelReady: 'Ready', modelPending: 'Not yet — downloads on your first question',
       restart: 'Restart', refresh: 'Refresh', showLogs: 'Show recent logs', logEmpty: '(no logs)',
-      claudeOk: 'claude CLI detected', claudeSignIn: 'sign in by running claude in a terminal',
+      claudeOk: 'claude CLI detected',
       claudeMissing: 'claude CLI not found — install it with the command below', copyCmd: 'Copy command', copied: 'Copied',
       ollamaOk: 'Ollama running', models: ' models',
       ollamaMissing: 'Ollama is not running — install it from ollama.com to use a local LLM',
+      authIn: 'Signed in', authOut: 'Not signed in', authUnknown: 'Sign-in status unknown',
+      authFixClaude: 'run claude, then type /login', authFixCodex: 'run codex login',
+      authChecking: 'Checking sign-in…', recheck: 'Check again',
+      codexOk: 'Codex CLI detected', codexMissing: 'Codex CLI not found — install it with the command below',
+      addCodex: 'Add Codex',
+      codexNote: 'Once added you can call it by name in chat, and the Claude harness can hand work to Codex like a sub-agent when it helps.',
       setDefault: 'Use as default model', addBrain: 'Add local model', added: 'Added — restart to apply',
       saveKey: 'Save',
       apiKeyNote: 'Anthropic API key — runs the model without the claude CLI. Engram-harness models can code too (file edits and commands). Whether the claude CLI or Engram does the coding is set by "Default model" below.',
@@ -584,6 +629,7 @@
     const SECTION_LABELS = {
       'sec-status': [t.secStatus, t.lastBeat, t.embedModel, t.dataFolder, t.restart, t.refresh, t.showLogs],
       'sec-brain': [t.secBrain, t.harness, t.harnessCli, t.harnessEngram, t.defaultBrain, t.addBrain, t.setDefault, 'Ollama', 'API', t.saveKey,
+        'Codex', t.addCodex, t.codexOk, t.authIn, t.authOut, t.recheck,
         t.regGroup, t.addGroup, t.brainCap, t.keySet, t.keyNotSet, t.keepBlank, t.nameConflict, t.delBrain, t.cancel,
         t.fName, t.fModel, t.fBaseUrl, t.fApiKey, t.fMaxTokens, t.fSearch, t.fSearchKey, t.fUsdIn, t.fUsdOut],
       'sec-coding': [t.secCoding, t.cmdMode, t.writePaths, t.denyPaths, t.cmdAllowlist, t.autoModeHint, t.cmdListCap, t.cmdBuiltin, t.resetDefault],
@@ -613,6 +659,7 @@
     $('log').textContent = t.logEmpty;
     $('claude').textContent = t.checking;
     $('ollama').textContent = t.checking;
+    $('codex').textContent = t.checking;
     $('api-note').textContent = t.apiKeyNote;
     $('btn-apikey').onclick = async () => {
       const k = $('apikey').value.trim();
@@ -657,9 +704,11 @@
     async function detect() {
       const c = await window.engram.detectClaude();
       if (c.installed) {
+        // 로그인 안내 문구는 아래 상태 줄이 실제 판정으로 대신한다 — 여기선 버전·실행 경로만.
         setLine($('claude'), [
           { cls: 'ok', text: t.claudeOk },
-          ' · ' + (c.version || '') + ' · ' + t.claudeSignIn,
+          ' · ' + (c.version || ''),
+          { cls: 'dim', text: ' · ' + c.command },
         ]);
         $('claude-install').hidden = true;
       } else {
@@ -699,7 +748,72 @@
         $('ollama-add').hidden = true;
         $('ollama-name-hint').hidden = true;
       }
+
+      // Codex 감지 — 잡히면 원클릭 등록 줄, 아니면 설치 안내(claude 미설치 안내와 같은 관례).
+      const cx = await window.engram.detectCodex();
+      if (cx.installed) {
+        codexCommand = cx.command;
+        setLine($('codex'), [{ cls: 'ok', text: t.codexOk }, cx.version ? ' · ' + cx.version : '']);
+        $('codex-path').textContent = cx.command;
+        $('codex-name').placeholder = t.namePlaceholder;
+        if (!codexNameDirty && !$('codex-name').value) $('codex-name').value = 'codex';
+        $('codex-install').hidden = true;
+        $('codex-add').hidden = false;
+        $('codex-note').textContent = t.codexNote;
+        $('codex-note').hidden = false;
+        updateCodexButton();
+      } else {
+        codexCommand = null;
+        setLine($('codex'), [{ cls: 'bad', text: t.codexMissing }]);
+        $('codex-install-cmd').textContent = cx.installCommand;
+        $('codex-install').hidden = false;
+        $('btn-copy-codex').onclick = async () => {
+          await navigator.clipboard.writeText(cx.installCommand);
+          $('btn-copy-codex').textContent = t.copied;
+        };
+        $('codex-add').hidden = true;
+        $('codex-note').hidden = true;
+      }
     }
+
+    // ---- CLI 로그인 상태(선제 알림) ----
+    // 판정은 메인 프로세스(cli-auth.ts)가 한다. 여기는 표시만: 로그인됨=초록+이메일/플랜,
+    // 안 됨=주황+해결 방법, 알 수 없음=회색(경고 아님). null = 기본 두뇌가 CLI가 아님 → 줄 자체를 숨김.
+    function renderCliAuth(s) {
+      if (!s) { $('cli-auth-row').hidden = true; return; }
+      $('cli-auth-row').hidden = false;
+      const label = s.provider === 'codex-cli' ? 'Codex CLI' : 'Claude CLI';
+      const fix = s.provider === 'codex-cli' ? t.authFixCodex : t.authFixClaude;
+      const copyBtn = $('btn-auth-copy');
+      if (s.state === 'logged-in') {
+        setLine($('cli-auth'), [{ cls: 'ok', text: `${label} · ${t.authIn}` }, s.detail ? ' · ' + s.detail : '']);
+        copyBtn.hidden = true;
+      } else if (s.state === 'logged-out') {
+        setLine($('cli-auth'), [{ cls: 'warnc', text: `${label} · ${t.authOut}` }, ' — ' + fix]);
+        copyBtn.hidden = false;
+        copyBtn.textContent = t.copyCmd;
+        copyBtn.onclick = async () => {
+          await navigator.clipboard.writeText(s.fixCommand);
+          copyBtn.textContent = t.copied;
+        };
+      } else {
+        setLine($('cli-auth'), [{ cls: 'dim', text: `${label} · ${t.authUnknown}` }]);
+        copyBtn.hidden = true;
+      }
+    }
+
+    async function loadCliAuth(force) {
+      renderCliAuth(force ? await window.engram.cliAuthRefresh() : await window.engram.cliAuthState());
+    }
+
+    $('btn-auth-recheck').onclick = async () => {
+      const btn = $('btn-auth-recheck');
+      btn.disabled = true;
+      setLine($('cli-auth'), [t.authChecking]);
+      try { await loadCliAuth(true); } finally { btn.disabled = false; }
+    };
+    // 주기 확인(30분)에서 상태가 바뀌면 메인이 push한다 — 설정창을 열어둔 채로도 최신.
+    window.engram.onCliAuthChanged?.((s) => renderCliAuth(s)); // ?. — 구버전 preload와 섞여도 페이지 전체가 죽지 않게
 
     $('btn-restart').onclick = async () => {
       await window.engram.restart();
@@ -722,6 +836,16 @@
       setLine($('ollama'), [{ cls: 'ok', text: t.added }]);
       nameDirty = false;
       await loadBrains();
+    };
+    $('codex-name').oninput = () => { codexNameDirty = true; updateCodexButton(); };
+    $('btn-codex').onclick = async () => {
+      const name = $('codex-name').value.trim();
+      if (!name || !codexCommand) return;
+      await window.engram.addCodex(name, codexCommand, $('codex-default').checked);
+      setLine($('codex'), [{ cls: 'ok', text: t.added }]);
+      codexNameDirty = false;
+      await loadBrains();
+      await loadCliAuth(true); // 기본으로 지정했다면 이제 codex 로그인 상태를 봐야 한다
     };
     $('btn-token').onclick = async () => {
       const v = $('token').value.trim();
@@ -989,10 +1113,12 @@
       if (editingKey && !brainDetailsList.some((b) => b.key === editingKey)) editingKey = null;
       renderBrainDetails();
       updateAddButton();
+      updateCodexButton();
     }
     $('default-brain').onchange = async () => {
       await window.engram.setDefaultBrain($('default-brain').value);
       await loadBrains();
+      await loadCliAuth(true); // 기본 두뇌가 바뀌면 확인 대상 CLI도 바뀐다(api면 줄이 사라짐)
     };
 
     // 하네스 전환 — 그 하네스의 모델(기존 기본이 있으면 유지 불가하므로 첫 항목)을 기본으로 지정.
@@ -1008,6 +1134,7 @@
       }
       await window.engram.setDefaultBrain(items[0].key);
       await loadBrains();
+      await loadCliAuth(true); // CLI ↔ 엔그램 하네스 전환 = 확인 대상 변경
     };
 
     async function loadCmdMode() { $('cmd-mode').value = await window.engram.getCommandMode(); }
@@ -1529,6 +1656,7 @@
 
     refresh();
     detect();
+    loadCliAuth(true); // 설정창을 여는 순간의 실제 로그인 상태(캐시가 비어 있을 수 있어 강제 확인)
     setInterval(refresh, 15000);
   </script>
 </body>

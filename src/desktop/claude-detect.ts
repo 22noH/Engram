@@ -28,13 +28,23 @@ export async function resolveClaude(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): Promise<{ installed: boolean; version: string | null; command: string }> {
+  return resolveCli('claude', run, fallbackCandidates(env, platform));
+}
+
+// 위 탐색 규칙의 일반형(codex.ts가 그대로 재사용 — 새 CLI마다 후보 목록만 주면 된다).
+// PATH의 bin → 잘 알려진 설치 위치 순으로 --version을 시도, 처음 성공한 것이 command.
+export async function resolveCli(
+  bin: string,
+  run: Runner,
+  candidates: string[],
+): Promise<{ installed: boolean; version: string | null; command: string }> {
   try {
-    const r = await run('claude', ['--version']);
-    if (r.code === 0) return { installed: true, version: r.stdout.trim() || null, command: 'claude' };
+    const r = await run(bin, ['--version']);
+    if (r.code === 0) return { installed: true, version: r.stdout.trim() || null, command: bin };
   } catch {
     // ENOENT 등 = PATH에 없음 — 폴백 후보 탐색으로 진행
   }
-  for (const candidate of fallbackCandidates(env, platform)) {
+  for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
     try {
       const r = await run(candidate, ['--version']);
@@ -43,7 +53,7 @@ export async function resolveClaude(
       // 이 후보도 실행 실패 — 다음 후보 계속
     }
   }
-  return { installed: false, version: null, command: 'claude' };
+  return { installed: false, version: null, command: bin };
 }
 
 // 후방호환 얇은 래퍼 — 기존 호출부(설정창 등)는 installed/version만 필요했다.
