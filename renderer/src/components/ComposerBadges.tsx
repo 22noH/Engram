@@ -80,16 +80,21 @@ export function ModelBadge({ brain, brainNames, defaultBrain, onChange }: {
 }
 
 // 권한 모드 — 코드 채널에서만 응답 모드 배지 자리를 대신한다(게이트는 App). 느슨해지는 순서로 나열하고
-// 마지막 "권한 무시"만 구분선 아래 danger로 뗀다(목업 승인). 서버는 채널에 값이 없으면 전역 설정으로
-// 폴백하므로, 여기 미설정 표시는 서버 기본값과 같은 'auto'다.
+// 마지막 "권한 무시"만 구분선 아래 danger로 뗀다(목업 승인).
 const PERM_MODES: PermMode[] = ['plan', 'files', 'restricted', 'auto'];
 
-export function PermModeBadge({ permMode, onChange }: {
-  permMode: PermMode;
+// 채널에 값이 없으면 서버가 전역 설정(permissions.json allow.commandMode)으로 폴백한다. 그래서 라벨은
+// "채널값 → 전역 기본값(서버가 channels 프레임으로 알려준 defaultPermMode) → auto" 순으로 정한다.
+// 마지막 'auto'는 전역값을 아예 모를 때(구식 서버·brain 모드)의 기존 표시 그대로(회귀 0).
+export function PermModeBadge({ permMode, defaultPermMode, onChange }: {
+  permMode?: PermMode;
+  defaultPermMode?: PermMode;
   onChange: (m: PermMode) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
+  // 지금 이 채널에 실제로 적용되는 모드(라벨·드롭다운 체크가 둘 다 이 하나를 본다 — 서로 어긋날 수 없게).
+  const effective: PermMode = permMode ?? defaultPermMode ?? 'auto';
   // 되돌리기 어려운 위험 설정(폴더 밖 수정 허용)은 확인 한 번을 거친다 — 거부하면 아무 일도 안 한다.
   const pick = (m: PermMode): void => {
     if (m === 'bypass' && !window.confirm(T.permBypassConfirm)) return;
@@ -97,7 +102,7 @@ export function PermModeBadge({ permMode, onChange }: {
     setOpen(false);
   };
   const item = (m: PermMode) => (
-    <div key={m} className={'item permItem' + (permMode === m ? ' sel' : '') + (m === 'bypass' ? ' danger' : '')}
+    <div key={m} className={'item permItem' + (effective === m ? ' sel' : '') + (m === 'bypass' ? ' danger' : '')}
       onClick={() => pick(m)}>
       <div className="permName">{T.permModeName(m)}</div>
       <div className="permDesc">{T.permModeDesc(m)}</div>
@@ -105,9 +110,9 @@ export function PermModeBadge({ permMode, onChange }: {
   );
   return (
     <div className="cbadgeWrap" ref={ref}>
-      <button type="button" className={'cbadge permBadge' + (permMode === 'bypass' ? ' danger' : '')}
+      <button type="button" className={'cbadge permBadge' + (effective === 'bypass' ? ' danger' : '')}
         title={T.permModeTitle} onClick={() => setOpen((o) => !o)}>
-        {T.permModeName(permMode)} ▾
+        {T.permModeName(effective)} ▾
       </button>
       {open && (
         <div className="cbadgeMenu permPop">

@@ -71,6 +71,21 @@ function readMcpWriteMode(configDir: string): 'propose' | 'write' {
   }
 }
 
+// permissions.json의 allow.commandMode 읽기 — readMcpWriteMode와 완전히 같은 결(같은 파일·자체 구현).
+// 쓰는 곳: channels 프레임의 defaultPermMode(권한 모드 배지가 "미설정 채널이 실제로 뭘로 도는지" 표시).
+// PermissionFence가 부팅 때 load하는 그 값이고, 여기서도 부팅 시 1회만 읽어 스냅샷으로 넘긴다
+// (전역 설정은 재시작 후 적용 — server-admin의 coding 키 appliesAfterRestart:true).
+// 없거나 깨짐/미지정값 → 'auto'(fence의 `commandMode ?? 'auto'` 폴백과 동일).
+function readCommandMode(configDir: string): 'auto' | 'allowlist' | 'off' {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(configDir, 'permissions.json'), 'utf8'));
+    const m = raw?.allow?.commandMode;
+    return m === 'allowlist' || m === 'off' ? m : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
 // 치명적 크래시 진단(실사고 2026-07-24): 상주 백엔드가 운행 중 code=1로 조용히 죽는데(스택 없이 exit 1)
 // 사인이 자식 stderr에 아무것도 안 남아 원인을 못 잡았다. 전체 스택을 stderr(부모가 child-stderr.log로
 // 파이프)로 동기 출력한다 — 다음 크래시가 진범을 뱉는다.
@@ -239,6 +254,10 @@ async function bootstrap(): Promise<void> {
       logger,
       brainNames: () => listBrainNames(paths.getConfigDir()),
       defaultBrain: () => defaultBrainName(paths.getConfigDir()),
+      // 채널에 permMode가 없을 때 실제로 적용되는 전역 기본값 — 권한 모드 배지가 이걸로 라벨을 정한다
+      // (안 넘기면 프레임에 필드가 없어 클라가 기존대로 '자동' 표시 = 회귀 0). 부팅 1회 스냅샷인 이유는
+      // readCommandMode 주석 참고(PermissionFence도 부팅 1회 load — 두 값이 항상 같은 시점).
+      defaultCommandMode: readCommandMode(paths.getConfigDir()),
       compactHandler,
       stopHandler,
     },

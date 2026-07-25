@@ -24,7 +24,7 @@ const CODE = { id: 'w-code', name: 'proj', respondMode: 'all', mode: 'code', rep
 
 function frames(ws: FakeWS): any[] { return ws.sent.map((s) => JSON.parse(s)); }
 
-async function openApp(list: unknown[], opts: { code?: boolean; remote?: boolean } = {}) {
+async function openApp(list: unknown[], opts: { code?: boolean; remote?: boolean; defaultPermMode?: string } = {}) {
   if (opts.remote) {
     localStorage.setItem('engram.connections', JSON.stringify({
       connections: [{ id: 'r1', name: 'Team Server', endpoint: 'ws://10.0.0.5:47800' }], defaultConnId: 'r1',
@@ -33,7 +33,11 @@ async function openApp(list: unknown[], opts: { code?: boolean; remote?: boolean
   render(<App />);
   act(() => { FakeWS.last.onopen!(); });
   act(() => {
-    FakeWS.last.onmessage!({ data: JSON.stringify({ t: 'channels', list, brainNames: ['claude', 'codex'], defaultBrain: 'claude' }) });
+    FakeWS.last.onmessage!({ data: JSON.stringify({
+      t: 'channels', list, brainNames: ['claude', 'codex'], defaultBrain: 'claude',
+      // 서버가 전역 기본 권한 모드를 알려줄 때만 실린다(미주입=필드 없음 — 구식 서버·brain 모드).
+      ...(opts.defaultPermMode ? { defaultPermMode: opts.defaultPermMode } : {}),
+    }) });
   });
   if (opts.code) {
     fireEvent.click(screen.getByText('Code'));
@@ -192,9 +196,30 @@ describe('B3-2. 권한 모드 배지(코드 채널 전용)', () => {
     expect(q('.respondBadge')).toBeNull();
   });
 
-  it('미설정 채널 라벨은 기본값 "자동"', async () => {
+  it('전역값 미주입이면 미설정 채널 라벨은 기존대로 "자동"(회귀 0)', async () => {
     await openApp([CODE], { code: true });
     expect(q('.permBadge')?.textContent).toContain(T.permModeName('auto'));
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    expect(q('.cbadgeMenu .item.sel .permName')?.textContent).toBe(T.permModeName('auto'));
+  });
+
+  // ★라벨↔동작 불일치 방지: 서버는 채널에 permMode가 없으면 전역 설정(permissions.json
+  // allow.commandMode)으로 폴백한다. 전역이 제한/파일만인데 배지가 "자동"이라고 우기면
+  // 사용자가 자동인 줄 알고 명령을 시켰다 거부당한다 — 그래서 전역값을 그대로 라벨에 쓴다.
+  // 서버가 실어주는 값(전역 allowlist→restricted / off→files / auto→auto)은 self.adapter가 매핑한다.
+  it.each(['restricted', 'files', 'auto'] as const)('미설정 채널은 전역 기본값(%s) 라벨로 뜬다', async (mode) => {
+    await openApp([CODE], { code: true, defaultPermMode: mode });
+    expect(q('.permBadge')?.textContent).toContain(T.permModeName(mode));
+    // 드롭다운 체크(.sel)도 실제 유효값을 가리켜야 한다(라벨만 맞고 체크가 어긋나면 그것도 거짓말).
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    expect(q('.cbadgeMenu .item.sel .permName')?.textContent).toBe(T.permModeName(mode));
+  });
+
+  it('채널에 값이 있으면 전역과 무관하게 채널값이 이긴다', async () => {
+    await openApp([{ ...CODE, permMode: 'plan' }], { code: true, defaultPermMode: 'restricted' });
+    expect(q('.permBadge')?.textContent).toContain(T.permModeName('plan'));
+    act(() => { fireEvent.click(q('.permBadge')!); });
+    expect(q('.cbadgeMenu .item.sel .permName')?.textContent).toBe(T.permModeName('plan'));
   });
 
   it('채널에 실린 permMode 값을 라벨로 보여준다', async () => {

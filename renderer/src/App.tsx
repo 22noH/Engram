@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Channel, ClientFrame, Message as Msg, RosterEntry, ServerFrame, UserDto } from '../../shared/protocol';
+import type { Channel, ClientFrame, Message as Msg, PermMode, RosterEntry, ServerFrame, UserDto } from '../../shared/protocol';
 import { loadConnections, saveConnections, setDefault, addConnection, removeConnection, isLocalEndpoint } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
@@ -131,6 +131,9 @@ export default function App() {
   // Task 4(리뷰 지적) — 현재 기본 두뇌 이름(드롭다운 기본 항목의 "Default (claude)" 표시용).
   // brainNames와 같은 결로 기본 연결 기준 하나만.
   const [defaultBrain, setDefaultBrain] = useState<string>('');
+  // 전역 기본 권한 모드 — 채널에 permMode가 없을 때 서버가 실제로 적용하는 값(권한 모드 배지 라벨용).
+  // defaultBrain과 같은 결로 기본 연결 기준 하나만. 서버가 안 알려주면 undefined(배지는 기존대로 '자동').
+  const [defaultPermMode, setDefaultPermMode] = useState<PermMode | undefined>(undefined);
   // Phase 16a — 로그인 게이트(기본 연결 기준). meByConn=연결별 로그인한 사용자, gateStatus=그 연결의
   // /auth/status(null=무인증 서버·brain → 게이트 없음, 현행 동작 유지).
   const [meByConn, setMeByConn] = useState<Record<string, UserDto>>({});
@@ -170,7 +173,7 @@ export default function App() {
     if (f.t === 'channels') {
       setChannelsByConn((prev) => ({ ...prev, [connId]: f.list }));
       // Task 4 — 두뇌 드롭다운은 기본 연결(그 서버) 기준 하나만(roster/wiki와 같은 결).
-      if (connId === connState.defaultConnId) { setBrainNames(f.brainNames); setDefaultBrain(f.defaultBrain); }
+      if (connId === connState.defaultConnId) { setBrainNames(f.brainNames); setDefaultBrain(f.defaultBrain); setDefaultPermMode(f.defaultPermMode); }
       setChanIdByConnName((prev) => {
         const next = new Map(prev);
         // Minor: 이 연결의 기존 엔트리를 먼저 지우고 새로 채운다 — 삭제된 채널이 stale로 안 남게.
@@ -1088,10 +1091,12 @@ export default function App() {
                 <div className="composerRow composerTools">
                   <div className="composerLeft">
                     {/* 코드 채널은 이 자리가 "권한 모드"(어디까지 알아서 할지), Chat·Team은 기존 "응답 모드"
-                        그대로. 서버는 채널에 값이 없으면 전역 설정으로 폴백하므로 미설정 표시는 'auto'. */}
+                        그대로. 서버는 채널에 값이 없으면 전역 설정으로 폴백하므로 미설정 채널 표시는
+                        서버가 알려준 전역 기본값(defaultPermMode)이다 — 모르면 배지가 'auto'로 폴백. */}
                     {mode === 'code' ? (
                       <PermModeBadge
-                        permMode={curChan?.permMode ?? 'auto'}
+                        permMode={curChan?.permMode}
+                        defaultPermMode={defaultPermMode}
                         onChange={(m) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setChannelPermMode', id, permMode: m })); }}
                       />
                     ) : (

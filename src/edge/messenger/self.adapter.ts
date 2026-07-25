@@ -33,6 +33,20 @@ import { questionFallbackText } from '../../agent-layer/ask-user-block';
 
 interface WikiDeps { wiki: WikiEngine; proposals: ProposalStore; applier: ProposalApplier }
 
+// 전역 기본 권한 모드(permissions.json allow.commandMode) → 채널 권한 모드 어휘.
+// PermissionFence의 PERM_TO_COMMAND(권한모드→명령정책)를 거꾸로 읽은 것이고, 전역엔 "계획만(plan)"·
+// "권한 무시(bypass)" 개념이 없어(둘 다 채널 전용) 세 항만 있다.
+//  - auto      → auto      아무 명령이나 실행(fence commandPolicy 'auto')
+//  - allowlist → restricted 승인 목록만(fence 'allowlist')
+//  - off       → files     명령만 끄고 파일 쓰기는 writePaths 안에서 그대로 = files와 같은 동작
+//                          (fence는 files·plan을 둘 다 'off'로 매핑하지만, plan은 파일 쓰기까지
+//                           막으므로 전역 off의 등가물은 files다)
+const COMMAND_TO_PERM: Record<'auto' | 'allowlist' | 'off', PermMode> = {
+  auto: 'auto',
+  allowlist: 'restricted',
+  off: 'files',
+};
+
 // Phase 16a 계정 세션 게이트 의존성. 미주입 시 무인증(현행 — 테스트·brain 모드).
 export interface AuthDeps {
   accounts: AccountStore; sessions: SessionStore; http: AuthHttp;
@@ -104,6 +118,13 @@ export class SelfMessenger implements MessengerPort {
       // Task 4(리뷰 지적): 현재 기본 두뇌 이름. brainNames와 같은 결로 요청마다 재조회(캐시 금지).
       // 미주입 시 ''(안전 폴백 — channels 응답의 defaultBrain='').
       defaultBrain?: () => string;
+      // 전역 기본 권한 모드의 원본값(permissions.json allow.commandMode). 채널에 permMode가 없을 때
+      // 실제로 적용되는 값이라 배지가 이걸 알아야 라벨과 동작이 안 어긋난다.
+      // getter가 아니라 값인 이유: 이 설정은 PermissionFence가 부팅 때 1회 load한 값으로 판정하고
+      // 재시작 후에야 바뀐다(server-admin의 coding 키가 appliesAfterRestart:true인 그 이유). 매번
+      // 재조회하면 파일만 바뀌고 아직 안 먹은 값을 배지에 띄워 오히려 어긋난다 — 부팅 스냅샷이 정답.
+      // 미주입 시 channels 프레임에 defaultPermMode 필드 자체가 없다(클라는 기존대로 'auto' 표시).
+      defaultCommandMode?: 'auto' | 'allowlist' | 'off';
       // clear-compact Task 3: compact ws 케이스가 호출하는 훅. 실제 브레인 배선(오케스트레이터
       // 메서드+bridge)은 별도 후속 태스크 — 여기선 훅 계약만 정의한다. 미주입(brain 모드/미배선)이면
       // compact 케이스는 조용한 no-op(무크래시, 브로드캐스트 없음).
@@ -339,16 +360,22 @@ export class SelfMessenger implements MessengerPort {
   private defaultBrain(): string {
     return this.opts.defaultBrain ? this.opts.defaultBrain() : '';
   }
+  // 전역 기본 권한 모드를 채널 권한 모드 어휘로 옮긴 값(미주입=undefined → 프레임에 필드 없음).
+  private defaultPermMode(): PermMode | undefined {
+    const m = this.opts.defaultCommandMode;
+    return m ? COMMAND_TO_PERM[m] : undefined;
+  }
 
   // 소켓별로 접근 가능한 채널만 담아 channels 프레임을 각 인증 소켓에 전송.
   private broadcastChannels(): void {
     const all = this.store.listChannels();
     const brainNames = this.brainNames();
     const defaultBrain = this.defaultBrain();
+    const defaultPermMode = this.defaultPermMode();
     for (const c of this.wss?.clients ?? []) {
       if (c.readyState !== WebSocket.OPEN || !this.isConnected(c)) continue;
       const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(c, ch)) : all;
-      try { c.send(JSON.stringify({ t: 'channels', list, brainNames, defaultBrain })); } catch { /* 격리 */ }
+      try { c.send(JSON.stringify({ t: 'channels', list, brainNames, defaultBrain, ...(defaultPermMode ? { defaultPermMode } : {}) })); } catch { /* 격리 */ }
     }
   }
   private adminList(): AdminUserDto[] {
@@ -394,7 +421,8 @@ export class SelfMessenger implements MessengerPort {
         case 'channels': {
           const all = this.store.listChannels();
           const list = this.authDeps ? all.filter((ch) => this.canAccessChannel(ws, ch)) : all;
-          this.sendTo(ws, { t: 'channels', list, brainNames: this.brainNames(), defaultBrain: this.defaultBrain() });
+          const defaultPermMode = this.defaultPermMode();
+          this.sendTo(ws, { t: 'channels', list, brainNames: this.brainNames(), defaultBrain: this.defaultBrain(), ...(defaultPermMode ? { defaultPermMode } : {}) });
           return;
         }
         case 'createChannel': {

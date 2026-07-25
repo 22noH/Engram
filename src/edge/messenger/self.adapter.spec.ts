@@ -565,6 +565,40 @@ describe('setChannelBrain(Task 3)', () => {
     expect(f.defaultBrain).toBe('claude');
   });
 
+  // 전역 기본 권한 모드(defaultPermMode): 채널에 permMode가 없을 때 실제로 적용되는 값을 배지가
+  // 정확히 쓰게 하려고 channels 프레임에 동봉한다(defaultBrain과 같은 결).
+  it('defaultCommandMode 미주입이면 channels 프레임에 defaultPermMode 필드가 아예 없다(회귀 0)', async () => {
+    client.send(JSON.stringify({ t: 'channels' }));
+    const f = await nextFrame(client);
+    expect('defaultPermMode' in f).toBe(false);
+  });
+
+  it.each([
+    ['auto', 'auto'],
+    ['allowlist', 'restricted'],
+    ['off', 'files'],
+  ] as const)('전역 commandMode=%s → defaultPermMode=%s (PermissionFence PERM_TO_COMMAND의 역방향)', async (cmd, perm) => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-defperm-'));
+    const store2 = new ChatStore(dir2);
+    store2.listChannels();
+    const sm2 = new SelfMessenger(
+      { enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store2,
+      { logger: noLog, defaultCommandMode: cmd },
+    );
+    await sm2.start();
+    const c = new WebSocket(`ws://127.0.0.1:${sm2.addressPort()}`);
+    await once(c, 'open');
+    c.send(JSON.stringify({ t: 'channels' }));
+    expect((await nextFrame(c)).defaultPermMode).toBe(perm);
+    // 브로드캐스트(설정 변경 응답)에도 같은 값이 실린다 — 두 경로가 갈라지지 않게.
+    const ch = store2.createChannel('coding-def', 'code')!;
+    c.send(JSON.stringify({ t: 'setChannelPermMode', id: ch.id, permMode: null }));
+    expect((await nextFrame(c)).defaultPermMode).toBe(perm);
+    c.terminate();
+    await sm2.stop();
+    fs.rmSync(dir2, { recursive: true, force: true });
+  });
+
   it('brainNames·defaultBrain 미주입이면 빈 목록·빈 문자열(회귀 없음)', async () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-brainch2-'));
     const store2 = new ChatStore(dir2);

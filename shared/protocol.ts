@@ -132,7 +132,11 @@ export type ClientFrame =
 
 // 서버 → 클라
 export type ServerFrame =
-  | { t: 'channels'; list: Channel[]; brainNames: string[]; defaultBrain: string }
+  // defaultPermMode: 채널에 permMode가 없을 때 실제로 적용되는 전역 기본 권한 모드(permissions.json
+  // allow.commandMode를 권한 모드 어휘로 옮긴 것 — auto→auto, allowlist→restricted, off→files).
+  // defaultBrain과 같은 결로 "미설정 채널이 실제로 뭘로 도는지"를 배지가 정확히 쓰게 하기 위한 값.
+  // 미주입(구식 배선·brain 모드·테스트) 시 필드 자체가 없다 → 클라는 기존대로 'auto'로 표시(회귀 0).
+  | { t: 'channels'; list: Channel[]; brainNames: string[]; defaultBrain: string; defaultPermMode?: PermMode }
   | { t: 'history'; channelId: string; messages: Message[] }
   | { t: 'msg'; channelId: string; message: Message }
   | { t: 'historyCleared'; channelId: string }
