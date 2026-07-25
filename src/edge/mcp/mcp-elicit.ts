@@ -20,7 +20,10 @@ import type { ElicitRequestFormParams } from '@modelcontextprotocol/sdk/types.js
 //     disableElicitation()으로 아예 끈다.
 //  3) 타임아웃 — 그래도 응답이 없으면 ELICIT_TIMEOUT_ENV(기본 120초) 후 거부가 아니라 폴백.
 
-export const DEFAULT_ELICIT_TIMEOUT_MS = 120_000;
+// 45초 — 클라이언트의 MCP 도구 호출 타임아웃(클로드 코드 기본 60초)보다 반드시 짧아야 한다.
+// 더 길면 사용자 화면엔 승인 대화상자가 떠 있는데 도구 호출은 이미 끊긴 뒤라, 눌러도 아무 일이
+// 없는 유령 대화상자가 된다(리뷰 지적 2026-07-25). 여유가 필요하면 ELICIT_TIMEOUT_ENV로 올린다.
+export const DEFAULT_ELICIT_TIMEOUT_MS = 45_000;
 export const ELICIT_TIMEOUT_ENV = 'ENGRAM_MCP_ELICIT_TIMEOUT_MS';
 // 탈출구 — 자동화/CI처럼 사람이 없는 게 확실한 맥락에서 대화상자를 아예 끄고 기존 경로로.
 export const ELICIT_OFF_ENV = 'ENGRAM_MCP_NO_ELICIT';
