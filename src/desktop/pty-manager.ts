@@ -169,6 +169,17 @@ export class PtyManager {
     if (sid) this.kill(sid);
   }
 
+  /**
+   * 주어진 키들 중 **지금 살아있는** 것만 돌려준다. 서버 메뉴의 "실행 중" 표시가 이걸 본다 —
+   * 레이아웃(저장된 탭)만 보고 판단하면 앱을 껐다 켠 뒤에도 안 도는 서버가 돌고 있다고 거짓말한다.
+   */
+  aliveKeys(keys: string[]): string[] {
+    return keys.filter((k) => {
+      const sid = this.byChannel.get(k);
+      return !!sid && this.sessions.has(sid);
+    });
+  }
+
   killAll(): void {
     for (const sid of Array.from(this.sessions.keys())) this.kill(sid);
   }

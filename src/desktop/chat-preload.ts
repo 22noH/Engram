@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('engramDesktop', {
   ptyKill: (sid: string): Promise<void> => ipcRenderer.invoke('engram:pty-kill', sid),
   // 탭/칸을 닫을 때 쓴다 — 그 탭이 한 번도 안 열렸으면 렌더러가 sid를 모른다(키는 항상 안다).
   ptyKillKey: (key: string): Promise<void> => ipcRenderer.invoke('engram:pty-kill-key', key),
+  // 서버 메뉴의 "실행 중" 표시 — 저장된 탭이 아니라 실제 살아있는 세션을 본다.
+  ptyAlive: (keys: string[]): Promise<string[]> => ipcRenderer.invoke('engram:pty-alive', keys),
   ptyReplay: (sid: string): Promise<string> => ipcRenderer.invoke('engram:pty-replay', sid),
   onPtyData: (cb: (sid: string, data: string) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: { sid: string; data: string }): void => cb(payload.sid, payload.data);

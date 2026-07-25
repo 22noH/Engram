@@ -99,6 +99,15 @@ export function findPaneByTool(layout: DockLayout, tool: DockTool): PaneNode | n
   return listPanes(layout.root).find((p) => p.tool === tool) ?? null;
 }
 
+/**
+ * pty 세션 키 — 예전엔 채널 id 하나였지만 독 패널에선 터미널 탭이 여럿이라 탭 단위로 쪼갠다.
+ * 탭 id가 localStorage에 남으므로, 패널을 접었다 펴도 **같은 키 = 같은 세션**이라 리플레이로
+ * 그대로 이어진다(패널만 접을 땐 세션을 죽이지 않는다는 기존 불변식이 이걸로 성립한다).
+ */
+export function ptySessionKey(channelId: string, tabId: string): string {
+  return `${channelId}#${tabId}`;
+}
+
 /** 이 레이아웃이 들고 있는 모든 터미널 탭의 세션 키(칸/탭 닫기 시 kill 대상 계산용). */
 export function terminalTabIds(node: DockNode): string[] {
   return listPanes(node).filter((p) => p.tool === 'terminal').flatMap((p) => p.tabs.map((t) => t.id));
@@ -234,7 +243,9 @@ function serializeTab(t: DockTab): DockTab | null {
   if (t.url) out.url = t.url;
   if (t.file) out.file = t.file;
   if (t.serverId) out.serverId = t.serverId;
-  // command는 "세션이 새로 생겼을 때 1회 입력"용 런타임 값이라 저장하지 않는다.
+  // command도 저장한다: 앱을 껐다 켜면 그 탭의 세션은 사라지므로, 탭을 다시 열 때 명령이 남아 있어야
+  // 개발 서버가 실제로 다시 뜬다(이름만 서버인 빈 셸이 남지 않게).
+  if (t.command) out.command = t.command;
   return out;
 }
 
@@ -277,6 +288,7 @@ function parseNode(raw: unknown): DockNode | null {
       if (typeof t.url === 'string' && !t.url.startsWith('data:')) tab.url = t.url;
       if (typeof t.file === 'string') tab.file = t.file;
       if (typeof t.serverId === 'string') tab.serverId = t.serverId;
+      if (typeof t.command === 'string') tab.command = t.command;
       tabs.push(tab);
     }
     if (!tabs.length) return null;

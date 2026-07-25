@@ -42,6 +42,8 @@ declare global {
       ptyKill?: (sid: string) => Promise<void>;
       /** 탭/칸을 닫을 때 — sid를 모르는 탭도 키로 정리할 수 있다(고아 방지). */
       ptyKillKey?: (key: string) => Promise<void>;
+      /** 지금 살아있는 세션 키만 돌려준다(서버 "실행 중" 표시가 저장값이 아니라 실제를 보게). */
+      ptyAlive?: (keys: string[]) => Promise<string[]>;
       ptyReplay?: (sid: string) => Promise<string>;
       // 코드 독 패널 브라우저 칸 — 파일 열기 / 스크린샷 저장 / 끌어다 놓은 파일의 실제 경로.
       pickFile?: () => Promise<string | null>;
@@ -108,7 +110,6 @@ declare module 'react' {
         webpreferences?: string;
         useragent?: string;
         /** allowpopups는 절대 붙이지 않는다(팝업 차단 — 새 창 요청은 OS 브라우저로). */
-        ref?: React.Ref<WebviewElement>;
       };
     }
   }

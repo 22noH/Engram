@@ -224,6 +224,18 @@ describe('PtyManager', () => {
     expect(r.created).toBe(true);
   });
 
+  it('aliveKeys()는 살아있는 키만 돌려준다 — 서버 "실행 중" 표시가 거짓말하지 않게', () => {
+    const { factory, procs } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    mgr.start('ch1#a', VALID_CWD);
+    mgr.start('ch1#b', VALID_CWD);
+    expect(mgr.aliveKeys(['ch1#a', 'ch1#b', 'ch1#never'])).toEqual(['ch1#a', 'ch1#b']);
+    mgr.killKey('ch1#a');
+    expect(mgr.aliveKeys(['ch1#a', 'ch1#b'])).toEqual(['ch1#b']);
+    procs[1].fireExit(0); // 서버가 스스로 죽은 경우도 반영된다
+    expect(mgr.aliveKeys(['ch1#a', 'ch1#b'])).toEqual([]);
+  });
+
   it('killKey()는 없는 키·kill throw를 삼킨다(never-throw)', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');

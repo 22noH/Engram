@@ -1,6 +1,6 @@
 import {
   addTab, closePane, closeTab, defaultLayout, findPane, findPaneByTool, focusPane, focusedPane,
-  legacyToolFor, listPanes, loadDock, makePane, makeTab, parseLayout, resizeSplit, saveDock,
+  legacyToolFor, listPanes, loadDock, makePane, makeTab, parseLayout, ptySessionKey, resizeSplit, saveDock,
   serializeLayout, setActiveTab, splitPane, terminalTabIds,
   type DockLayout, type PaneNode, type SplitNode,
 } from './layout';
@@ -207,6 +207,12 @@ describe('탐색 도우미', () => {
     expect(findPaneByTool(l, 'diff')).toBeNull();
   });
 
+  it('세션 키는 채널+탭으로 만들어져 패널을 접었다 펴도 같은 세션에 이어진다', () => {
+    expect(ptySessionKey('w-code', 't-1')).toBe('w-code#t-1');
+    expect(ptySessionKey('w-code', 't-1')).toBe(ptySessionKey('w-code', 't-1'));
+    expect(ptySessionKey('w-code', 't-1')).not.toBe(ptySessionKey('w-code', 't-2'));
+  });
+
   it('terminalTabIds는 터미널 칸의 탭만 모은다', () => {
     let l = defaultLayout('browser');
     l = splitPane(l, paneIds(l)[0], 'col', 'terminal');
@@ -227,11 +233,18 @@ describe('직렬화 왕복', () => {
     expect(back).toEqual(l);
   });
 
-  it('diff 탭의 파일 경로와 서버 탭의 serverId를 보존한다', () => {
+  it('diff 탭의 파일 경로를 보존한다', () => {
     const pane = makePane('diff', [makeTab({ file: 'src/a.ts' })]);
     const l: DockLayout = { root: pane, focusedPaneId: pane.id };
     const back = parseLayout(serializeLayout(l)!)!;
     expect((back.root as PaneNode).tabs[0].file).toBe('src/a.ts');
+  });
+
+  it('서버 탭의 serverId·command를 보존한다(앱 재시작 후에도 그 탭을 열면 서버가 다시 뜬다)', () => {
+    const pane = makePane('terminal', [makeTab({ serverId: 'srv-1', command: 'npm run dev', title: 'renderer' })]);
+    const l: DockLayout = { root: pane, focusedPaneId: pane.id };
+    const t = (parseLayout(serializeLayout(l)!)!.root as PaneNode).tabs[0];
+    expect(t).toMatchObject({ serverId: 'srv-1', command: 'npm run dev', title: 'renderer' });
   });
 
   it('data: URL 탭(HTML 크게보기)은 저장하지 않는다 — localStorage를 통째로 날릴 수 있다', () => {

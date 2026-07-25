@@ -641,6 +641,7 @@ function registerIpc(): void {
   ipcMain.handle('engram:pty-kill', (_e, sid: string) => { ptyManager.kill(sid); });
   // 독 패널: 탭/칸을 닫을 때 sid를 모를 수 있어(한 번도 안 연 탭 등) 키로도 죽인다.
   ipcMain.handle('engram:pty-kill-key', (_e, key: string) => { ptyManager.killKey(key); });
+  ipcMain.handle('engram:pty-alive', (_e, keys: string[]) => ptyManager.aliveKeys(Array.isArray(keys) ? keys : []));
   ipcMain.handle('engram:pty-replay', (_e, sid: string) => ptyManager.replay(sid));
   // 독 패널 더보기(⋮) — 파일 열기: 브라우저 칸에서 file://로 열 로컬 파일 하나를 고른다.
   ipcMain.handle('engram:pick-file', async () => {

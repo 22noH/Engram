@@ -11,7 +11,13 @@ import { Thread } from './components/Thread';
 import type { AttachmentCtx } from './components/Message';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
-import { CodePanel, CodePanelIcons, loadCodeTab, saveCodeTab, type CodeTab } from './components/CodePanel';
+import { DockIcons, DockPanel } from './components/dock/DockPanel';
+import {
+  addTab, defaultLayout, type DockLayout, type DockTool, findPaneByTool, focusedPane, focusPane,
+  loadDock, makeTab, saveDock, splitPane, updateTab,
+} from './dock/layout';
+import { loadPrefs } from './dock/prefs';
+import { toNavUrl, urlTitle } from './dock/url';
 import { EngramSelector } from './components/EngramSelector';
 import { RespondModeBadge, ModelBadge, EffortBadge, PermModeBadge } from './components/ComposerBadges';
 import { MicButton } from './components/MicButton';
@@ -448,33 +454,63 @@ export default function App() {
     ? channelsByConn[connState.defaultConnId]?.find((c) => c.name === currentName && (c.mode ?? 'chat') === mode)
     : undefined;
 
-  // Task 3(code-panel) — 채널별 열림 탭은 localStorage 퍼시스트(CodePanel.tsx 헬퍼). 채널이 바뀌면
-  // 그 채널의 저장된 탭으로, code 모드를 벗어나면 닫힌 것으로 취급한다.
-  const [codeTab, setCodeTab] = useState<CodeTab | null>(null);
+  // 코드 독 패널(2026-07-25) — 채널별 레이아웃을 localStorage에 퍼시스트(dock/layout.ts). 채널이
+  // 바뀌면 그 채널의 저장된 레이아웃으로, code 모드를 벗어나면 닫힌 것으로 취급한다(회귀 0 —
+  // 기존 단일 패널 사용자 값은 loadDock이 기본 레이아웃으로 이관한다).
+  const [dock, setDock] = useState<DockLayout | null>(null);
   useEffect(() => {
-    setCodeTab(mode === 'code' && defaultChan?.id ? loadCodeTab(defaultChan.id) : null);
+    setDock(mode === 'code' && defaultChan?.id ? loadDock(defaultChan.id) : null);
   }, [mode, defaultChan?.id]);
-  const openCodeTab = (t: CodeTab) => {
-    if (!defaultChan) return;
-    setCodeTab(t);
-    saveCodeTab(defaultChan.id, t);
+  const applyDock = (next: DockLayout | null) => {
+    setDock(next);
+    if (defaultChan) saveDock(defaultChan.id, next);
   };
-  const closeCodePanel = () => {
-    if (defaultChan) saveCodeTab(defaultChan.id, null);
-    setCodeTab(null);
+  // 도구 열기(헤더 아이콘) — 그 도구 칸이 있으면 포커스만, 없으면 지금 칸을 아래로 쪼개 만든다.
+  const openDockTool = (tool: DockTool) => {
+    if (!defaultChan) return;
+    if (!dock) { applyDock(defaultLayout(tool)); return; }
+    const existing = findPaneByTool(dock, tool);
+    applyDock(existing ? focusPane(dock, existing.id) : splitPane(dock, focusedPane(dock).id, 'col', tool));
   };
   const codePanelGate = mode === 'code' && !!defaultChan?.repoPath && !!window.engramDesktop?.ptyStart;
 
-  // HTML 인라인 미리보기 "크게 보기" — 채팅 카드의 확대 버튼이 넘긴 HTML을 우측 패널 프리뷰 탭에
-  // srcdoc으로 띄운다. 패널을 못 여는 영역(일반 Chat/Team, 비데스크톱)에는 onExpandHtml 자체를
-  // 내려주지 않아 카드에서 확대 버튼이 사라진다 — 눌러도 아무 일 없는 버튼을 두지 않는다.
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
-  useEffect(() => { setPreviewHtml(null); }, [mode, defaultChan?.id]);
-  const expandHtml = (html: string) => {
+  // 브라우저 칸에 새 탭으로 주소 하나를 연다(HTML 크게 보기·채팅 링크가 함께 쓴다).
+  // 브라우저 칸이 없으면 만들고, 지금 보고 있는 탭이 빈 탭이면 그 자리를 쓴다.
+  const openInDockBrowser = (url: string, title?: string) => {
     if (!defaultChan) return;
-    setPreviewHtml(html);
-    setCodeTab('preview');
-    saveCodeTab(defaultChan.id, 'preview');
+    let next = dock ?? defaultLayout('browser');
+    let browser = findPaneByTool(next, 'browser');
+    if (!browser) {
+      next = splitPane(next, focusedPane(next).id, 'col', 'browser');
+      browser = findPaneByTool(next, 'browser')!;
+    }
+    const activeTab = browser.tabs.find((t) => t.id === browser!.activeTabId);
+    next = activeTab && !activeTab.url
+      ? updateTab(next, browser.id, activeTab.id, { url, title: title ?? urlTitle(url) })
+      : addTab(next, browser.id, makeTab({ url, title: title ?? urlTitle(url) }));
+    applyDock(next);
+  };
+
+  // HTML 인라인 미리보기 "크게 보기" — 채팅 카드의 확대 버튼이 넘긴 HTML을 브라우저 칸의 새 탭으로
+  // 띄운다. data: URL은 고유(opaque) 출처라 앱 DOM·스토리지에 닿을 수 없고, 미리보기 파티션이라
+  // 앱 세션과도 분리된다. 저장은 되지 않는다(dock/layout.ts가 data: 탭을 퍼시스트에서 제외).
+  // 패널을 못 여는 영역(일반 Chat/Team, 비데스크톱)에는 onExpandHtml 자체를 내려주지 않아 카드에서
+  // 확대 버튼이 사라진다 — 눌러도 아무 일 없는 버튼을 두지 않는다.
+  const expandHtml = (html: string) => {
+    openInDockBrowser('data:text/html;charset=utf-8,' + encodeURIComponent(html), 'HTML');
+  };
+
+  // 더보기(⋮) "채팅 링크를 이 패널에서 열기" — 켜져 있으면 메시지 속 링크를 외부 브라우저 대신
+  // 브라우저 칸의 새 탭으로 연다. 꺼져 있으면(기본) 기존 동작 그대로다(회귀 0).
+  const onMsgsClick = (e: React.MouseEvent) => {
+    if (!codePanelGate || !loadPrefs().openLinksHere) return;
+    const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+    const href = a?.getAttribute('href') ?? '';
+    if (!/^https?:/i.test(href)) return;
+    const url = toNavUrl(href);
+    if (!url) return;
+    e.preventDefault();
+    openInDockBrowser(url);
   };
 
   // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
@@ -908,7 +944,7 @@ export default function App() {
                   // 게이트가 닫힌 코드 채널(비데스크톱 등)은 아래 else 분기로 기존 마크업 그대로(byte-identical).
                   <div id="chhdr" style={{ display: 'flex' }} title={defaultChan.repoPath}>
                     <span>{'📁 ' + defaultChan.repoPath.split(/[\\/]/).filter(Boolean).pop()}</span>
-                    <CodePanelIcons activeTab={codeTab} onSelect={openCodeTab} />
+                    <DockIcons layout={dock} onOpenTool={openDockTool} />
                   </div>
                 ) : (
                   <div id="chhdr" style={{ display: 'block' }} title={defaultChan.repoPath}>
@@ -927,7 +963,7 @@ export default function App() {
               {(() => {
                 const codeChildren = (
                 <>
-              <div id="msgs" ref={msgsRef}>
+              <div id="msgs" ref={msgsRef} onClick={onMsgsClick}>
                 {(() => {
                   const byAnchor = new Map<string, Msg[]>();
                   for (const m of mergedMsgs) {
@@ -1158,12 +1194,11 @@ export default function App() {
               </div>
                 </>
                 );
-                return codePanelGate && codeTab && defaultChan ? (
+                return codePanelGate && dock && defaultChan ? (
                   <div className="codeMainRow">
                     <div className="chatCol">{codeChildren}</div>
-                    <CodePanel channelId={defaultChan.id} repoPath={defaultChan.repoPath as string} tab={codeTab}
-                      onChangeTab={openCodeTab} onClose={closeCodePanel}
-                      previewHtml={previewHtml} onClearPreviewHtml={() => setPreviewHtml(null)} />
+                    <DockPanel channelId={defaultChan.id} repoPath={defaultChan.repoPath as string}
+                      layout={dock} onLayout={applyDock} />
                   </div>
                 ) : (
                   <div className="chatCol">{codeChildren}</div>

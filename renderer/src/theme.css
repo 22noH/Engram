@@ -648,25 +648,15 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
 .codeMainRow { flex:1; display:flex; min-height:0; }
 .codeMainRow .chatCol { flex:1; min-width:0; }
 
-/* 레포 첫 스플리터 — 패널 좌측 모서리, 드래그로 폭 조절(마우스업 시 localStorage 퍼시스트). */
-.codePanel { position:relative; flex:none; display:flex; flex-direction:column; min-height:0;
+/* 독 패널 바깥틀 — 좌측 모서리 스플리터로 폭 조절(마우스업 시 localStorage 퍼시스트). */
+.dockPanel { position:relative; flex:none; display:flex; min-height:0; min-width:0;
              background:var(--panel); border-left:1px solid var(--line); }
-.codeSplitter { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2; }
+.codeSplitter { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:3; }
 .codeSplitter:hover { background:var(--accent-line); opacity:.5; }
-
-.codeTabRow { flex:none; display:flex; align-items:center; gap:2px; padding:0 8px;
-              border-bottom:1px solid var(--line); background:var(--panel-2); }
-.codeTabBtn { padding:8px 10px; font-size:12px; color:var(--dim); cursor:pointer; border-bottom:2px solid transparent; }
-.codeTabBtn:hover { color:var(--text); }
-.codeTabBtn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
-.codeTabClose { margin-left:auto; background:transparent; color:var(--dim); font-size:16px; line-height:1;
-                padding:2px 6px; border-radius:6px; }
-.codeTabClose:hover { background:var(--hover); color:var(--text); }
-.codeTabBody { flex:1; min-height:0; display:flex; flex-direction:column; }
 .codeEmptyNotice { flex:1; display:flex; align-items:center; justify-content:center; text-align:center;
                     padding:20px; color:var(--dim); font-size:12.5px; }
 
-/* 터미널 탭 — 배경은 --panel-2(라이트=종이톤 카드/다크=흑연), xterm 자체 theme도 CodePanel.tsx가
+/* 터미널 탭 — 배경은 --panel-2(라이트=종이톤 카드/다크=흑연), xterm 자체 theme도 TerminalPane.tsx가
    같은 토큰에서 구성한다. */
 .codeTerm { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--panel-2); }
 .codeTermSurface { flex:1; min-height:0; padding:6px 8px; }
@@ -675,15 +665,109 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
                    padding:8px 12px; font-size:12px; color:var(--dim); border-top:1px solid var(--line); }
 .codeSessionBar button { padding:5px 12px; font-size:12px; }
 
-/* 프리뷰 탭 — URL 바+iframe(sandbox 속성은 CodePanel.tsx). */
-.codePreview { flex:1; min-height:0; display:flex; flex-direction:column; }
-.codePreviewBar { flex:none; display:flex; align-items:center; gap:6px; padding:8px; border-bottom:1px solid var(--line); }
-.codePreviewBar input { flex:1; min-width:0; padding:6px 8px; font-size:12px; }
-.codePreviewBar button, .codePreviewBar a { flex:none; padding:5px 9px; font-size:12px; text-align:center;
-                                             color:var(--dim); text-decoration:none; border:1px solid var(--line); border-radius:6px; }
-.codePreviewBar a:hover, .codePreviewBar button:hover:not(:disabled) { color:var(--text); background:var(--hover); }
-.codePreviewError { flex:none; padding:6px 12px; font-size:12px; color:var(--danger); }
-.codePreview iframe { flex:1; min-height:0; border:none; background:var(--panel-2); }
+/* ---- 코드 독 패널(2026-07-25, 목업 승인) — 레일 · 자유 분할 · 칸마다 탭 · 진짜 브라우저 ---- */
+
+/* 왼쪽 세로 막대: 도구 열기 + 분할 + 접기. */
+.dockRail { flex:none; width:38px; display:flex; flex-direction:column; align-items:center; gap:4px;
+            padding:8px 0; background:var(--panel-2); border-right:1px solid var(--line); }
+.dockRailBtn { width:26px; height:26px; padding:0; border-radius:7px; font-size:13px; line-height:1;
+               background:transparent; border:1px solid transparent; color:var(--dim); cursor:pointer;
+               display:flex; align-items:center; justify-content:center; }
+.dockRailBtn:hover { background:var(--hover); color:var(--text); }
+.dockRailBtn.on { background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent); }
+.dockRailGap { flex:1; }
+
+.dockBody { flex:1; min-width:0; min-height:0; display:flex; }
+
+/* 분할 상자 — 이진 트리 한 칸. 드래그 중에는 flexGrow만 DOM으로 갱신한다(DockPanel.tsx). */
+.dockSplit { flex:1; min-width:0; min-height:0; display:flex; }
+.dockSplit.row { flex-direction:row; }
+.dockSplit.col { flex-direction:column; }
+.dockSplitChild { flex-basis:0; min-width:0; min-height:0; display:flex; }
+.dockDivider { flex:none; background:transparent; z-index:2; }
+.dockDivider.row { width:5px; cursor:col-resize; border-left:1px solid var(--line); }
+.dockDivider.col { height:5px; cursor:row-resize; border-top:1px solid var(--line); }
+.dockDivider:hover { background:var(--accent-line); opacity:.6; }
+/* 드래그 중엔 webview/텍스트가 포인터를 채가지 못하게 한다(경계가 손에서 빠지는 것 방지). */
+body.dockDragging { cursor:col-resize; user-select:none; }
+body.dockDragging .dockWebview, body.dockDragging iframe { pointer-events:none; }
+
+/* 칸 — 탭 줄 + 본문. */
+.dockPane { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); }
+.dockPaneBody { flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; position:relative; }
+.dockTabs { position:relative; flex:none; display:flex; align-items:center; gap:2px; padding:5px 6px;
+            background:var(--panel-2); border-bottom:1px solid var(--line); }
+.dockPane.focused > .dockTabs { box-shadow:inset 2px 0 0 var(--accent-line); }
+.dockTab { display:flex; align-items:center; gap:6px; max-width:150px; padding:4px 8px; border-radius:7px;
+           font-size:12px; color:var(--dim); cursor:pointer; border:1px solid transparent; }
+.dockTab:hover { color:var(--text); }
+.dockTab.on { background:var(--panel); border-color:var(--line); color:var(--text); }
+.dockTab .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dockTab .x { flex:none; font-size:10px; color:var(--dim); opacity:.6; }
+.dockTab .x:hover { opacity:1; color:var(--danger); }
+.dockTabBtn { flex:none; width:22px; height:22px; padding:0; border:none; border-radius:6px; background:transparent;
+              color:var(--dim); font-size:12px; line-height:1; cursor:pointer;
+              display:flex; align-items:center; justify-content:center; }
+.dockTabBtn:hover { background:var(--hover); color:var(--text); }
+.dockTabBtn.on { background:var(--accent-soft); color:var(--accent); }
+.dockSp { flex:1; }
+
+/* 브라우저 칸 — 주소줄 + webview 스택. */
+.dockBrowser { flex:1; min-height:0; display:flex; flex-direction:column; }
+.dockBrowser.dropping { outline:2px dashed var(--accent-line); outline-offset:-4px; }
+.dockNav { flex:none; display:flex; align-items:center; gap:5px; padding:6px 8px; border-bottom:1px solid var(--line); }
+.dockNavBtn { flex:none; width:24px; height:24px; padding:0; border:none; border-radius:6px; background:transparent;
+              color:var(--dim); font-size:12px; line-height:24px; text-align:center; text-decoration:none; cursor:pointer; }
+.dockNavBtn:hover:not(:disabled) { background:var(--hover); color:var(--text); }
+.dockNavBtn:disabled { opacity:.35; cursor:default; }
+.dockAddr { flex:1; min-width:0; padding:5px 9px; font-size:12px; border-radius:8px;
+            background:var(--panel-2); border:1px solid var(--line); color:var(--text); }
+.dockBar { flex:none; display:flex; align-items:center; gap:8px; padding:6px 10px; font-size:12px; }
+.dockBar.warn { color:var(--danger); }
+.dockBar.confirm { background:var(--accent-soft); color:var(--text); border-bottom:1px solid var(--line); }
+.dockBarText { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dockBar button { padding:3px 9px; font-size:12px; border:1px solid var(--line); border-radius:6px;
+                  background:var(--panel); color:var(--text); cursor:pointer; }
+.dockBar button:hover { background:var(--hover); }
+/* webview 스택: 탭을 바꿔도 떼지 않는다(뒤로/앞으로 기록 보존) — 비활성은 감추기만. */
+.dockViews { flex:1; min-height:0; position:relative; background:var(--panel-2); }
+.dockWebview { position:absolute; inset:0; width:100%; height:100%; visibility:hidden; }
+.dockWebview.active { visibility:visible; z-index:1; }
+.dockEmpty { position:absolute; inset:0; z-index:2; }
+
+/* 드롭다운(서버·더보기) — 탭 줄 오른쪽에 매달린다. */
+.dockMenuWrap { position:absolute; top:100%; right:6px; z-index:20; }
+.dockMenu { width:250px; padding:6px 0; border-radius:10px; background:var(--panel);
+            border:1px solid var(--line); box-shadow:0 8px 24px rgba(0,0,0,.18); }
+.dockMenu.wide { width:274px; }
+.dockMenuHead { padding:6px 14px 4px; font-size:11px; color:var(--dim); }
+.dockMenuEmpty { padding:7px 14px; font-size:12px; color:var(--dim); }
+.dockMenuItem { display:flex; align-items:center; gap:9px; padding:7px 14px; font-size:13px; color:var(--text); }
+.dockMenuItem.clickable, .dockMenuItem { cursor:default; }
+.dockMenuItem.clickable { cursor:pointer; }
+.dockMenuItem:hover { background:var(--hover); }
+.dockMenuIcon { flex:none; width:16px; font-size:12px; color:var(--dim); text-align:center; }
+.dockMenuLabel { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dockMenuVal { flex:none; font-size:12px; color:var(--dim); }
+.dockMenuCheck { flex:none; font-size:12px; color:var(--accent); width:12px; }
+.dockMenuSep { height:1px; margin:5px 0; background:var(--line); }
+.dockMenuPlay, .dockMenuX { flex:none; width:20px; height:20px; padding:0; border-radius:5px; font-size:10px;
+                            background:transparent; border:1px solid transparent; color:var(--dim); cursor:pointer; }
+.dockMenuPlay { border-color:var(--line); color:var(--accent); }
+.dockMenuPlay:hover, .dockMenuX:hover { background:var(--hover); }
+.dockMenuX:hover { color:var(--danger); }
+.dockDot { flex:none; width:6px; height:6px; border-radius:50%; background:transparent; }
+.dockDot.on { background:var(--accent); }
+.dockMenuForm { display:flex; flex-direction:column; gap:5px; padding:6px 12px 10px; }
+.dockMenuForm input { padding:5px 8px; font-size:12px; }
+.dockMenuForm button { padding:5px 10px; font-size:12px; }
+.dockSiteList { max-height:150px; overflow-y:auto; padding:2px 0 4px; }
+.dockSiteRow { display:flex; align-items:center; gap:8px; padding:4px 14px 4px 39px; font-size:12px; color:var(--dim); }
+
+.dockNotice { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:30;
+              padding:7px 14px; max-width:88%; border-radius:9px; font-size:12px;
+              background:var(--panel); border:1px solid var(--line); color:var(--text);
+              box-shadow:0 6px 18px rgba(0,0,0,.16); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* Diff 탭 — 좌측 파일 목록+우측 unified diff(추가/삭제행은 --accent/--danger 파생색, AdminArea 관례). */
 .codeDiff { flex:1; min-height:0; display:flex; }
