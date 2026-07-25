@@ -18,6 +18,13 @@ describe('extractPropose', () => {
     const t = '답.\n```engram:propose\n{"goal":"  "}\n```';
     expect(extractPropose(t).goal).toBeUndefined();
   });
+  it('마커 뒤에 다른 펜스가 오면 그 내용을 삼켜 삭제하지 않는다(실사고 2026-07-25)', () => {
+    // 예전 정규식은 lazy 캡처가 뒤 펜스까지 먹어 JSON 파싱이 깨지면 ask_user 블록째 사라졌다.
+    const t = '답.\n```engram:propose\n{"goal":"X"}\n```\n```ask_user\n{"questions":[]}\n```';
+    const r = extractPropose(t);
+    expect(r.reply).toContain('ask_user'); // 뒤 블록이 살아있다(삭제 없음)
+    expect(r.reply).toContain('답.');
+  });
   it('마커가 답변 중간에 인용되면(끝이 아니면) 신호로 취급 안 함 — 원문 그대로, goal 없음', () => {
     // 예: 이 기능 자체를 설명하며 마커를 인용하는 경우
     const t = '시스템은 ```engram:propose\n{"goal":"예시"}\n``` 블록을 답 끝에 붙여요. 그냥 설명이에요.';

@@ -18,12 +18,57 @@ function makeOrch(brainText: string) {
   return o;
 }
 
-type Posted = { text: string; actions?: any[] };
+type Posted = { text: string; actions?: any[]; question?: any };
 function collect() {
   const posts: Posted[] = [];
-  const post = async (text: string, actions?: any[]) => { posts.push({ text, actions }); };
+  const post = async (text: string, actions?: any[], question?: any) => { posts.push({ text, actions, question }); };
   return { posts, post };
 }
+
+// 실사고(2026-07-25): 코드 채널만 extractAskUser 미배선이라 두뇌가 되물어도 카드가 안 뜨고,
+// 펜스 JSON이 채팅에 날것으로 찍혔다. "[구현 시작] 버튼과 경합"이 이유였지만 되묻는 턴은
+// 애초에 구현 제안이 아니라 경합 자체가 없다 — 질문이 이기고 버튼·pending은 안 건다.
+const ASK_FENCE = '```ask_user\n{"questions":[{"q":"A와 B 중 뭘로 할까요?","options":[{"label":"A"},{"label":"B"}]}]}\n```';
+
+it('Code 채널: 두뇌가 ask_user 블록을 내면 질문 카드로 게시(JSON 날것 노출 없음)', async () => {
+  const orch = makeOrch(`정하고 가야 해요.\n${ASK_FENCE}`);
+  const { posts, post } = collect();
+  await orch.handleMention(
+    { text: '재리뷰까지 할까?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
+  );
+  expect(posts).toHaveLength(1);
+  expect(posts[0].question).toEqual({
+    questions: [{ q: 'A와 B 중 뭘로 할까요?', options: [{ label: 'A' }, { label: 'B' }] }],
+  });
+  expect(posts[0].text).toBe('정하고 가야 해요.');
+  expect(posts[0].text).not.toContain('ask_user'); // 펜스 잔재 없음
+});
+
+it('Code 채널: 질문과 구현제안이 동시에 오면 질문이 이긴다(버튼·pending 없음)', async () => {
+  const orch = makeOrch(`붙일 수 있어요.\n\`\`\`engram:propose\n{"goal":"로그인"}\n\`\`\`\n${ASK_FENCE}`);
+  const { posts, post } = collect();
+  await orch.handleMention(
+    { text: '로그인 붙여줘', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1',
+  );
+  expect(posts[0].question).toBeDefined();
+  expect(posts[0].actions).toBeUndefined();                  // 되묻는 턴엔 [구현 시작] 안 붙는다
+  expect((orch as any).pending.get('c1')).toBeUndefined();   // 답을 받기 전엔 제안 확정 안 함
+});
+
+it('Code 채널: 적재되는 대화 기록에도 펜스 JSON이 아니라 표시 텍스트가 남는다', async () => {
+  const brain = { complete: async () => ({ text: `정하고 가야 해요.\n${ASK_FENCE}`, costUsd: 0, isError: false }) } as any;
+  const append = jest.fn(async () => {});
+  const conversations = { append, recent: async () => [] } as any;
+  const o = new Orchestrator(
+    null as any, conversations, logger, null as any,
+    null as any, null as any, null as any, null as any,
+    {} as any, null as any, null as any, null as any, null as any,
+    brain, { assertWritable() {} } as any, null as any, { all: () => [] } as any, null as any,
+  );
+  const { post } = collect();
+  await o.handleMention({ text: '재리뷰?', userId: 'c1', mode: 'code', repoPath: 'C:/repo/app' }, post, 'c1');
+  expect(append).toHaveBeenCalledWith('c1', expect.objectContaining({ answer: '정하고 가야 해요.' }));
+});
 
 it('Code 채널 질문은 대화 답변만 — 버튼·제안 없음', async () => {
   const orch = makeOrch('여기 원인은 add.js가 없어서야.');

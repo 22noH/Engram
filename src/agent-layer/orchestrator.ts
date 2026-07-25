@@ -449,18 +449,26 @@ export class Orchestrator {
         await post(t('noRepoFolder'));
         return;
       }
-      const { reply, goal } = await this.answerInCode(msg, threadKey, brain);
+      const { reply, goal, question } = await this.answerInCode(msg, threadKey, brain);
+      // ask-user(실사고 2026-07-25): 코드 채널만 extractAskUser가 빠져 있어 두뇌가 되물어도 카드가
+      // 안 뜨고 펜스 JSON이 채팅·대화기록에 날것으로 박혔다. 미배선 사유였던 "[구현 시작] 버튼과 경합"은
+      // 잘못된 전제 — 되묻는 턴은 구현 제안이 아니라 애초에 경합이 없다. 질문이 있으면 질문이 이기고
+      // (버튼·pending 안 걺: 답을 받은 다음 턴이 제안을 다시 만든다), 없으면 기존 동작 그대로(회귀 0 —
+      // 블록이 없으면 extractAskUser가 원문을 그대로 돌려준다).
+      // 질문 추출은 answerInCode가 이미 마쳤다(제안 마커보다 먼저 떼야 해서) — 여기선 표시 텍스트만 정한다.
+      const replyText = reply;
+      const answerForLog = question ? (replyText || questionFallbackText(question)) : replyText;
       // 이 채널의 다음 턴 연속성을 위해 Q&A 적재(answerInCode의 recent가 읽는다). 실패는 continuity만 포기.
       try {
-        await this.conversations.append(msg.userId, { ts: new Date().toISOString(), question: msg.text, answer: reply, sources: [] });
+        await this.conversations.append(msg.userId, { ts: new Date().toISOString(), question: msg.text, answer: answerForLog, sources: [] });
       } catch { /* 적재 실패는 답변에 영향 없음 */ }
-      // ask-user Task 3: 이 코드채팅 응답은 의도적으로 postReply(extractAskUser) 미배선 — [구현 시작]
-      // 액션 버튼과 자리를 다투기 때문(질문 카드가 뜨면 postReply가 actions를 지워버려 버튼이 사라진다).
-      if (goal && this.fence && this.projects) {
+      if (question) {
+        await post(replyText || questionFallbackText(question), undefined, question);
+      } else if (goal && this.fence && this.projects) {
         this.pending.set(threadKey, { kind: 'proposeReady', repoPath: msg.repoPath, goal });
-        await post(reply, [{ label: t('startImplementationLabel'), send: '구현 시작' }]);
+        await post(replyText, [{ label: t('startImplementationLabel'), send: '구현 시작' }]);
       } else {
-        await post(reply); // 코딩 미배선이거나 순수 대화면 답만
+        await post(replyText); // 코딩 미배선이거나 순수 대화면 답만
       }
       return;
     }
@@ -507,14 +515,21 @@ export class Orchestrator {
     const work: Promise<void> = (async (): Promise<void> => {
       try {
         const result = await this.collaborate(question, team, userId, { onProgress: post });
+        // ask-user(실사고 2026-07-25): 여기도 미배선이라 합성 결과에 펜스가 섞이면 JSON이 날것으로
+        // 노출됐다. 합성 결과라도 사용자에게 물을 게 있으면 카드가 맞다(답은 새 멘션으로 재진입).
+        const { text: resultText, question: resultQuestion } = extractAskUser(result);
         // 채널 기억: 결과를 대화로그에 적재(후속 맥락·B수집 소스). 부수효과 실패는 무시.
         await this.conversations
-          .append(userId, { ts: new Date().toISOString(), question, answer: result, sources: [] })
+          .append(userId, {
+            ts: new Date().toISOString(),
+            question,
+            answer: resultQuestion ? (resultText || questionFallbackText(resultQuestion)) : resultText,
+            sources: [],
+          })
           .catch(() => {});
         this.tracker.finish(threadKey, tracked.id, 'done');
-        // ask-user Task 3: 이 결과도 의도적으로 postReply(extractAskUser) 미배선 — 여러 페르소나가
-        // 합성한 결과라 "두뇌 한 명이 사용자에게 되묻는다"는 질문 카드 모델과 안 맞아서(브리프 범위 밖).
-        await post(result);
+        if (resultQuestion) await post(resultText || questionFallbackText(resultQuestion), undefined, resultQuestion);
+        else await post(resultText);
       } catch (err) {
         this.tracker.finish(threadKey, tracked.id, 'failed');
         this.logger.warn(`백그라운드 협업 실패: ${String(err)}`, 'Orchestrator');
@@ -587,7 +602,7 @@ export class Orchestrator {
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
   // 조회만 한다 — 게시·pending은 호출 분기(Step 6)가 결정. 읽기전용이라 게이트 없음(질문=chat 동급).
   // brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
-  private async answerInCode(msg: CoreMessage, threadKey: string, brain?: BrainProvider): Promise<{ reply: string; goal?: string }> {
+  private async answerInCode(msg: CoreMessage, threadKey: string, brain?: BrainProvider): Promise<{ reply: string; goal?: string; question?: AskUserPayload }> {
     const useBrain = brain ?? this.codeBrain;
     if (!useBrain || !msg.repoPath) return { reply: t('answerUnavailable') };
 
@@ -610,7 +625,11 @@ export class Orchestrator {
       extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
     });
     if (r.isError) return { reply: brainErrorHint(r.raw) };
-    return extractPropose(r.text);
+    // 질문 블록을 먼저 떼어낸 뒤 제안 마커를 판정한다(순서 중요 — 실사고 2026-07-25): ask_user가
+    // 뒤에 붙으면 propose의 끝 앵커가 안 맞아 제안이 통째로 무시됐다. 먼저 떼면 남은 텍스트의
+    // 끝이 다시 propose가 되어 둘 다 산다. 블록이 없으면 extractAskUser는 원문을 그대로 돌려준다(회귀 0).
+    const { text: withoutAsk, question } = extractAskUser(r.text);
+    return { ...extractPropose(withoutAsk), question };
   }
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기. brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).

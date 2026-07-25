@@ -32,7 +32,10 @@ export function buildCodeChatPrompt(
 // 마커는 계약상 "답변 맨 끝"에만 온다(buildCodeChatPrompt) → 끝($)에 앵커한다.
 // 그래야 답변 중간에 인용된 마커(예: 이 기능 자체를 설명할 때)를 신호로 오인하지 않는다.
 export function extractPropose(text: string): { reply: string; goal?: string } {
-  const m = text.match(/```engram:propose\s*([\s\S]*?)```\s*$/);
+  // 캡처 그룹은 자기 닫는 펜스 전까지만((?!```) — 실사고 2026-07-25): 예전엔 [\s\S]*?가 뒤따르는
+  // 다른 펜스(ask_user 등)까지 삼켜, JSON 파싱이 깨지면 그 블록째로 답변에서 조용히 삭제됐다.
+  // 이제 그런 꼬리는 아예 매치 안 됨 = 신호로 취급 안 함(내용 삭제 없음, 끝 앵커 의미는 그대로).
+  const m = text.match(/```engram:propose\s*((?:(?!```)[\s\S])*?)```\s*$/);
   if (!m) return { reply: text.trim() };
   const reply = text.replace(m[0], '').trim();
   try {
