@@ -235,6 +235,22 @@ function trayIcon(): Electron.NativeImage {
 // 재시작할 수 있게 — 트레이 항목·인앱 배너 양쪽에 반영). null이면 최신(표시할 업데이트 없음).
 let pendingUpdateVersion: string | null = null;
 
+// 상주 중 주기 확인(사용자 요청 2026-07-25): 지금까지 업데이트 확인은 부팅 시 딱 한 번뿐이라,
+// 앱을 계속 켜두면 새 버전이 나와도 **재시작하기 전까지 알 길이 없었다**. 트레이 상주 앱이라
+// 며칠씩 안 끄는 게 정상 사용이므로, 켜둔 채로도 알림이 뜨게 주기적으로 확인한다.
+// 이미 받아둔 업데이트가 있으면(pendingUpdateVersion) 더 확인하지 않는다 — 표시는 이미 떠 있고
+// 재다운로드만 반복하게 된다.
+export const UPDATE_POLL_MS = 60 * 60 * 1000; // 1시간 — GitHub 릴리스 확인은 가볍지만 잦을 이유도 없다.
+let updateTimer: NodeJS.Timeout | null = null;
+function startUpdatePolling(): void {
+  if (updateTimer) return;
+  updateTimer = setInterval(() => {
+    if (pendingUpdateVersion) return;
+    autoUpdater.checkForUpdatesAndNotify().catch(() => { /* 오프라인 등 — 다음 주기에 다시 */ });
+  }, UPDATE_POLL_MS);
+  updateTimer.unref?.(); // 이 타이머가 앱 종료를 붙잡지 않게(레포 관례)
+}
+
 // 다운로드된 업데이트를 지금 설치(앱 종료→NSIS 설치→재실행). before-quit가 자식을 트리킬하므로
 // 백엔드가 파일을 쥔 채 설치 실패하는 일은 없다. 무다운로드 시엔 no-op(방어).
 function installUpdate(): void {
@@ -789,6 +805,7 @@ if (!gotLock) {
     if (app.isPackaged && process.platform === 'win32') {
       autoUpdater.on('update-downloaded', (info) => onUpdateDownloaded(info.version));
       autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+      startUpdatePolling();
     }
     registerIpc();
     createTray();
