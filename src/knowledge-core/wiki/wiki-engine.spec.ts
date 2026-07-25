@@ -120,6 +120,61 @@ describe('WikiEngine 상태(draft/published)', () => {
   });
 });
 
+// listPages 캐시(2026-07-25 위키탭 렉 측정) — 목록은 페이지마다 파일 전체를 읽어 O(n)이었고,
+// wikiChanged가 올 때마다 그 비용을 통째로 다시 냈다. mtime+size 캐시로 "안 바뀐 파일은 다시 안 읽는다".
+// 아래 테스트는 그 비용(=readFile 호출 수)과, 캐시가 절대 낡은 값을 주지 않음을 함께 못박는다.
+describe('WikiEngine listPages 캐시', () => {
+  it('두 번째 listPages는 안 바뀐 페이지를 다시 읽지 않는다', async () => {
+    const engine = await makeEngine();
+    for (const s of ['a', 'b', 'c']) {
+      await engine.createPage({ slug: s, title: s, category: 'c', body: `body-${s}` });
+    }
+    await engine.listPages(); // 1회차(워밍) — 여기서 3번 읽는다
+
+    // getPage가 곧 "파일 한 개를 통째로 읽는" 지점이다(readFile+parsePage). 캐시가 들으면 0회여야 한다.
+    const spy = jest.spyOn(engine, 'getPage');
+    try {
+      const first = await engine.listPages();
+      expect(first.length).toBe(3);
+      expect(spy).not.toHaveBeenCalled(); // 캐시 적중 — 파일 재읽기 0회
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('페이지가 바뀌면(엔진 경유) 목록이 새 내용을 돌려준다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'p', title: 'T', category: 'c', body: 'old', status: 'published' });
+    await engine.listPages(); // 캐시 채우기
+    await engine.editPage('p', 'new body');
+    const list = await engine.listPages();
+    expect(list[0].body).toBe('new body');
+  });
+
+  it('파일이 밖에서 바뀌어도(git pull 등) 목록이 새 내용을 돌려준다', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'p', title: 'T', category: 'c', body: 'old' });
+    await engine.listPages(); // 캐시 채우기
+
+    const file = path.join((engine as unknown as { paths: PathResolver }).paths.getWikiPagesDir(DEFAULT_USER), 'p.md');
+    const raw = await fs.readFile(file, 'utf8');
+    await fs.writeFile(file, raw.replace('old', 'outside edit — 길이가 달라 크기도 바뀐다'));
+
+    const list = await engine.listPages();
+    expect(list[0].body.trim()).toBe('outside edit — 길이가 달라 크기도 바뀐다');
+  });
+
+  it('삭제된 페이지는 목록에서 빠진다(캐시 잔재 없음)', async () => {
+    const engine = await makeEngine();
+    await engine.createPage({ slug: 'a', title: 'A', category: 'c', body: 'x', status: 'published' });
+    await engine.createPage({ slug: 'b', title: 'B', category: 'c', body: 'y', status: 'published' });
+    await engine.listPages(); // 캐시 채우기
+    await engine.deletePage('a');
+    const list = await engine.listPages();
+    expect(list.map((p) => p.slug)).toEqual(['b']);
+  });
+});
+
 describe('WikiEngine 파괴적 행위', () => {
   it('editPage: 게시 페이지 본문 교체·updated 갱신·published 유지·메타 보존', async () => {
     const engine = await makeEngine();
