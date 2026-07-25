@@ -157,15 +157,27 @@ describe('④ 결과·로그', () => {
     expect(r.text).toContain('detached');
   });
 
-  it('스크린샷은 저장 경로를 돌려준다(두뇌가 그 파일을 읽는다)', async () => {
+  // 캡처 자체는 메인이 한다(렌더러에서 webview.capturePage()를 부르면 창이 멎는다 — 실기 검증
+  // 2026-07-25). 여기선 게스트 id를 넘기고 경로를 받는 계약만 본다.
+  it('스크린샷은 게스트 id를 넘겨 저장 경로를 돌려준다(두뇌가 그 파일을 읽는다)', async () => {
+    const ids: number[] = [];
     const h = ctx({
-      view: {
-        executeJavaScript: async () => ({ ok: true }),
-        capturePage: async () => ({ toPNG: () => new Uint8Array([1, 2, 3]) }),
-      },
+      view: { executeJavaScript: async () => ({ ok: true }), getWebContentsId: () => 42 },
+      saveShot: async (id) => { ids.push(id); return 'C:/tmp/shot.png'; },
     });
     const r = await runBrowserOp({ kind: 'screenshot' }, h.c);
     expect(r.ok).toBe(true);
+    expect(ids).toEqual([42]);
     expect(r.text).toContain('C:/tmp/shot.png');
+  });
+
+  it('캡처 실패(창이 가려짐 등)는 무엇을 해야 하는지 알려준다', async () => {
+    const h = ctx({
+      view: { executeJavaScript: async () => ({ ok: true }), getWebContentsId: () => 7 },
+      saveShot: async () => null,
+    });
+    const r = await runBrowserOp({ kind: 'screenshot' }, h.c);
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/bring it to the front/);
   });
 });

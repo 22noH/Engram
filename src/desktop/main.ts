@@ -1,5 +1,5 @@
 // Electron 껍데기(스펙 §3): 트레이 상주 + 설정창 + 자식(상주 main.js) 감독. 로직은 테스트된 모듈에 위임.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray, utilityProcess, webContents } from 'electron';
 import { execFileSync } from 'child_process';
 import type { UtilityProcess } from 'electron';
 import * as fs from 'fs';
@@ -659,15 +659,35 @@ function registerIpc(): void {
   ipcMain.handle('engram:set-allowed-sites', (_e, sites: unknown) => {
     allowedSites = Array.isArray(sites) ? sites.filter((s): s is string => typeof s === 'string' && !!s) : [];
   });
-  // AI 웹 조작 스크린샷: 대화상자 없이 임시 폴더에 저장하고 경로를 돌려준다(두뇌가 그 파일을 읽는다).
-  // 사용자가 직접 누르는 "스크린샷 저장"(engram:save-screenshot)과 달리 대화상자가 없으므로 저장
-  // 위치를 앱 임시 폴더로 고정한다 — 임의 경로 쓰기 통로가 되지 않게.
-  ipcMain.handle('engram:save-shot-temp', (_e, png: ArrayBuffer) => {
+  // 브라우저 칸 스크린샷 — ★캡처는 메인이 한다(실사고 2026-07-25 실기 검증):
+  // 렌더러에서 `webview.capturePage()`를 부르면 이 조합(Electron+webview)에서 프로미스가 영원히
+  // 안 풀리고 채팅 창이 통째로 멎는다. 게스트의 webContents를 메인이 직접 잡아 캡처하면 멀쩡하다.
+  // where='temp'(AI 조작 — 대화상자 없이 앱 임시 폴더 고정, 임의 경로 쓰기 통로 금지)
+  // where='dialog'(사용자가 ⋮에서 직접 저장)
+  ipcMain.handle('engram:capture-webview', async (_e, webContentsId: number, where: string, suggested?: string) => {
     try {
+      const guest = webContents.fromId(webContentsId);
+      if (!guest) return null;
+      // 창이 가려지면 프레임이 안 그려져 capturePage가 안 풀린다 — 짧게 끊고 실패로 돌린다.
+      const img = await Promise.race([
+        guest.capturePage(),
+        new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+      ]);
+      if (!img) return null;
+      const png = img.toPNG();
+      if (where === 'dialog') {
+        const res = await dialog.showSaveDialog({
+          defaultPath: suggested || `engram-${Date.now()}.png`,
+          filters: [{ name: 'PNG', extensions: ['png'] }],
+        });
+        if (res.canceled || !res.filePath) return null;
+        fs.writeFileSync(res.filePath, png);
+        return res.filePath;
+      }
       const dir = path.join(app.getPath('temp'), 'engram-shots');
       fs.mkdirSync(dir, { recursive: true });
       const p = path.join(dir, `shot-${Date.now()}.png`);
-      fs.writeFileSync(p, Buffer.from(png));
+      fs.writeFileSync(p, png);
       return p;
     } catch { return null; }
   });

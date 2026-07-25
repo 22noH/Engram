@@ -530,7 +530,7 @@ export default function App() {
       confirm: (label, url) => requestConfirm(f.channelId, label, url),
       log: (e) => { appendAgentLog(f.channelId, e); },
       consoleLines: () => consoleLines(activeTabId),
-      saveShot: async (png) => (await window.engramDesktop?.saveShotTemp?.(png)) ?? null,
+      saveShot: async (id) => (await window.engramDesktop?.captureWebview?.(id, 'temp')) ?? null,
     });
     answerBrowserOp(connId, f.opId, result);
   };

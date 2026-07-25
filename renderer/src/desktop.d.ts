@@ -54,8 +54,12 @@ declare global {
       // 판정하기 위해 스냅샷만 받는다 — 판정 함수는 shared/site-gate.ts 하나를 공유한다.
       setAllowedSites?: (sites: string[]) => Promise<void>;
       onNavBlocked?: (cb: (url: string) => void) => () => void;
-      /** AI 웹 조작 스크린샷 — 대화상자 없이 임시 폴더에 저장하고 경로를 돌려준다. */
-      saveShotTemp?: (png: ArrayBuffer) => Promise<string | null>;
+      /**
+       * 브라우저 칸 스크린샷 — ★캡처는 메인이 한다. 렌더러에서 webview.capturePage()를 부르면
+       * 프로미스가 영원히 안 풀리고 채팅 창이 멎는다(실기 검증 2026-07-25). getWebContentsId()만 넘긴다.
+       * where='temp'(AI 조작 — 앱 임시 폴더) | 'dialog'(사용자 저장). 실패·취소면 null.
+       */
+      captureWebview?: (webContentsId: number, where: 'temp' | 'dialog', suggested?: string) => Promise<string | null>;
       onPtyData?: (cb: (sid: string, data: string) => void) => () => void;
       onPtyExit?: (cb: (sid: string, code: number) => void) => () => void;
       // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).
@@ -103,8 +107,13 @@ export interface WebviewElement extends HTMLElement {
   getURL(): string;
   getTitle(): string;
   loadURL(url: string): Promise<void>;
-  capturePage(): Promise<{ toPNG(): Uint8Array }>;
   executeJavaScript(code: string): Promise<unknown>;
+  /**
+   * 게스트 webContents id — 스크린샷은 이 id를 메인에 넘겨 찍는다.
+   * ※ webview.capturePage()는 쓰지 말 것: 렌더러에서 부르면 프로미스가 영원히 안 풀리고 채팅 창이
+   *   멎는다(실기 검증 2026-07-25). 캡처는 메인의 engram:capture-webview 하나로 모았다.
+   */
+  getWebContentsId(): number;
 }
 
 declare module 'react' {

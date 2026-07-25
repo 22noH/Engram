@@ -19,7 +19,8 @@ const NETWORK_MAX = 40;
 export interface AgentView {
   getURL?(): string;
   executeJavaScript(code: string): Promise<unknown>;
-  capturePage?(): Promise<{ toPNG(): Uint8Array }>;
+  /** 캡처는 메인이 한다 — 여기선 게스트를 가리키는 id만 얻는다(agent-run 주석 참조). */
+  getWebContentsId?(): number;
 }
 
 export interface AgentCtx {
@@ -34,8 +35,8 @@ export interface AgentCtx {
   log: (e: { label: string; status: 'ok' | 'fail' | 'blocked' | 'skipped'; detail?: string }) => void;
   /** 그 탭의 콘솔 링버퍼(BrowserView가 모은다). */
   consoleLines: () => string[];
-  /** 스크린샷 저장(경로 반환). 데스크톱이 아니면 null. */
-  saveShot: (png: ArrayBuffer) => Promise<string | null>;
+  /** 스크린샷 — 게스트 webContents id를 메인에 넘겨 캡처·저장하고 경로를 받는다. 실패면 null. */
+  saveShot: (webContentsId: number) => Promise<string | null>;
 }
 
 /** 확인 줄·로그에 쓸 한 줄 요약(사람이 읽는 문구). */
@@ -134,12 +135,14 @@ async function perform(op: BrowserOp, ctx: AgentCtx, label: string, url: string)
   if (!view) return fail(ctx, label, 'no page is open in the browser pane — use browser_navigate first');
 
   if (op.kind === 'screenshot') {
-    if (!view.capturePage) return fail(ctx, label, 'screenshots are only available in the Engram desktop app');
-    const img = await view.capturePage();
-    const png = img.toPNG();
-    const buf = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer;
-    const saved = await ctx.saveShot(buf);
-    if (!saved) return fail(ctx, label, 'could not save the screenshot');
+    // ★실기 검증(2026-07-25)에서 드러난 것: 렌더러에서 webview.capturePage()를 부르면 프로미스가
+    // 영원히 안 풀리고 채팅 창이 통째로 멎는다. 그래서 캡처는 메인이 한다 — 여기선 게스트 id만 넘긴다.
+    const id = view.getWebContentsId?.();
+    if (typeof id !== 'number') return fail(ctx, label, 'screenshots are only available in the Engram desktop app');
+    const saved = await ctx.saveShot(id);
+    if (!saved) {
+      return fail(ctx, label, 'could not capture the page — if the Engram window is minimized or hidden, ask the user to bring it to the front');
+    }
     ctx.log({ label, status: 'ok', detail: saved });
     return { ok: true, text: `screenshot saved: ${saved}` };
   }

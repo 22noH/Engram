@@ -167,14 +167,15 @@ export function DockPanel({ channelId, repoPath, layout, onLayout }: {
     if (url) doNewTab(pane, { url, title: urlTitle(url) });
   };
 
+  // ★캡처는 메인이 한다(실기 검증 2026-07-25): 여기서 el.capturePage()를 부르면 프로미스가 영원히
+  // 안 풀리고 채팅 창이 통째로 멎는다(재현됨). 게스트 webContents id만 넘기고 메인이 찍어 저장한다.
   const screenshot = async (pane: PaneNode) => {
     const el = getView(pane.activeTabId);
-    if (!el?.capturePage) { setNotice(T.dockScreenshotFailed); return; }
+    const id = el?.getWebContentsId?.();
+    if (typeof id !== 'number') { setNotice(T.dockScreenshotFailed); return; }
     try {
-      const png = (await el.capturePage()).toPNG();
-      const buf = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer;
       const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId);
-      const saved = await window.engramDesktop?.saveScreenshot?.(buf, `${urlTitle(activeTab?.url ?? '') || 'engram'}.png`);
+      const saved = await window.engramDesktop?.captureWebview?.(id, 'dialog', `${urlTitle(activeTab?.url ?? '') || 'engram'}.png`);
       if (saved) setNotice(T.dockScreenshotSaved(saved));
     } catch { setNotice(T.dockScreenshotFailed); }
   };

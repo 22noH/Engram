@@ -48,8 +48,11 @@ contextBridge.exposeInMainWorld('engramDesktop', {
     ipcRenderer.on('engram:nav-blocked', listener);
     return () => ipcRenderer.removeListener('engram:nav-blocked', listener);
   },
-  // AI 웹 조작: 대화상자 없이 임시 폴더에 스크린샷 저장(경로 반환) — 두뇌가 그 파일을 읽어 본다.
-  saveShotTemp: (png: ArrayBuffer): Promise<string | null> => ipcRenderer.invoke('engram:save-shot-temp', png),
+  // 브라우저 칸 스크린샷 — ★캡처는 메인이 한다. 렌더러에서 webview.capturePage()를 부르면
+  // 프로미스가 안 풀리고 채팅 창이 멎는다(실기 검증 2026-07-25). 게스트의 webContents id만 넘긴다.
+  // where='temp'(AI 조작, 임시 폴더 고정) | 'dialog'(사용자가 직접 저장). 저장 경로를 돌려준다.
+  captureWebview: (webContentsId: number, where: 'temp' | 'dialog', suggested?: string): Promise<string | null> =>
+    ipcRenderer.invoke('engram:capture-webview', webContentsId, where, suggested),
   // 파일 끌어다 놓기: Electron 32+에서 File.path가 사라졌다 — 실제 경로는 webUtils로만 얻는다.
   // 이 함수는 preload(격리된 컨텍스트)에서만 동작한다(렌더러엔 webUtils가 없다).
   filePath: (file: File): string => {
