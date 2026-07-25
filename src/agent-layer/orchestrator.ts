@@ -45,7 +45,18 @@ import { brainErrorHint } from './brain-error-hints';
 // question(ask-user Task 3): 범용 경로가 뽑아낸 질문 카드 페이로드 — 기존 (text, actions) 호출부는
 // 3번째 인자를 안 넘기니 무영향(TS 함수 타입은 뒤쪽 파라미터를 덜 받는 쪽이 항상 대입 가능).
 // toolsUsed(brain-activity Task 1): additive 4번째 — 같은 이유로 미전달 호출부는 무영향.
-type PostFn = (text: string, actions?: Action[], question?: AskUserPayload, toolsUsed?: string[]) => Promise<void>;
+// progress(진행 중 표시): additive 5번째 — 다단계 작업(협업·코딩 루프)의 "중간 보고"에만 true를 실어
+// 게시한다. 렌더러가 진행 메시지를 식별하는 유일한 근거(텍스트 패턴 매칭 금지 — i18n에서 깨진다).
+type PostFn = (text: string, actions?: Action[], question?: AskUserPayload, toolsUsed?: string[], progress?: boolean) => Promise<void>;
+
+// 예외 → 화면에 보여줄 한 줄 사유. 스택트레이스가 채팅을 덮지 않게 첫 줄만·200자까지 자른다
+// (전문은 항상 로그에 남는다). 사유를 못 뽑으면 빈 문자열이 아니라 원문 문자열화 결과를 쓴다.
+export function shortReason(err: unknown, max = 200): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const line = raw.split('\n').find((l) => l.trim()) ?? raw;
+  const trimmed = line.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
 
 // prompts/decompose.md 없을 때의 내장 기본값. JSON 계약은 decompose()가 코드에서 덧붙인다.
 export const DECOMPOSE_DEFAULT = [
@@ -160,6 +171,14 @@ export class Orchestrator {
   ): Promise<void> {
     if (signal.aborted) { await post(t('interrupted')); return; }
     await this.postReply(reply, post, actions, toolsUsed);
+  }
+
+  // 진행 중 표시: 다단계 작업의 중간 보고 전용 post 래퍼. 진행 보고를 내는 지점(협업 onProgress,
+  // 코딩 루프 onProgress)이 모두 이 한 곳을 거치게 해서 "무엇이 진행 메시지인가"의 정의가 코드에
+  // 한 번만 적히게 한다. 최종 결과·질문·에러는 이 래퍼를 안 쓰므로 표식이 없고, 렌더러는 그 차이로
+  // 애니메이션을 멈춘다.
+  private progressPost(post: PostFn): (text: string) => Promise<void> {
+    return (text) => post(text, undefined, undefined, undefined, true);
   }
 
   // ask_user 도구 경로(Task 4): 도구 호출 중간에 곧바로 카드를 게시하는 클로저 — postReply의 펜스텍스트
@@ -576,7 +595,9 @@ export class Orchestrator {
     const tracked = this.tracker.start(threadKey, { question, team });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
-        const result = await this.collaborate(question, team, userId, { onProgress: post });
+        // 진행 중 표시: 협업의 중간 보고(팀 구성·의견 도착·종합 중)는 진행 메시지로 게시한다 —
+        // 아래 최종 결과 post는 표식 없이 나가 렌더러 애니메이션이 그 시점에 멈춘다.
+        const result = await this.collaborate(question, team, userId, { onProgress: this.progressPost(post) });
         // ask-user(실사고 2026-07-25): 여기도 미배선이라 합성 결과에 펜스가 섞이면 JSON이 날것으로
         // 노출됐다. 합성 결과라도 사용자에게 물을 게 있으면 카드가 맞다(답은 새 멘션으로 재진입).
         const { text: resultText, question: resultQuestion } = extractAskUser(result);
@@ -742,8 +763,11 @@ export class Orchestrator {
     const tracked = this.tracker.start(threadKey, { question: t('codingTaskLabel', targetPath), team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
-        await post(t('codingStarted'));
-        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void post(`· ${m}`); }, brain, ...(permMode ? { permMode } : {}) });
+        // 진행 중 표시: 시작 안내부터 루프의 각 단계까지 전부 진행 메시지 — 마지막 하나만 렌더러에서
+        // 애니메이션이 돌고 앞의 것들은 완료 점으로 남는다. 결과/실패 메시지는 표식 없이 나간다.
+        const report = this.progressPost(post);
+        await report(t('codingStarted'));
+        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void report(`· ${m}`); }, brain, ...(permMode ? { permMode } : {}) });
         this.tracker.finish(threadKey, tracked.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
@@ -1127,6 +1151,10 @@ export class Orchestrator {
           }
         } catch (err) {
           this.logger.warn(`코딩 티켓 실패(재시도 대기) ${ticket.id}: ${String(err)}`, 'Orchestrator');
+          // 실사고(2026-07-25): 여기가 로그로만 끝나 화면은 몇 분간 아무 말이 없었다("갑자기 완료된 것처럼
+          // 나온다"). 실패·재시도도 진행 보고로 올린다 — 사유는 한 줄로 잘라 채팅이 스택트레이스로
+          // 덮이지 않게 한다(전문은 여전히 로그에 있다).
+          report(t('ticketFailedRetry', ticket.area, ticket.attempts + 1, shortReason(err)));
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'PENDING' });
         }
       })));

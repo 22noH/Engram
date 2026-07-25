@@ -854,7 +854,7 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
-  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void> {
+  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean): Promise<void> {
     const t = target as SelfTarget;
     const msg = this.store.appendMessage(t.channelId, {
       authorId: 'engram',
@@ -863,6 +863,8 @@ export class SelfMessenger implements MessengerPort {
       ...(actions ? { actions } : {}),
       ...(question ? { question } : {}),
       ...(toolsUsed && toolsUsed.length ? { toolsUsed } : {}),
+      // 진행 중 표시: 참일 때만(미전달=필드 자체 없음 — toolsUsed와 동일 관례).
+      ...(progress ? { progress: true } : {}),
     });
     if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }

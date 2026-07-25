@@ -126,6 +126,18 @@ describe('SelfMessenger 코어', () => {
     expect(store.history('general').at(-1)?.toolsUsed).toEqual(['web_search', 'fetch_url']);
   });
 
+  it('reply(progress)가 메시지에 진행 표시를 실어 broadcast+영속한다(진행 중 표시)', async () => {
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '· 코딩 중: backend', undefined, undefined, undefined, true);
+    const frame = await nextFrame(client);
+    expect(frame.t).toBe('msg');
+    expect(frame.message.progress).toBe(true);
+    expect(store.history('general').at(-1)?.progress).toBe(true);
+
+    await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '완료');
+    const f2 = await nextFrame(client);
+    expect('progress' in f2.message).toBe(false); // 미전달=필드 자체 없음(회귀 0)
+  });
+
   it('reply(toolsUsed=빈 배열/미전달)은 메시지에 toolsUsed 필드 자체가 없다(회귀 0)', async () => {
     await sm.reply({ channelId: 'general', anchorId: 'a1' } as SelfTarget, '답변1', undefined, undefined, []);
     const f1 = await nextFrame(client);

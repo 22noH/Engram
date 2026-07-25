@@ -55,6 +55,11 @@ export interface Message {
   answersId?: string;                        // 이 메시지가 답하는 카드 메시지 id
   attachments?: AttachmentMeta[];            // 채팅 첨부(이미지/파일) — 메시지와 운명 공유
   toolsUsed?: string[];                      // 두뇌 활동 표시(Task 1): 이 응답 생성 중 쓴 도구 이름들(순서대로, 원시 이름). 비어있으면 필드 자체 생략.
+  // 진행 중 표시: 다단계 작업(코딩 루프·협업)이 올리는 "중간 보고" 메시지 표식. 서버가 게시 지점에서
+  // 직접 스탬프한다(orchestrator의 onProgress 경로 — PostFn 5번째 인자). 렌더러는 이 필드로만 진행
+  // 메시지를 식별한다: 텍스트 패턴("…중" 등) 매칭은 i18n에서 깨지고 오탐하므로 금지.
+  // 미첨부=필드 자체 없음(기존 메시지와 완전히 동일 렌더 — 회귀 0).
+  progress?: boolean;
 }
 
 // 채팅 첨부 메타(Task 1). 실파일은 dataDir/attachments/<channelId>/<id>. 사용자 파일명은

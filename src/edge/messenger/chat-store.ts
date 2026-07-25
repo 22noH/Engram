@@ -19,6 +19,7 @@ export interface ChatMessage {
   answersId?: string;                        // Task 1(ask-user): 이 메시지가 답하는 카드 메시지 id
   attachments?: AttachmentMeta[];            // Task 1(chat-attachments): 첨부(메시지와 운명 공유)
   toolsUsed?: string[];                      // Task 1(brain-activity): 이 응답 생성 중 쓴 도구 이름들(순서대로). 비어있으면 필드 생략.
+  progress?: boolean;                        // 진행 중 표시: 다단계 작업의 중간 보고 메시지(렌더러 애니메이션·완료 점 판정). 미첨부/false는 필드 생략.
   ts: string; // ISO
 }
 
@@ -334,6 +335,7 @@ export class ChatStore {
       answersId?: string;
       attachments?: AttachmentMeta[];
       toolsUsed?: string[];
+      progress?: boolean;
     },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
@@ -349,6 +351,8 @@ export class ChatStore {
       ...(input.attachments && input.attachments.length ? { attachments: input.attachments } : {}),
       // Task 1(brain-activity): 요약줄용 도구 목록. 빈 배열/미첨부는 필드 생략(회귀 0 — actions/attachments와 동일 관례).
       ...(input.toolsUsed && input.toolsUsed.length ? { toolsUsed: input.toolsUsed } : {}),
+      // 진행 중 표시: 참일 때만 싣는다(false/미첨부는 필드 자체 없음 — toolsUsed와 동일 관례, 회귀 0).
+      ...(input.progress ? { progress: true } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });

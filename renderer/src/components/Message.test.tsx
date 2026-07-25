@@ -24,6 +24,35 @@ it('question+actions 동시 메시지는 카드만 렌더, 액션 버튼은 숨�
   expect(container.textContent).toContain('어느 쪽?');
 });
 
+// 이미 쓴 버튼 숨기기 — 그 버튼이 요구한 답이 실제로 온 뒤에는 흔적도 남기지 않는다.
+// "왔는지"는 질문 카드와 같은 기제(answersId 상관관계)로 App이 판정해 actionsConsumed로 내려준다.
+describe('Message 액션 버튼 소비', () => {
+  const withActions = (over: Record<string, unknown> = {}) => ({
+    id: 'a1', authorId: 'engram', text: '완성조건…', ts: new Date(0).toISOString(),
+    actions: [{ label: '✅ 승인', send: '승인' }, { label: '취소', send: '취소' }], ...over,
+  }) as any;
+
+  it('아직 안 쓴 버튼은 그대로 보인다', () => {
+    const { container } = render(<Message m={withActions()} onSend={() => {}} />);
+    expect(container.querySelector('.actions')).not.toBeNull();
+  });
+
+  it('그 답이 이미 왔으면(actionsConsumed) 버튼 줄이 통째로 사라진다', () => {
+    const { container } = render(<Message m={withActions()} onSend={() => {}} actionsConsumed />);
+    expect(container.querySelector('.actions')).toBeNull();
+    expect(container.textContent).toContain('완성조건…'); // 본문은 그대로(기록 유실 없음)
+  });
+
+  it('버튼 클릭은 그 메시지 id를 answersId로 함께 보낸다(질문 카드와 같은 상관관계)', () => {
+    const calls: Array<[string, string | undefined]> = [];
+    const { container } = render(
+      <Message m={withActions()} onSend={(text, answersId) => calls.push([text, answersId])} />,
+    );
+    fireEvent.click(container.querySelectorAll('.actions button')[0]);
+    expect(calls).toEqual([['승인', 'a1']]);
+  });
+});
+
 describe('Message 작성자 렌더', () => {
   it('team(myName): 내 이름은 me, 남은 이름 + other 스타일', () => {
     const mine = render(<Message m={msg('alice')} myName="alice" />);

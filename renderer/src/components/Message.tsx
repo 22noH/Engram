@@ -41,6 +41,30 @@ export function aggregateTools(names: string[]): string {
   return parts.join(' · ');
 }
 
+// 진행 중 표시 — 경과 시간을 몇 초부터 보여줄지. 1~3초짜리 짧은 단계마다 숫자가 깜빡이면 오히려
+// 산만해서, 3초를 넘긴 단계에만 붙인다(그때부터가 "왜 멈춰 있지?"가 시작되는 구간).
+export const ELAPSED_MIN_SEC = 4;
+
+// 게시 시각(서버 스탬프) 기준 경과 초. 시계 어긋남(원격 연결)으로 음수가 나오면 0으로 눌러
+// 이상한 숫자가 뜨지 않게 한다.
+export function elapsedSec(ts: string, now: number): number {
+  const started = new Date(ts).getTime();
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, Math.floor((now - started) / 1000));
+}
+
+// 진행 중인 단계에만 붙는 경과 시간. running일 때만 1초 타이머를 걸고(끝나면 정리) 3초 초과부터 표시.
+function ProgressElapsed({ ts }: { ts: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const sec = elapsedSec(ts, now);
+  if (sec < ELAPSED_MIN_SEC) return null;
+  return <span className="pElapsed">{T.progressElapsed(sec)}</span>;
+}
+
 // 첨부 1개: 이미지=인라인 썸네일(클릭=새 창에서 원본), 그 외=칩(클릭=다운로드). 인증 연결은
 // <img src>/평범한 링크가 Authorization 헤더를 못 실어(브라우저 한계) fetch+blob으로 통일했다
 // (무인증 연결도 같은 경로 — 렌더러 단순화, 구현자 재량 사용·브리프에 보고). 언마운트 시 revoke(누수 방지).
@@ -110,11 +134,19 @@ function MdChunk({ text }: { text: string }) {
 // 없으면 기존 테스트·attachments 없는 메시지 회귀 0).
 // onExpandHtml(HTML 인라인 미리보기): html 카드의 확대 버튼을 우측 코드 패널로 연결한다. App이
 // 패널을 띄울 수 있을 때만 내려주고(코드 채널), 없으면 카드에서 확대 버튼 자체가 사라진다.
-export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx, onExpandHtml }: {
-  m: Msg; onSend?: (text: string) => void; myName?: string;
+// 진행 중 표시(activeProgressId): "지금 이 채널이 실제로 하고 있는" 단계의 메시지 id. App이 정하고
+// (채널의 마지막 메시지가 진행 메시지일 때 그 id) 여기선 내 id와 같을 때만 흐르는 애니메이션을 켠다.
+// 나머지 진행 메시지는 완료(초록 점 + 흐린 글자)로 남는다.
+// actionsConsumed(이미 쓴 버튼 숨기기): 이 메시지의 버튼이 요구한 답이 실제로 왔는지 — App이 저장된
+// 기록만으로 판정해 내려준다(그래서 새로고침·재접속 후에도 숨김이 유지된다). true면 버튼 줄을 아예
+// 안 그린다(사용자 확정: 흔적도 남기지 않음).
+export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx, onExpandHtml, activeProgressId, actionsConsumed }: {
+  m: Msg; onSend?: (text: string, answersId?: string) => void; myName?: string;
   answeredText?: string; onAnswer?: (text: string, answersId: string) => void;
   attachmentCtx?: AttachmentCtx;
   onExpandHtml?: (html: string) => void;
+  activeProgressId?: string;
+  actionsConsumed?: boolean;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   // ```html 블록이 하나라도 있을 때만 세그먼트 렌더로 갈라진다 — 없으면(대다수 메시지) 아래
@@ -124,13 +156,19 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
   const isEngram = m.authorId === 'engram';
   const isMe = !isEngram && (myName === undefined || m.authorId === myName);
   const who = isEngram ? 'Engram' : isMe ? (ko ? '나' : 'me') : (m.authorName ?? m.authorId);
+  // 진행 메시지 판정은 오직 서버가 붙인 필드(m.progress) — 텍스트 패턴 매칭 없음.
+  const isProgress = m.progress === true;
+  const progressRunning = isProgress && m.id === activeProgressId;
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     body.replaceChildren(renderMarkdown(m.text));
   }, [m.text]);
   return (
-    <div className={'msg' + (isEngram ? '' : isMe ? ' me' : ' other')}>
+    <div
+      className={'msg' + (isEngram ? '' : isMe ? ' me' : ' other') + (isProgress ? (progressRunning ? ' progress running' : ' progress done') : '')}
+      aria-busy={progressRunning || undefined}
+    >
       <div className="who">{who + ' · ' + new Date(m.ts).toLocaleTimeString()}</div>
       {/* Task 2(brain-activity, 목업 ②) — 도구를 썼으면 who 아래·body(또는 카드) 위에 요약 한 줄(대시
           보더로 구분). 없으면(m.toolsUsed 미첨부/빈 배열) 렌더 자체를 안 해 기존 메시지와 byte-identical. */}
@@ -139,6 +177,14 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
       )}
       {m.question ? (
         <QuestionCard msgId={m.id} question={m.question} answeredText={answeredText} onAnswer={onAnswer ?? (() => {})} />
+      ) : isProgress ? (
+        // 진행 보고 한 줄 — 단계 점 + 본문(+진행 중이면 경과 시간). 본문 렌더 경로는 기존과 동일한
+        // .body(마크다운 DOM 빌더)라 텍스트 처리 방식이 갈라지지 않는다.
+        <div className="progressRow">
+          <span className="pdot" aria-hidden="true" />
+          <div className="body" ref={bodyRef} />
+          {progressRunning && <ProgressElapsed ts={m.ts} />}
+        </div>
       ) : hasHtml ? (
         <div className="body">
           {segments.map((s, i) => (s.kind === 'html'
@@ -156,7 +202,13 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
       {/* 최종 리뷰 픽스(방어): 카드가 있으면 액션 버튼은 안 그린다 — 현재 프로듀서는 question과 actions를
           동시에 안 보내지만(위 주석), 이 게이트가 없으면 미래에 둘 다 실린 메시지가 카드+버튼을 같이
           그려 사용자가 어디에 답해야 할지 헷갈린다. */}
-      {!m.question && m.actions && m.actions.length > 0 && onSend && <ActionButtons actions={m.actions} onSend={onSend} />}
+      {/* 이미 쓴 버튼 숨기기: 그 버튼이 요구한 답이 온 뒤에는(actionsConsumed) 아예 안 그린다 —
+          지난 대화를 스크롤하다 옛 버튼을 눌러 사고 나는 걸 막는 게 목적이라, 비활성화가 아니라 제거다.
+          클릭은 그 메시지 id를 answersId로 실어 보낸다(질문 카드와 같은 상관관계 — 서버가 그 id로
+          중복 답을 조용히 버리므로 이중 클릭도 무해하다). */}
+      {!m.question && !actionsConsumed && m.actions && m.actions.length > 0 && onSend && (
+        <ActionButtons actions={m.actions} onSend={(text) => onSend(text, m.id)} />
+      )}
     </div>
   );
 }

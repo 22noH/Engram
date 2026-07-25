@@ -253,6 +253,14 @@ export const T = {
   htmlExpand: ko ? '크게 보기' : 'Open larger',
   // Task 2(brain-activity, 목업 ②) — 완료된 답 위 도구 요약 줄. n=총 호출 횟수(중복 포함),
   // list=aggregateTools()가 만든 "이름 ×N" 요약(Message.tsx).
+  // 진행 중 표시 — 지금 돌고 있는 단계의 경과 시간. 침묵이 길어질 때 "멈춘 게 아니라 아직 하는 중"을
+  // 알려주는 유일한 단서라 초 단위로 그대로 보여준다(1분이 넘으면 분+초).
+  progressElapsed: (sec: number) => {
+    if (sec < 60) return ko ? `${sec}초` : `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return ko ? `${m}분 ${s}초` : `${m}m ${s}s`;
+  },
   toolsUsedLabel: (n: number, list: string) => (ko
     ? `🔧 도구 ${n}개 사용 — ${list}`
     : `🔧 ${n} tool${n === 1 ? '' : 's'} used — ${list}`),

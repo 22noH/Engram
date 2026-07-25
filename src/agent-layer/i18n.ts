@@ -109,6 +109,9 @@ const MESSAGES: Record<string, Entry> = {
   gateRunning: { en: (a) => `  Running gate: ${a}`, ko: (a) => `  게이트 실행 중: ${a}` },
   ticketLanded: { en: (a) => `  ✓ Landed: ${a}`, ko: (a) => `  ✓ 착지: ${a}` },
   gateFailed: { en: (a, failed) => `  ✗ Gate red (waiting to retry): ${a} [${failed}]`, ko: (a, failed) => `  ✗ 게이트 빨강(재시도 대기): ${a} [${failed}]` },
+  // 티켓이 예외로 죽었을 때(두뇌 한도·크래시 등). 지금까지 로그에만 남아 화면은 몇 분간 침묵했다 —
+  // 사용자가 "왜 멈춰 있는지"를 알 수 있게 사유와 시도 횟수를 그대로 보여준다.
+  ticketFailedRetry: { en: (a, n, why) => `  ✗ Failed: ${a} — retrying (attempt ${n}) [${why}]`, ko: (a, n, why) => `  ✗ 실패: ${a} — 다시 시도합니다 (${n}번째 시도) [${why}]` },
   reviewerExtraTickets: { en: (n) => `Reviewer added ${n} more task(s)`, ko: (n) => `리뷰어 추가 작업 ${n}개` },
   meetingMinutesTitle: { en: (name, date) => `${name} meeting minutes (${date})`, ko: (name, date) => `${name} 회의록 (${date})` },
   sourcesFooter: { en: (list) => `\n\n───\nSources: ${list}`, ko: (list) => `\n\n───\n출처: ${list}` },

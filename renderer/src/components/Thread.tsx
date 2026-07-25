@@ -63,7 +63,7 @@ function Avatar({ name, cls }: { name: string; cls: string }) {
 export function Thread(props: {
   anchor: Msg; replies: Msg[]; draft: string; collapsed: boolean;
   onDraft: (v: string) => void; onReply: (text: string) => void;
-  onToggle: (collapsed: boolean) => void; onSend?: (text: string) => void;
+  onToggle: (collapsed: boolean) => void; onSend?: (text: string, answersId?: string) => void;
   myName?: string;
   // Team 채널에서만 true. 생략 시 true(기존 호출부 호환) — App은 mode === 'team'을 그대로 내려준다.
   threaded?: boolean;
@@ -72,6 +72,11 @@ export function Thread(props: {
   getAttachmentCtx?: (id: string) => AttachmentCtx | undefined;
   // HTML 인라인 미리보기 — 카드의 확대 버튼을 우측 코드 패널로 잇는다(App이 패널 가능할 때만 전달).
   onExpandHtml?: (html: string) => void;
+  // 진행 중 표시 — 지금 실제로 돌고 있는 단계의 메시지 id(App이 판정). getAnsweredText와 같은 결로
+  // Message까지 그대로 흘려보낸다.
+  activeProgressId?: string;
+  // 이미 쓴 버튼 숨기기 — 그 메시지의 액션이 이미 소비됐는지(App이 저장된 기록으로 판정).
+  isActionsConsumed?: (id: string) => boolean;
 }) {
   const { anchor, replies } = props;
   const threaded = props.threaded ?? true;
@@ -79,7 +84,9 @@ export function Thread(props: {
   const msg = (m: Msg) => (
     <Message m={m} onSend={props.onSend} myName={props.myName}
       answeredText={props.getAnsweredText?.(m.id)} onAnswer={props.onAnswer}
-      attachmentCtx={props.getAttachmentCtx?.(m.id)} onExpandHtml={props.onExpandHtml} />
+      attachmentCtx={props.getAttachmentCtx?.(m.id)} onExpandHtml={props.onExpandHtml}
+      activeProgressId={props.activeProgressId}
+      actionsConsumed={props.isActionsConsumed?.(m.id)} />
   );
 
   if (replies.length === 0) return msg(anchor);

@@ -406,6 +406,38 @@ export default function App() {
     return m;
   }, [mergedMsgs]);
 
+  // 진행 중 애니메이션 — "지금 실제로 돌고 있는 단계"는 채널의 마지막 메시지가 진행 보고(m.progress)일
+  // 때 그것 하나뿐이다. 다단계 작업은 끝날 때(성공·실패·중단 안내) 반드시 진행 표식이 없는 메시지를
+  // 게시하므로, 답이 오거나 중지하면 그 순간 마지막 메시지가 바뀌며 애니메이션이 저절로 멈춘다.
+  // (awaiting은 여기 못 쓴다 — 코딩·협업은 백그라운드로 돌아 첫 보고가 오는 순간 이미 풀린다.)
+  const activeProgressId = useMemo(() => {
+    const last = mergedMsgs[mergedMsgs.length - 1];
+    return last && last.progress ? last.id : undefined;
+  }, [mergedMsgs]);
+
+  // 이미 쓴 버튼 숨기기 — "그 버튼이 요구한 답이 실제로 왔는가"를 저장된 기록만으로 판정한다
+  // (렌더러 임시 상태가 아니라 기록 기반이라 새로고침·재접속 후에도 그대로 유지된다).
+  //  (1) answersId 상관관계 — 버튼 클릭이 보낸 답이 그 메시지를 가리킨다(질문 카드와 동일 기제).
+  //  (2) 옛 기록 폴백 — answersId가 없던 시절의 클릭도 숨긴다: 뒤에 온 사용자 메시지의 text가 액션의
+  //      send와 정확히 같으면 그게 그 답이다(서버도 정확히 그 문자열로만 pending을 소비한다).
+  // 버튼을 무시하고 다른 말만 한 경우는 숨기지 않는다 — 그때 서버 pending(승인 대기)은 아직 살아 있어
+  // 버튼이 여전히 유효하기 때문이다.
+  const consumedActionIds = useMemo(() => {
+    const out = new Set<string>();
+    mergedMsgs.forEach((m, i) => {
+      if (!m.actions || m.actions.length === 0) return;
+      const sends = new Set(m.actions.map((a) => a.send));
+      for (let j = i + 1; j < mergedMsgs.length; j++) {
+        const later = mergedMsgs[j];
+        if (later.answersId === m.id || (later.authorId !== 'engram' && sends.has(later.text.trim()))) {
+          out.add(m.id);
+          break;
+        }
+      }
+    });
+    return out;
+  }, [mergedMsgs]);
+
   // anchor(및 답)의 소유 연결 — 스레드 답글을 그 스레드를 연 Engram으로 라우팅하는 데 쓰인다.
   const anchorConn = useMemo(() => {
     const m = new Map<string, string>();
@@ -1027,7 +1059,12 @@ export default function App() {
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
-                      onSend={(text) => sendText(text)}
+                      // 액션 버튼 클릭은 그 메시지 id를 answersId로 싣는다(질문 카드와 같은 경로) —
+                      // 기록에 상관관계가 남아 새로고침 후에도 "이미 쓴 버튼"을 알아볼 수 있고,
+                      // 서버가 같은 answersId의 중복 답을 조용히 버려 이중 클릭도 무해해진다.
+                      onSend={(text, answersId) => sendText(text, undefined, answersId)}
+                      activeProgressId={activeProgressId}
+                      isActionsConsumed={(id) => consumedActionIds.has(id)}
                       getAnsweredText={(id) => answeredById.get(id)}
                       onAnswer={(text, answersId) => sendText(text, undefined, answersId)}
                       getAttachmentCtx={attachmentCtxFor}

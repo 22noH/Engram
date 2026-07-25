@@ -12,7 +12,8 @@ export interface MentionHandler {
     msg: CoreMessage,
     // question(ask-user Task 3): Orchestrator.PostFn과 짝(구조적 동일 — { questions: QuestionItem[] }).
     // toolsUsed(brain-activity Task 1): additive 4번째 인자 — 안 쓰는 호출부는 그대로(회귀 0).
-    post: (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]) => Promise<void>,
+    // progress(진행 중 표시): additive 5번째 — 다단계 작업의 중간 보고에만 서버가 붙이는 표식.
+    post: (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean) => Promise<void>,
     threadKey?: string,
     // activity(brain-activity Task 1): 대기 중 실시간 라벨 발화 — port.activity 미지원 어댑터면 undefined.
     activity?: (label: string) => void,
@@ -33,8 +34,8 @@ export function bindMessenger(
   policy?: ChannelPolicy,
 ): void {
   port.onMention(async (e) => {
-    const post = (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void> =>
-      port.reply(e.target, text, actions, question, toolsUsed);
+    const post = (text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean): Promise<void> =>
+      port.reply(e.target, text, actions, question, toolsUsed, progress);
     const threadKey = e.threadId ?? e.channelId; // 스레드 우선, 없으면 채널
     // Task 1(brain-activity): port.activity 지원 어댑터(self.adapter)만 채널에 바인딩된 activity fn을
     // 만든다 — 미지원 어댑터는 undefined(orchestrator/reader-agent가 그대로 no-op으로 흡수, 회귀 0).

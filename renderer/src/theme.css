@@ -196,6 +196,31 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 @keyframes caretBlink { 0%,100% { opacity:1; } 50% { opacity:0; } }
 /* 도구 줄은 말풍선 바로 아래에 붙는다(기본 .typing의 위/아래 여백을 이 문맥에서만 좁힌다). */
 .msg.streaming .typing { margin:5px 0 0 2px; }
+/* 진행 중 표시(B안 목업 승인 — 글자가 흐름). 다단계 작업(코딩 루프·협업)이 올리는 진행 보고에만
+   붙는다(서버가 스탬프한 m.progress). 마지막 하나(.running)만 글자가 흐르고, 끝난 단계(.done)는
+   초록 점 + 흐린 글자로 남아 "어디까지 됐는지"가 한눈에 보인다. 색은 전부 Quiet Library 토큰. */
+.msg.progress .progressRow { display:flex; align-items:center; gap:9px;
+                             background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
+                             padding:8px 12px; }
+/* 말풍선 껍데기는 .progressRow가 맡는다 — .body를 투명하게 비워야 아래 shimmer(글자 클리핑)가
+   말풍선 배경까지 같이 잘라먹지 않는다. */
+.msg.progress .progressRow .body { background:none; border:none; border-radius:0; padding:0; flex:1; min-width:0; }
+.msg.progress .pdot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.msg.progress .pElapsed { flex:none; font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums; }
+.msg.progress.done .progressRow .body { color:var(--dim); }
+.msg.progress.running .progressRow .body { color:transparent; -webkit-text-fill-color:transparent;
+  background-image:linear-gradient(90deg, var(--dim) 0%, var(--text) 45%, var(--dim) 90%);
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+  animation:progressShimmer 1.8s linear infinite; }
+.msg.progress.running .progressRow .body * { color:inherit; -webkit-text-fill-color:inherit; }
+@keyframes progressShimmer { 0% { background-position:120% 0; } 100% { background-position:-20% 0; } }
+/* 접근성 — 움직임을 줄이도록 설정한 사용자에겐 애니메이션을 끄고 평범한 정적 표시로 되돌린다. */
+@media (prefers-reduced-motion: reduce) {
+  /* 선택자는 위 shimmer 규칙과 글자 그대로 같아야 한다 — 미디어쿼리는 우선순위를 안 올려주므로
+     더 짧게 쓰면(예: .msg.progress.running .body) 오히려 shimmer 규칙에 져서 애니메이션이 그대로 돈다. */
+  .msg.progress.running .progressRow .body { animation:none; background-image:none;
+                                             color:var(--text); -webkit-text-fill-color:var(--text); }
+}
 /* 스레드(Team 전용, 목업 승인) — <details> 기본 스타일을 버리고 직접 그린다: 헤더 한 줄(참여자
    아바타 겹침 · 답글 수 · 마지막 시각 · 접기 셰브론)과 세로 연결선 안의 답글들. 접히면 헤더만 남는다. */
 .thread { margin:-2px 0 10px 6px; padding-left:14px; border-left:2px solid var(--accent-line); }

@@ -93,6 +93,19 @@ describe('ChatStore', () => {
     expect('toolsUsed' in noTools).toBe(false);
   });
 
+  it('progress가 저장/왕복 보존되고, 미첨부·false는 필드 자체가 없다(진행 중 표시)', () => {
+    store.listChannels();
+    const prog = store.appendMessage('general', { authorId: 'engram', text: '· 코딩 중: backend', progress: true })!;
+    expect(prog.progress).toBe(true);
+    expect(store.history('general')[0].progress).toBe(true); // 새로고침·재접속 후에도 유지
+
+    const notProg = store.appendMessage('general', { authorId: 'engram', text: '완료', progress: false })!;
+    expect('progress' in notProg).toBe(false);
+
+    const plain = store.appendMessage('general', { authorId: 'engram', text: '보통 답' })!;
+    expect('progress' in plain).toBe(false);
+  });
+
   it('없는 채널 append는 null, history는 빈배열', () => {
     expect(store.appendMessage('nope', { authorId: 'owner', text: 'x' })).toBeNull();
     expect(store.history('nope')).toEqual([]);

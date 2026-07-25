@@ -38,7 +38,8 @@ export interface MessengerPort {
   onMessage?(handler: (e: MentionEvent) => Promise<void>): void;
   // Task 2(ask-user): question은 additive 옵션 4번째 인자 — 3인자 구현체(다른 어댑터)는 구조적 호환 유지.
   // Task 1(brain-activity): toolsUsed는 additive 5번째 인자 — 4인자 이하 구현체도 구조적 호환 유지.
-  reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[]): Promise<void>;
+  // 진행 중 표시: progress는 additive 6번째 인자(다단계 작업의 중간 보고 표식) — 같은 이유로 무영향.
+  reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean): Promise<void>;
   postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
   // Task 1(brain-activity): 옵셔널 — 실시간 활동 라벨(예: "웹 검색 중 · web_search")을 그 채널에만
   // 브로드캐스트. 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0).
