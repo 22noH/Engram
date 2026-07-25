@@ -13,6 +13,10 @@ export const T = {
   newChannelPrompt: ko ? '채널 이름:' : 'Channel name:',
   replies: (n: number) => (ko ? `답글 ${n}개` : `${n} replies`),
   replyPh: ko ? '스레드에 답장…' : 'Reply in thread…',
+  // 스레드 UI 개편(목업 승인, Team 전용) — 헤더 줄: 답글 수 옆 마지막 답글 시각 + 접기/펼치기 셰브론.
+  threadLast: (hm: string) => (ko ? `· 마지막 ${hm}` : `· last ${hm}`),
+  threadCollapse: ko ? '접기' : 'Collapse',
+  threadExpand: ko ? '펼치기' : 'Expand',
   delConfirm: (name: string) => (ko ? `'${name}' 채널을 삭제할까요? (기록 파일은 남습니다)` : `Delete channel '${name}'? (history file is kept)`),
   delChannel: ko ? '채널 삭제' : 'Delete channel',
   modeAll: ko ? '모든 메시지에 반응' : 'Respond to all',

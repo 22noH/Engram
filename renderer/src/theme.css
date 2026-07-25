@@ -11,6 +11,9 @@
   /* R2-2(Admin 재설계) — 승인 대기 하이라이트 카드용 앰버 톤(스펙 표에 없는 신규 페어, 목업 지정값 그대로).
      --ok는 "활성" 상태 필용 muted green 1개 토큰(soft/line은 color-mix로 파생 — 토큰 증식 방지). */
   --pending-bg:#fff7ed; --pending-line:#ecd9bf; --ok:#3f7d3f;
+  /* 스레드 참여자 아바타 색(--av-1..6). 이름 해시로 고정 배정 — 같은 사람은 늘 같은 색.
+     서재 팔레트 안에서 서로 구분되는 muted 톤 6개, 글자는 --accent-text(라이트=흰색). */
+  --av-1:#2e6e63; --av-2:#7a6ea0; --av-3:#b0873f; --av-4:#3f6f92; --av-5:#8a4a3a; --av-6:#5f7d43;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -21,6 +24,8 @@
     /* R2-2 — 라이트 페어(#fff7ed/#ecd9bf)와 같은 결로 어둡게: 중립 패널(#1f221f/#22251f)과 뚜렷이
        구분되는 따뜻한 갈색조. --ok는 다크에서 밝기를 올려 저채도 배경 위 대비 확보. */
     --pending-bg:#2a2318; --pending-line:#4a3d26; --ok:#8fc28a;
+    /* 다크에서 아바타 글자색(--accent-text)이 어두워지므로 배경을 밝은 파스텔로 뒤집는다(대비 유지). */
+    --av-1:#7fb5a6; --av-2:#a99ecb; --av-3:#d3ab68; --av-4:#7ca8c9; --av-5:#c78a7a; --av-6:#9dbb7c;
   }
 }
 * { box-sizing: border-box; margin: 0; }
@@ -170,10 +175,35 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 @keyframes caretBlink { 0%,100% { opacity:1; } 50% { opacity:0; } }
 /* 도구 줄은 말풍선 바로 아래에 붙는다(기본 .typing의 위/아래 여백을 이 문맥에서만 좁힌다). */
 .msg.streaming .typing { margin:5px 0 0 2px; }
-details.thread { margin:-4px 0 10px 16px; }
-details.thread summary { color:var(--accent); font-size:12px; cursor:pointer; }
-details.thread .msg { max-width:100%; }
-.treply { display:flex; gap:6px; margin-top:6px; }
+/* 스레드(Team 전용, 목업 승인) — <details> 기본 스타일을 버리고 직접 그린다: 헤더 한 줄(참여자
+   아바타 겹침 · 답글 수 · 마지막 시각 · 접기 셰브론)과 세로 연결선 안의 답글들. 접히면 헤더만 남는다. */
+.thread { margin:-2px 0 10px 6px; padding-left:14px; border-left:2px solid var(--accent-line); }
+.thread .th-head { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim);
+                   padding:2px 0 6px; cursor:pointer; user-select:none; }
+.thread .th-head:focus-visible { outline:1px solid var(--accent); outline-offset:2px; border-radius:6px; }
+.thread .avs { display:flex; }
+.thread .av, .thread .th-av { border-radius:50%; font-size:10px; line-height:1; font-weight:600;
+                              color:var(--accent-text); display:flex; align-items:center; justify-content:center; }
+/* 겹침: 뒤 아바타가 앞을 살짝 파고들되 패널색 링으로 분리돼 보이게. */
+.thread .av { width:20px; height:20px; margin-left:-6px; border:2px solid var(--panel); }
+.thread .av:first-child { margin-left:0; }
+.thread .av.more { background:var(--code-bg); color:var(--dim); }
+.thread .th-count { font-weight:600; color:var(--accent); }
+.thread .th-when { color:var(--faint); }
+.thread .chev { margin-left:auto; color:var(--faint); font-size:11px; }
+.thread .th-msg { display:flex; gap:9px; padding:5px 0; }
+.thread .th-av { width:22px; height:22px; flex:none; margin-top:2px; }
+.thread .th-body { flex:1; min-width:0; }
+.thread .th-body .msg { max-width:100%; margin:0; }
+.thread .th-body .msg.me { margin-left:0; }
+/* 답글 입력: 밋밋한 한 줄 대신 입력창 형태 + 보내기 버튼(목업). Enter 전송은 그대로. */
+.treply { display:flex; align-items:center; gap:8px; margin-top:8px; padding:4px 5px 4px 10px;
+          background:var(--panel); border:1px solid var(--line); border-radius:9px; }
+.treply input { flex:1; min-width:0; border:none; background:transparent; padding:3px 0;
+                font-size:12px; color:var(--text); }
+.treply input:focus { outline:none; }
+.treply .th-send { flex:none; padding:4px 11px; border:none; border-radius:6px; font-size:11px;
+                   background:var(--accent); color:var(--accent-text); cursor:pointer; }
 .actions { display:flex; gap:8px; margin:8px 0 2px; flex-wrap:wrap; }
 .actions button { padding:6px 14px; font-size:13px; }
 .actions button:disabled { opacity:.5; cursor:default; }

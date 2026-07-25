@@ -932,6 +932,9 @@ export default function App() {
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
                       myName={mode === 'team' ? meByConn[connState.defaultConnId]?.id : undefined}
+                      // 스레드는 Team 채널에서만. Chat·Code는 답글이 달린 기존 메시지도 평평하게
+                      // 펼쳐 보여주고(기록 유실 없음 — 표시만) 답글 입구도 안 띄운다.
+                      threaded={mode === 'team'}
                       onToggle={(c) => setCollapsed((prev) => { const n = new Set(prev); c ? n.add(m.id) : n.delete(m.id); return n; })}
                       onDraft={(v) => setDrafts((p) => new Map(p).set(m.id, v))}
                       onReply={(text) => { sendText(text, m.id); setDrafts((p) => { const n = new Map(p); n.delete(m.id); return n; }); }}
