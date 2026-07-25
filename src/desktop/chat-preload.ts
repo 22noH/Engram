@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron';
 
 // 채팅 창(renderer)이 Code 채널 폴더 바인딩·코드 패널 터미널에 쓰는 최소 API.
 // 브라우저(폰)엔 이 객체가 없으므로 chat.html이 텍스트 입력으로 폴백한다.
@@ -10,11 +10,15 @@ contextBridge.exposeInMainWorld('engramDesktop', {
 
   // 코드 패널 터미널(레포 첫 스트리밍 IPC — webContents.send). pty 스폰·입출력은 전부 메인
   // 프로세스 경유, 렌더러엔 노드 API 미노출 유지.
-  ptyStart: (channelId: string, cwd: string): Promise<{ sid: string; shell: string } | { error: string }> =>
+  // channelId는 "세션 키"다 — 독 패널에서 터미널 탭이 여럿이 되면서 `채널id#탭id` 형태가 됐다.
+  // created=false면 기존 세션 재사용(리플레이) — 서버 시작 명령 같은 1회성 입력은 보내면 안 된다.
+  ptyStart: (channelId: string, cwd: string): Promise<{ sid: string; shell: string; created: boolean } | { error: string }> =>
     ipcRenderer.invoke('engram:pty-start', channelId, cwd),
   ptyWrite: (sid: string, data: string): Promise<void> => ipcRenderer.invoke('engram:pty-write', sid, data),
   ptyResize: (sid: string, cols: number, rows: number): Promise<void> => ipcRenderer.invoke('engram:pty-resize', sid, cols, rows),
   ptyKill: (sid: string): Promise<void> => ipcRenderer.invoke('engram:pty-kill', sid),
+  // 탭/칸을 닫을 때 쓴다 — 그 탭이 한 번도 안 열렸으면 렌더러가 sid를 모른다(키는 항상 안다).
+  ptyKillKey: (key: string): Promise<void> => ipcRenderer.invoke('engram:pty-kill-key', key),
   ptyReplay: (sid: string): Promise<string> => ipcRenderer.invoke('engram:pty-replay', sid),
   onPtyData: (cb: (sid: string, data: string) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: { sid: string; data: string }): void => cb(payload.sid, payload.data);
@@ -25,6 +29,18 @@ contextBridge.exposeInMainWorld('engramDesktop', {
     const listener = (_e: IpcRendererEvent, payload: { sid: string; code: number }): void => cb(payload.sid, payload.code);
     ipcRenderer.on('engram:pty-exit', listener);
     return () => ipcRenderer.removeListener('engram:pty-exit', listener);
+  },
+
+  // 코드 독 패널(2026-07-25) — 브라우저 칸 부가 기능.
+  // pickFile: 더보기(⋮) "파일 열기" — 고른 경로를 렌더러가 file:// URL로 바꿔 새 탭에 연다.
+  pickFile: (): Promise<string | null> => ipcRenderer.invoke('engram:pick-file'),
+  // saveScreenshot: webview.capturePage()로 만든 PNG 바이트를 저장(대화상자는 메인). 저장 경로 반환.
+  saveScreenshot: (png: ArrayBuffer, suggested?: string): Promise<string | null> =>
+    ipcRenderer.invoke('engram:save-screenshot', png, suggested),
+  // 파일 끌어다 놓기: Electron 32+에서 File.path가 사라졌다 — 실제 경로는 webUtils로만 얻는다.
+  // 이 함수는 preload(격리된 컨텍스트)에서만 동작한다(렌더러엔 webUtils가 없다).
+  filePath: (file: File): string => {
+    try { return webUtils.getPathForFile(file); } catch { return ''; }
   },
 
   // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).

@@ -85,6 +85,22 @@ ptyManager.onExit((sid, code) => {
   chatWin?.webContents.send('engram:pty-exit', { sid, code });
 });
 
+// ---- 코드 독 패널의 브라우저 칸(<webview>) 안전 규칙(스펙 2026-07-25 §안전 설정) ----
+// 게스트 웹콘텐츠가 만들어질 때마다 걸린다. 렌더러가 못 끄는 자리(메인)에서 강제하는 것이 핵심이다.
+app.on('web-contents-created', (_e, contents) => {
+  if (contents.getType() !== 'webview') return;
+  // 새 창(target=_blank·window.open) 요청은 앱 안에 창을 띄우지 않고 OS 기본 브라우저로 넘긴다.
+  contents.setWindowOpenHandler(({ url: ext }) => {
+    if (/^https?:/i.test(ext)) void shell.openExternal(ext);
+    return { action: 'deny' };
+  });
+  // 미리보기로 연 사이트에 카메라·마이크·알림·위치를 줄 이유가 없다 — 전부 거절.
+  try {
+    contents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+    contents.session.setPermissionCheckHandler(() => false);
+  } catch { /* 파티션 세션이 이미 핸들러를 가진 경우 등 — 격리 */ }
+});
+
 // ---- 음성 입력(로컬 Whisper — stt.ts) ----
 // 모델은 앱에 번들하지 않고 첫 사용 시 받아 userData/models에 캐시한다(임베딩 모델과 같은 폴더 —
 // childEnv.ENGRAM_MODEL_CACHE_DIR과 동일 경로라 백엔드/두뇌와 캐시를 공유한다).
@@ -340,7 +356,27 @@ function openChat(): void {
     icon: trayIcon(), // dev 모드 작업표시줄에 Electron 기본 로고 대신 뇌 아이콘
     titleBarStyle: 'hidden', titleBarOverlay: overlay(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#191b19' : '#f5f6f4',
-    webPreferences: { preload: path.join(__dirname, 'chat-preload.js') },
+    // webviewTag는 **채팅 창에만** 켠다(설정창은 그대로) — 코드 독 패널의 브라우저 칸이 진짜
+    // 브라우저(<webview>)여야 뒤로/앞으로·로컬 파일 열기가 된다(스펙 §핵심 기술 결정).
+    // 실제 안전 설정 강제는 아래 will-attach-webview에서 한다(렌더러 속성만 믿지 않는다).
+    webPreferences: { preload: path.join(__dirname, 'chat-preload.js'), webviewTag: true },
+  });
+  // ★ webview 안전 게이트 — 렌더러가 어떤 속성을 붙였든 메인이 다시 못 박는다(스펙 §안전 설정).
+  // 렌더러 코드가 실수/변조로 nodeIntegration을 켜도 여기서 꺼진다.
+  chatWin.webContents.on('will-attach-webview', (_e, webPreferences, params) => {
+    delete (webPreferences as { preload?: string }).preload; // 게스트에 preload 브리지 금지
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    webPreferences.webSecurity = true;
+    delete (params as { allowpopups?: unknown }).allowpopups; // 팝업 차단(새 창은 아래에서 OS 브라우저로)
+    // 파티션이 비어 있으면(=앱 세션 공유) 아예 붙이지 않는다 — 외부 사이트가 앱 쿠키/스토리지에
+    // 닿는 유일한 경로라 여기서 확실히 끊는다.
+    const part = String(params.partition ?? '');
+    if (!part.replace(/^persist:/, '').startsWith('engram-preview')) {
+      params.partition = 'engram-preview';
+    }
   });
   const onTheme = (): void => {
     try { chatWin?.setTitleBarOverlay(overlay()); } catch { /* 미지원 플랫폼 무시 */ }
@@ -603,7 +639,26 @@ function registerIpc(): void {
   ipcMain.handle('engram:pty-write', (_e, sid: string, data: string) => { ptyManager.write(sid, data); });
   ipcMain.handle('engram:pty-resize', (_e, sid: string, cols: number, rows: number) => { ptyManager.resize(sid, cols, rows); });
   ipcMain.handle('engram:pty-kill', (_e, sid: string) => { ptyManager.kill(sid); });
+  // 독 패널: 탭/칸을 닫을 때 sid를 모를 수 있어(한 번도 안 연 탭 등) 키로도 죽인다.
+  ipcMain.handle('engram:pty-kill-key', (_e, key: string) => { ptyManager.killKey(key); });
   ipcMain.handle('engram:pty-replay', (_e, sid: string) => ptyManager.replay(sid));
+  // 독 패널 더보기(⋮) — 파일 열기: 브라우저 칸에서 file://로 열 로컬 파일 하나를 고른다.
+  ipcMain.handle('engram:pick-file', async () => {
+    const res = await dialog.showOpenDialog({ properties: ['openFile'] });
+    return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+  });
+  // 독 패널 더보기(⋮) — 스크린샷 저장: 렌더러가 webview.capturePage()로 만든 PNG 바이트를 받는다.
+  ipcMain.handle('engram:save-screenshot', async (_e, png: ArrayBuffer, suggested?: string) => {
+    const res = await dialog.showSaveDialog({
+      defaultPath: suggested || `engram-${Date.now()}.png`,
+      filters: [{ name: 'PNG', extensions: ['png'] }],
+    });
+    if (res.canceled || !res.filePath) return null;
+    try {
+      fs.writeFileSync(res.filePath, Buffer.from(png));
+      return res.filePath;
+    } catch { return null; }
+  });
   // 코드 패널 diff 뷰: 읽기 전용(git-diff.ts, never-throw 결과형).
   ipcMain.handle('engram:git-diff-status', (_e, repoPath: string) => diffStatus(repoPath));
   ipcMain.handle('engram:git-diff-file', (_e, repoPath: string, file: string) => diffFile(repoPath, file));

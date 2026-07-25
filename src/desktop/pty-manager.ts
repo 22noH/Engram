@@ -69,7 +69,10 @@ export const defaultSpawnFactory: SpawnFactory = (shell, cwd) => {
 
 export class PtyManager {
   private sessions = new Map<string, Session>(); // sid -> session
-  private byChannel = new Map<string, string>(); // channelId -> sid
+  // key -> sid. key는 원래 채널 id였는데, 독 패널(2026-07-25)에서 한 채널에 터미널 탭이 여러 개가
+  // 되면서 `채널id#탭id`(개발 서버는 `채널id#서버id`) 형태로 넓어졌다 — 매니저 입장에선 그냥
+  // "세션을 구분하는 문자열"이라 로직 변경은 없다(killAll도 키 개수만큼 전부 정리한다).
+  private byChannel = new Map<string, string>();
   private dataCbs: Array<(sid: string, data: string) => void> = [];
   private exitCbs: Array<(sid: string, code: number) => void> = [];
 
@@ -78,12 +81,14 @@ export class PtyManager {
     private readonly platform: NodeJS.Platform = process.platform,
   ) {}
 
-  // 채널당 1세션: 기존 세션이 있으면 그대로 반환(cwd 무시), 없으면 새로 스폰.
-  start(channelId: string, cwd: string): { sid: string; shell: string } | { error: string } {
+  // 키당 1세션: 기존 세션이 있으면 그대로 반환(cwd 무시), 없으면 새로 스폰.
+  // created=false는 "리플레이로 이어붙는 기존 세션"이라는 뜻 — 개발 서버 시작 명령처럼 한 번만
+  // 쳐야 하는 입력은 created=true일 때만 보내야 한다(안 그러면 서버가 두 번 뜬다).
+  start(channelId: string, cwd: string): { sid: string; shell: string; created: boolean } | { error: string } {
     const existingSid = this.byChannel.get(channelId);
     if (existingSid) {
       const existing = this.sessions.get(existingSid);
-      if (existing) return { sid: existing.sid, shell: existing.shell };
+      if (existing) return { sid: existing.sid, shell: existing.shell, created: false };
       this.byChannel.delete(channelId); // 매핑만 남고 세션은 유실된 경우 정리 후 새로 스폰
     }
     // 리뷰 지적: cwd가 문자열이 아니거나 실존하지 않으면 스폰 전에 걸러낸다(스폰 자체가
@@ -119,7 +124,7 @@ export class PtyManager {
           }
         }
       });
-      return { sid, shell };
+      return { sid, shell, created: true };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
@@ -155,6 +160,13 @@ export class PtyManager {
     }
     this.sessions.delete(sid);
     if (this.byChannel.get(s.channelId) === sid) this.byChannel.delete(s.channelId);
+  }
+
+  // 독 패널: 탭/칸을 닫을 때 렌더러는 sid를 모를 수 있다(그 탭이 한 번도 안 열렸거나, 탭 전환으로
+  // 이미 언마운트됐거나). 키는 항상 아는 값이라(`채널id#탭id`) 키로 죽일 길을 열어 둔다.
+  killKey(key: string): void {
+    const sid = this.byChannel.get(key);
+    if (sid) this.kill(sid);
   }
 
   killAll(): void {

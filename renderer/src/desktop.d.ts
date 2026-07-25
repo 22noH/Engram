@@ -33,12 +33,20 @@ declare global {
       pickFolder: () => Promise<string | null>;
       setupCode?: () => Promise<string | null>; // Task 15
       addLocalBrain?: (name: string) => Promise<{ endpoint: string; name: string } | null>; // Task 15
-      // 코드 패널 터미널(코드 패널 Task 1 — pty 인프라). 채널당 1세션, cwd=채널 repoPath.
-      ptyStart?: (channelId: string, cwd: string) => Promise<{ sid: string; shell: string } | { error: string }>;
+      // 코드 패널 터미널(코드 패널 Task 1 — pty 인프라). cwd=채널 repoPath.
+      // 첫 인자는 "세션 키"다 — 독 패널(2026-07-25)에서 터미널 탭이 여럿이 되며 `채널id#탭id`가 됐다.
+      // created=false = 기존 세션 재사용(리플레이) → 1회성 입력(서버 시작 명령)을 보내면 안 된다.
+      ptyStart?: (key: string, cwd: string) => Promise<{ sid: string; shell: string; created: boolean } | { error: string }>;
       ptyWrite?: (sid: string, data: string) => Promise<void>;
       ptyResize?: (sid: string, cols: number, rows: number) => Promise<void>;
       ptyKill?: (sid: string) => Promise<void>;
+      /** 탭/칸을 닫을 때 — sid를 모르는 탭도 키로 정리할 수 있다(고아 방지). */
+      ptyKillKey?: (key: string) => Promise<void>;
       ptyReplay?: (sid: string) => Promise<string>;
+      // 코드 독 패널 브라우저 칸 — 파일 열기 / 스크린샷 저장 / 끌어다 놓은 파일의 실제 경로.
+      pickFile?: () => Promise<string | null>;
+      saveScreenshot?: (png: ArrayBuffer, suggested?: string) => Promise<string | null>;
+      filePath?: (file: File) => string;
       onPtyData?: (cb: (sid: string, data: string) => void) => () => void;
       onPtyExit?: (cb: (sid: string, code: number) => void) => () => void;
       // 코드 패널 diff 뷰(코드 패널 Task 2 — git-diff.ts). 읽기 전용, 결과형(never-throw).
@@ -68,5 +76,40 @@ declare global {
       installUpdate?: () => Promise<void>;
       onUpdateReady?: (cb: (version: string) => void) => () => void;
     };
+  }
+}
+
+// ---- <webview>(Electron) ----
+// 독 패널 브라우저 칸의 실체. React가 모르는 태그라 JSX에 직접 선언한다. 속성은 전부 문자열이다
+// (webview는 커스텀 엘리먼트라 boolean 속성이 없다). 안전 설정의 최종 강제는 메인 프로세스의
+// will-attach-webview에서 한다 — 여기 값은 "요청"일 뿐이다(src/desktop/main.ts).
+export interface WebviewElement extends HTMLElement {
+  src: string;
+  canGoBack(): boolean;
+  canGoForward(): boolean;
+  goBack(): void;
+  goForward(): void;
+  reload(): void;
+  stop(): void;
+  getURL(): string;
+  getTitle(): string;
+  loadURL(url: string): Promise<void>;
+  capturePage(): Promise<{ toPNG(): Uint8Array }>;
+  executeJavaScript(code: string): Promise<unknown>;
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        src?: string;
+        partition?: string;
+        /** 예: "contextIsolation=yes,nodeIntegration=no,sandbox=yes" */
+        webpreferences?: string;
+        useragent?: string;
+        /** allowpopups는 절대 붙이지 않는다(팝업 차단 — 새 창 요청은 OS 브라우저로). */
+        ref?: React.Ref<WebviewElement>;
+      };
+    }
   }
 }

@@ -189,6 +189,50 @@ describe('PtyManager', () => {
     expect(procs.every((p) => p.killed)).toBe(true);
   });
 
+  // 독 패널(2026-07-25): 한 채널에 터미널 탭이 여러 개다 → 키가 `채널#탭id`로 늘어난다.
+  // killAll이 "채널 하나당 하나"가 아니라 **키 개수만큼** 전부 정리해야 고아가 안 남는다.
+  it('killAll()은 한 채널의 여러 키(탭) 세션도 전부 kill한다 — 독 패널 고아 방지', () => {
+    const { factory, procs } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    mgr.start('ch1#t1', VALID_CWD);
+    mgr.start('ch1#t2', VALID_CWD);
+    mgr.start('ch1#srv-a', VALID_CWD);
+    expect(procs).toHaveLength(3);
+    mgr.killAll();
+    expect(procs.every((p) => p.killed)).toBe(true);
+  });
+
+  it('start()는 새로 스폰했는지(created)를 알려준다 — 서버 명령 자동 입력은 새 세션에만', () => {
+    const { factory } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    const r1 = mgr.start('ch1', VALID_CWD) as { created: boolean };
+    const r2 = mgr.start('ch1', VALID_CWD) as { created: boolean };
+    expect(r1.created).toBe(true);
+    expect(r2.created).toBe(false); // 재사용(리플레이) — 명령을 또 치면 서버가 두 번 뜬다
+  });
+
+  it('killKey()는 키로 세션을 죽인다(탭을 닫을 때 sid를 몰라도 정리 가능)', () => {
+    const { factory, procs } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    mgr.start('ch1#t1', VALID_CWD);
+    mgr.start('ch1#t2', VALID_CWD);
+    mgr.killKey('ch1#t1');
+    expect(procs[0].killed).toBe(true);
+    expect(procs[1].killed).toBe(false);
+    // 죽인 키로 다시 start하면 새 세션이 뜬다(매핑도 같이 지워졌다는 뜻)
+    const r = mgr.start('ch1#t1', VALID_CWD) as { created: boolean };
+    expect(r.created).toBe(true);
+  });
+
+  it('killKey()는 없는 키·kill throw를 삼킨다(never-throw)', () => {
+    const { factory, procs } = makeFactory();
+    const mgr = new PtyManager(factory, 'win32');
+    expect(() => mgr.killKey('nope')).not.toThrow();
+    mgr.start('ch1', VALID_CWD);
+    procs[0].killThrows = true;
+    expect(() => mgr.killKey('ch1')).not.toThrow();
+  });
+
   it('onData 구독자는 (sid, data)로 팬아웃 수신', () => {
     const { factory, procs } = makeFactory();
     const mgr = new PtyManager(factory, 'win32');
