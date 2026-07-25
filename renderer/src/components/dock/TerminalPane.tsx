@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Terminal as XTerminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { T } from '../../i18n';
+import {
+  buildXtermTheme, contextMenuAction, cssVarReader, isPasteShortcut, shouldFocusTerminal,
+  shouldPreventPaneMouseDown,
+} from '../../dock/terminal';
 
 // 독 패널 터미널 탭 — 기존 CodePanel의 TerminalTab을 옮겨온 것이다. 달라진 건 딱 둘:
 //  ① 세션 키가 채널 id가 아니라 `채널id#탭id`(탭마다 별도 세션)
@@ -18,23 +22,8 @@ async function loadXterm() {
   return { Terminal, FitAddon };
 }
 
-// QL 토큰 값을 getComputedStyle로 읽어 xterm 테마를 구성 — 검정 고정 금지(라이트=종이톤·다크=흑연).
-function buildXtermTheme(): Record<string, string> {
-  const cs = typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement) : null;
-  const v = (name: string, fallback: string) => {
-    const val = cs?.getPropertyValue(name)?.trim();
-    return val || fallback;
-  };
-  return {
-    background: v('--panel-2', '#ffffff'),
-    foreground: v('--text', '#24292e'),
-    cursor: v('--accent', '#2e6e63'),
-    cursorAccent: v('--panel-2', '#ffffff'),
-    selectionBackground: v('--accent-soft', '#eef2ee'),
-    black: v('--text', '#24292e'),
-    brightBlack: v('--dim', '#6b7268'),
-  };
-}
+// 테마 구성(팔레트 값·포커스·우클릭 규칙)은 ../../dock/terminal.ts에 있다 — xterm 없이 단위 테스트된다.
+const currentTheme = (): Record<string, string> => buildXtermTheme(cssVarReader());
 
 // jsdom엔 ResizeObserver가 없다 — 없으면 그냥 관찰을 생략(fit은 마운트 시 1회는 이미 수행).
 const ResizeObserverCtor: typeof ResizeObserver | undefined =
@@ -60,6 +49,44 @@ export function TerminalPane({ sessionKey, cwd, command, onShellName }: {
   const [restartKey, setRestartKey] = useState(0);
   const [startError, setStartError] = useState<string | null>(null);
 
+  // ---- 클립보드(윈도우 터미널 관례) ----
+  // 붙여넣기는 클립보드 → ptyWrite. Ctrl+V는 손대지 않는다(셸로 그대로 간다).
+  const pasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard?.readText();
+      if (text && sidRef.current) await window.engramDesktop?.ptyWrite?.(sidRef.current, text);
+    } catch { /* 클립보드 권한 없음 등 — 조용히 무시(붙여넣기 실패가 터미널을 깨선 안 된다) */ }
+  }, []);
+
+  // 우클릭: 선택 영역이 있으면 복사(+선택 해제), 없으면 붙여넣기 — PowerShell/cmd 기본 동작.
+  // 브라우저 기본 컨텍스트 메뉴는 막는다(앱 안에서 웹 메뉴가 뜨면 터미널 관례가 깨진다).
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const term = termRef.current;
+    if (!term) return;
+    if (contextMenuAction(term.hasSelection()) === 'copy') {
+      const sel = term.getSelection();
+      if (sel) void navigator.clipboard?.writeText(sel).catch(() => { /* 무시 */ });
+      term.clearSelection();
+      return;
+    }
+    void pasteFromClipboard();
+  }, [pasteFromClipboard]);
+
+  // ★실기 확정 버그(2026-07-25)의 봉합: 터미널 칸 어디를 눌러도 터미널이 포커스를 받게 한다.
+  // 이전엔 xterm 격자를 정확히 눌렀을 때만 포커스가 갔고, 표면 여백(.codeTermSurface의 padding)이나
+  // 격자 바깥을 누르면 포커스가 <body>로 빠져 스페이스·한글이 통째로 먹히지 않았다.
+  // 격자 바깥에선 preventDefault가 필수다 — 안 그러면 우리가 준 포커스를 mousedown 기본 동작이
+  // 곧바로 <body>로 날린다(실기에서 그대로 재현됐다).
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    const term = termRef.current;
+    if (!term) return;
+    if (shouldPreventPaneMouseDown(e.target as Element)) {
+      e.preventDefault();
+      term.focus();
+    }
+  }, []);
+
   useEffect(() => {
     setEnded(false);
     setStartError(null);
@@ -79,13 +106,31 @@ export function TerminalPane({ sessionKey, cwd, command, onShellName }: {
         const term = new Terminal({
           fontFamily: 'Consolas, "Cascadia Mono", Menlo, monospace',
           fontSize: 12,
-          theme: buildXtermTheme(),
+          theme: currentTheme(),
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
         termRef.current = term;
         if (containerRef.current) term.open(containerRef.current);
         try { fit.fit(); } catch { /* jsdom 등 레이아웃 없는 환경 */ }
+
+        // Ctrl+Shift+V = 붙여넣기(터미널 관례). false를 돌려주면 xterm이 그 키를 셸로 보내지 않는다.
+        // 그 외 키는 전부 true — xterm이 스스로 처리한다(한글 IME 조합 포함, 가로채면 조합이 깨진다).
+        // fit.fit()과 같은 결로 감싼다: 여기서 던지는 예외가 아래 ptyStart까지 막으면 안 된다.
+        try {
+          term.attachCustomKeyEventHandler((e) => {
+            if (!isPasteShortcut(e)) return true;
+            void pasteFromClipboard();
+            return false;
+          });
+        } catch { /* jsdom 등 렌더러가 없는 환경 */ }
+
+        // ★탭/칸을 새로 열면 포커스가 그 <button>에 남아 스페이스가 "버튼 누르기"로 소비되고
+        // 한글은 조합 이벤트조차 안 뜬다(실기 재현 완료). 마운트 시 터미널로 포커스를 옮긴다 —
+        // 단 사용자가 글자를 넣고 있던 곳(채팅 입력창 등)에서는 절대 뺏지 않는다(shouldFocusTerminal).
+        try {
+          if (shouldFocusTerminal(document.activeElement)) term.focus();
+        } catch { /* jsdom 등 렌더러가 없는 환경 */ }
 
         dataDisp = term.onData((data: string) => {
           if (sidRef.current) void window.engramDesktop?.ptyWrite?.(sidRef.current, data);
@@ -101,7 +146,7 @@ export function TerminalPane({ sessionKey, cwd, command, onShellName }: {
 
         // 앱 테마(라이트/다크) 전환 시 xterm 테마 재적용 — 검정 고정 금지 요건의 핵심 배선.
         mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
-        onThemeChange = () => { term.options.theme = buildXtermTheme(); };
+        onThemeChange = () => { term.options.theme = currentTheme(); };
         mq?.addEventListener?.('change', onThemeChange);
 
         const api = window.engramDesktop;
@@ -150,7 +195,7 @@ export function TerminalPane({ sessionKey, cwd, command, onShellName }: {
   }, [sessionKey, cwd, command, restartKey]);
 
   return (
-    <div className="codeTerm">
+    <div className="codeTerm" onMouseDown={onMouseDown} onContextMenu={onContextMenu}>
       <div className="codeTermSurface" ref={containerRef} />
       {ended && (
         <div className="codeSessionBar">

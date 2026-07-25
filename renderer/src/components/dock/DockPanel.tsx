@@ -7,6 +7,7 @@ import {
 } from '../../dock/layout';
 import { type DevServer, type DockPrefs, loadPrefs, loadServers, savePrefs, serverUrl } from '../../dock/prefs';
 import { toNavUrl, urlTitle } from '../../dock/url';
+import { dockButtonHoldsFocus } from '../../dock/terminal';
 import { getView } from '../../dock/views';
 import { BrowserPane } from './BrowserPane';
 import { MoreMenu, ServerMenu } from './BrowserMenus';
@@ -77,6 +78,17 @@ export function DockPanel({ channelId, repoPath, layout, onLayout }: {
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
   };
+
+  // ★실기 확정(2026-07-25): 독의 버튼(⌨ 도구 아이콘·탭 줄의 ＋·레일)을 누르면 포커스가 그 <button>에
+  // 남는다. 그 상태에서 스페이스는 터미널이 아니라 **버튼을 누른다**(＋에 남은 채 스페이스를 치면 탭이
+  // 하나 더 생기는 것을 재현했다). 한글은 조합 이벤트조차 뜨지 않는다.
+  // 렌더 직후 독 버튼이 포커스를 쥐고 있으면, 포커스된 칸의 터미널로 넘긴다. 조건이 좁아서(독 버튼일
+  // 때만) 다른 포커스 흐름은 건드리지 않는다 — Tab 이동은 리렌더를 일으키지 않아 여기 걸리지 않는다.
+  useEffect(() => {
+    if (!dockButtonHoldsFocus(document.activeElement)) return;
+    const pane = document.querySelector(`.dockPane[data-pane="${layout.focusedPaneId}"] .xterm-helper-textarea`);
+    (pane as HTMLElement | null)?.focus();
+  });
 
   useEffect(() => { setServers(loadServers(channelId)); setMenu(null); setMaximized(null); }, [channelId]);
   useEffect(() => {

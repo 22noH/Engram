@@ -14,6 +14,15 @@
   /* 스레드 참여자 아바타 색(--av-1..6). 이름 해시로 고정 배정 — 같은 사람은 늘 같은 색.
      서재 팔레트 안에서 서로 구분되는 muted 톤 6개, 글자는 --accent-text(라이트=흰색). */
   --av-1:#2e6e63; --av-2:#7a6ea0; --av-3:#b0873f; --av-4:#3f6f92; --av-5:#8a4a3a; --av-6:#5f7d43;
+  /* 터미널 ANSI 16색(2026-07-25 사용자 신고: 흰 배경에 노란 글씨라 안 보임).
+     xterm 기본 팔레트는 **어두운 배경 전제**라 라이트 테마에서 노랑·밝은색이 사실상 안 보인다.
+     PSReadLine이 명령어를 brightYellow, 숫자를 white로 칠하므로 그 둘이 특히 중요하다:
+     노랑은 진한 황토·갈색으로, white/brightWhite는 흰색이 아니라 읽히는 회색으로 둔다.
+     값·최소 대비(흰 배경 4.5:1)는 dock/terminal.ts의 LIGHT_ANSI와 그 테스트가 잠근다. */
+  --term-black:#24292f; --term-red:#cf222e; --term-green:#116329; --term-yellow:#7d4e00;
+  --term-blue:#0550ae; --term-magenta:#6639ba; --term-cyan:#1b7c83; --term-white:#6e7781;
+  --term-bright-black:#57606a; --term-bright-red:#a40e26; --term-bright-green:#1a7f37; --term-bright-yellow:#9a6700;
+  --term-bright-blue:#0969da; --term-bright-magenta:#8250df; --term-bright-cyan:#22808f; --term-bright-white:#424a53;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +35,12 @@
     --pending-bg:#2a2318; --pending-line:#4a3d26; --ok:#8fc28a;
     /* 다크에서 아바타 글자색(--accent-text)이 어두워지므로 배경을 밝은 파스텔로 뒤집는다(대비 유지). */
     --av-1:#7fb5a6; --av-2:#a99ecb; --av-3:#d3ab68; --av-4:#7ca8c9; --av-5:#c78a7a; --av-6:#9dbb7c;
+    /* 다크(흑연 --panel-2:#22251f)에선 어두운 배경용 값으로 되돌린다 — 라이트에서 쓰던 진한 색은
+       여기선 반대로 안 보인다. 전환은 TerminalPane의 prefers-color-scheme 리스너가 재적용한다. */
+    --term-black:#22251f; --term-red:#f47067; --term-green:#8ddb8c; --term-yellow:#e0c485;
+    --term-blue:#6cb6ff; --term-magenta:#dcbdfb; --term-cyan:#76e3ea; --term-white:#d9dbd5;
+    --term-bright-black:#6b7268; --term-bright-red:#ff8a80; --term-bright-green:#a2f2a2; --term-bright-yellow:#f0d9a4;
+    --term-bright-blue:#9cd0ff; --term-bright-magenta:#eed4ff; --term-bright-cyan:#a2f4f9; --term-bright-white:#f2f3ef;
   }
 }
 * { box-sizing: border-box; margin: 0; }
