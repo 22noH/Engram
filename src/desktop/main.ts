@@ -21,6 +21,10 @@ import { getCommandMode, setCommandMode, getPermissionDetails, setPermissionList
 import { setAlias, removeAlias, setSearchRoots } from './coderepos-file';
 import { listSchedules, removeScheduleFromFile } from './schedules-file';
 import { readWikiRemoteFile, saveWikiRemote, WikiRemoteForm } from './wiki-remote-file';
+import {
+  FolderImportConfig, importLedgerPath, loadImportConfig, saveImportConfig, touchImportTrigger,
+} from '../knowledge-core/import/import.config';
+import { ImportLedger } from '../knowledge-core/import/import-ledger';
 import { readPresetFile } from './preset-file';
 import { loadCodeRepos } from '../agent-layer/coderepos';
 import { saveDiscordToken } from './messenger-writer';
@@ -594,6 +598,24 @@ function registerIpc(): void {
   });
   ipcMain.handle('engram:list-schedules', () => listSchedules(configDir));
   ipcMain.handle('engram:remove-schedule', (_e, id: string) => removeScheduleFromFile(configDir, id));
+  // 폴더 자동 변환. 설정창은 config 파일만 읽고 쓴다 — 실제 변환은 상주 백엔드의 워처가
+  // 그 파일 변경을 보고 재시작 없이 반영한다(자식 프로세스 IPC 프로토콜을 새로 만들지 않는다).
+  ipcMain.handle('engram:get-folder-import', () => loadImportConfig(configDir));
+  ipcMain.handle('engram:set-folder-import', (_e, cfg: Partial<FolderImportConfig>) => saveImportConfig(configDir, cfg));
+  ipcMain.handle('engram:folder-import-status', async () => {
+    const ledger = new ImportLedger(importLedgerPath(path.join(dataDir, 'state')));
+    await ledger.load(); // 깨졌거나 없으면 빈 이력(never-throw)
+    return { counts: ledger.counts(), recent: ledger.recent(12) };
+  });
+  // "지금 검사" — 트리거 파일의 mtime을 건드리면 백엔드 워처가 즉시 스캔한다.
+  ipcMain.handle('engram:folder-import-scan', () => {
+    try {
+      touchImportTrigger(path.join(dataDir, 'state'));
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
   ipcMain.handle('engram:get-wiki-remote', () => readWikiRemoteFile(configDir));
   ipcMain.handle('engram:set-wiki-remote', (_e, cfg: WikiRemoteForm) => { saveWikiRemote(configDir, cfg); });
   ipcMain.handle('engram:get-command-mode', () => getCommandMode(configDir));

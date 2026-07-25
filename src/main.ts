@@ -48,6 +48,14 @@ import { BrainDelegator } from './agent-layer/brain-delegator';
 import { readClaudeMcpServers } from './brain/claude-mcp-import';
 import { mirrorClaudeMcp } from './desktop/mcp-file';
 import { CompactService } from './agent-layer/compact';
+import { SttEngine } from './desktop/stt';
+import { DEFAULT_USER } from './pal/path-resolver';
+import { FolderImporter } from './knowledge-core/import/folder-importer';
+import { ImportLedger } from './knowledge-core/import/import-ledger';
+import { ImportWatcher } from './knowledge-core/import/import-watcher';
+import { importLedgerPath } from './knowledge-core/import/import.config';
+import { makeImporterPorts } from './knowledge-core/import/import-wiring';
+import { makeAudioText, pdfText } from './knowledge-core/import/extract-ports';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
 // prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
@@ -100,6 +108,47 @@ process.on('uncaughtException', (err) => { logFatal('uncaughtException', err); p
 // 크래시-재시작 폭주의 진범이었다면, 로그를 남기면서 프로세스를 살려 폭주 자체를 끊는다(회복력 우선).
 process.on('unhandledRejection', (reason) => logFatal('unhandledRejection', reason));
 
+/**
+ * 폴더 자동 변환(감시 폴더 → 위키) 기동. 설정이 꺼져 있어도 워처는 띄운다 — 설정 파일을 지켜보다가
+ * 사용자가 설정창에서 켜면 재시작 없이 바로 붙기 때문이다(꺼진 동안은 폴더를 열지 않는다).
+ * 실패는 상주를 죽이지 않는다(위키 원격 동기화 배선과 같은 결).
+ *
+ * 핵심 로직은 knowledge-core/import에 순수 모듈로 있고 여기서는 실 서비스만 꽂는다 —
+ * 같은 makeImporterPorts를 MCP 쪽에서도 그대로 재사용할 수 있다.
+ */
+function startFolderImport(
+  paths: PathResolver,
+  logger: PinoLogger,
+  brain: BrainProvider,
+  wiki: WikiEngine,
+  proposals: ProposalStore,
+): ImportWatcher {
+  const log = (level: 'log' | 'warn' | 'error', msg: string): void => {
+    if (level === 'error') logger.error(msg, undefined, 'FolderImport');
+    else if (level === 'warn') logger.warn(msg, 'FolderImport');
+    else logger.log(msg, 'FolderImport');
+  };
+  // 음성 전사는 새로 만들지 않고 기존 로컬 Whisper(stt.ts)를 그대로 쓴다. 모델 캐시 폴더는
+  // 데스크톱 셸이 쓰는 곳과 동일(ENGRAM_MODEL_CACHE_DIR = <data>/models) — 임베딩 모델과 공유.
+  const stt = new SttEngine(process.env.ENGRAM_MODEL_CACHE_DIR ?? path.join(paths.getDataDir(), 'models'));
+  const ports = makeImporterPorts({
+    brain,
+    wiki,
+    proposals,
+    userId: DEFAULT_USER,
+    extract: {
+      readFile: (p) => fs.promises.readFile(p),
+      pdfText,
+      audioText: makeAudioText(stt, process.env.ENGRAM_LANG),
+    },
+    log,
+  });
+  const importer = new FolderImporter(ports, new ImportLedger(importLedgerPath(paths.getStateDir())));
+  const watcher = new ImportWatcher(paths.getConfigDir(), paths.getStateDir(), importer, log);
+  void watcher.start().catch((e) => log('warn', `폴더 자동 변환 시작 실패: ${String(e)}`));
+  return watcher;
+}
+
 // 상주 부트스트랩(설계 §9.2). 스케줄러(@Cron)는 모듈 그래프로 자동 가동.
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
 async function bootstrap(): Promise<void> {
@@ -133,6 +182,13 @@ async function bootstrap(): Promise<void> {
     }
     const wikiSync = new WikiSyncService(wikiGit, wikiRemote, logger);
     void wikiSync.start().catch((e) => logger.warn(`위키 동기화 시작 실패: ${String(e)}`, 'WikiSync'));
+  }
+
+  // 폴더 자동 변환(설정창 → 위키 → 폴더 자동 변환). 두뇌를 못 얻으면(미설정 등) 조용히 건너뛴다.
+  try {
+    startFolderImport(paths, logger, app.get<BrainProvider>(BRAIN), app.get(WikiEngine), app.get(ProposalStore));
+  } catch (e) {
+    logger.warn(`폴더 자동 변환 배선 실패(비활성): ${String(e)}`, 'FolderImport');
   }
 
   // 자체 채팅(Phase 9): 기본 가동(chat.json enabled:false만 끔). 실패해도 상주 불사.

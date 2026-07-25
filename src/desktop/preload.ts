@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('engram', {
   addMcpServer: (name: string, command: string, argsLine: string) => ipcRenderer.invoke('engram:add-mcp-server', name, command, argsLine),
   removeMcpServer: (name: string) => ipcRenderer.invoke('engram:remove-mcp-server', name),
   syncClaudeMcp: () => ipcRenderer.invoke('engram:sync-claude-mcp'),
+  // 폴더 자동 변환(감시 폴더 → 위키): 설정 읽기/쓰기 + 진행 상황 + "지금 검사".
+  getFolderImport: () => ipcRenderer.invoke('engram:get-folder-import'),
+  setFolderImport: (cfg: Record<string, unknown>) => ipcRenderer.invoke('engram:set-folder-import', cfg),
+  folderImportStatus: () => ipcRenderer.invoke('engram:folder-import-status'),
+  folderImportScan: () => ipcRenderer.invoke('engram:folder-import-scan'),
   getChatRetention: () => ipcRenderer.invoke('engram:get-chat-retention'),
   setChatRetention: (retention: { mode: 'count' | 'days' | 'unlimited'; value?: number }, autoCompact: boolean) =>
     ipcRenderer.invoke('engram:set-chat-retention', retention, autoCompact),

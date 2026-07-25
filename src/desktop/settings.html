@@ -384,6 +384,46 @@
     </div>
     <div class="cap" data-t="wikiCap"></div>
     <p class="cap ok" id="wiki-hint" hidden></p>
+
+    <!-- 폴더 자동 변환: 폴더에 둔 파일을 AI가 정리해 위키 문서로 만든다 -->
+    <div class="grp-h" data-t="importHead"></div>
+    <div class="grp">
+      <div class="li">
+        <label for="import-enabled" style="font-size:13px" data-t="importEnabled"></label>
+        <span class="val"><input type="checkbox" id="import-enabled" /></span>
+      </div>
+      <div class="li">
+        <label for="import-folder" style="font-size:13px" data-t="importFolder"></label>
+        <span class="val">
+          <input id="import-folder" class="mono" style="width:230px" />
+          <button id="btn-import-browse" data-t="browse"></button>
+        </span>
+      </div>
+      <div class="li">
+        <label for="import-mode" style="font-size:13px" data-t="importMode"></label>
+        <span class="val"><select id="import-mode">
+          <option value="ai" data-t="importModeAi"></option>
+          <option value="raw" data-t="importModeRaw"></option>
+        </select></span>
+      </div>
+      <div class="li">
+        <label for="import-publish" style="font-size:13px" data-t="importPublish"></label>
+        <span class="val"><select id="import-publish">
+          <option value="propose" data-t="importPublishPropose"></option>
+          <option value="direct" data-t="importPublishDirect"></option>
+        </select></span>
+      </div>
+    </div>
+    <div class="cap" data-t="importCap" style="white-space:pre-line"></div>
+    <p class="cap ok" id="import-hint" hidden></p>
+
+    <div class="grp-h" style="display:flex;align-items:center;gap:8px">
+      <span data-t="importProgress" style="flex:1"></span>
+      <span id="import-counts" style="text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px"></span>
+      <button id="btn-import-scan" data-t="importScanNow" style="font-size:11px;padding:3px 10px;flex:none"></button>
+    </div>
+    <div class="grp" id="import-recent"></div>
+    <div class="cap" data-t="importNote"></div>
   </section>
 
   <section id="sec-mcp">
@@ -526,6 +566,29 @@
       schedCap: "새 예약은 채팅에서 — '매일 아침 9시에 브리핑해줘'",
       schedRestart: '삭제는 재시작해야 완전히 적용돼요',
       wikiCap: '비우면 로컬 전용 · 인증은 git 표준(SSH/토큰) · ENGRAM_WIKI_REMOTE 환경변수가 있으면 그게 우선이에요',
+      importHead: '폴더 자동 변환',
+      importEnabled: '사용', importFolder: '폴더', importMode: '정리 방식', importPublish: '완료 후',
+      importModeAi: 'AI가 정리 (제목·요약·분류)', importModeRaw: '내용 그대로',
+      importPublishPropose: '승인함으로 (기본)', importPublishDirect: '바로 게시',
+      importCap: '폴더에 문서를 넣어두면 AI가 읽고 정리해 위키 문서로 만들어요 · 읽는 형식: 글·코드 · pdf · docx · pptx · xlsx · hwpx · 그림 · 음성(wav·mp3)\n원본은 지우지도 옮기지도 않아요 — 처리됐다는 표시만 따로 남겨요 · 긴 문서는 주제별로 나눠 여러 페이지로, 이미 있는 내용이면 새 페이지 대신 기존 문서에 덧붙여요',
+      importProgress: '진행 상황', importScanNow: '지금 검사',
+      importNote: '변환된 문서는 위키 승인함에 쌓여요. 어떤 파일에서 왔는지 출처가 함께 남아서, 잘못 만들어졌으면 원본을 바로 찾을 수 있어요.',
+      importEmpty: '아직 변환한 파일이 없어요',
+      importNeedFolder: '폴더를 먼저 골라주세요',
+      importScanQueued: '검사를 시작했어요', importSaved: '저장됨 — 바로 적용돼요',
+      importDone: '완료', importPending: '대기', importFailed: '실패', importSkipped: '건너뜀',
+      importPages: (n) => `→ ${n}개 페이지`, importAppended: '기존 문서에 덧붙임',
+      importCounts: (d, p) => `${d}건 완료 · ${p}건 대기`,
+      importReason: {
+        unsupported: '읽을 수 없는 형식', legacyHwp: '구형 hwp는 읽을 수 없어요 (hwpx로 저장해 주세요)',
+        noPdfParser: 'PDF 읽기 기능 없음', noAudioEngine: '음성 인식 기능 없음',
+        compressedAudio: 'm4a·aac는 읽을 수 없어요 (wav·mp3로 변환해 주세요)',
+        scannedPdf: '글자가 없는 스캔 PDF (그림 파일로 넣어주세요)',
+        imageTooLarge: '그림이 너무 커요', binary: '글이 아닌 파일', empty: '빈 파일',
+        unreadable: '파일을 읽지 못했어요', damagedZip: '파일이 손상됐어요', noText: '내용이 없어요',
+        tooLarge: '크기 상한을 넘었어요', imageNeedsAi: "그림은 '내용 그대로' 방식으로 넣을 수 없어요",
+        organizeParse: 'AI 응답을 이해하지 못했어요', organizeFailed: 'AI 정리 실패',
+      },
       mcpCap: 'AI에 도구를 꽂는 표준(MCP) 서버 목록 — Claude Code의 .mcp.json과 같은 포맷이라 파일을 직접 편집해도 돼요',
       mcpEmpty: '등록된 MCP 서버가 없어요',
       mcpSynced: 'Claude에서 동기화됨',
@@ -601,6 +664,29 @@
       schedCap: 'Create schedules in chat — "brief me every morning at 9"',
       schedRestart: 'Deletion fully applies after a restart',
       wikiCap: 'Empty = local only · auth is standard git (SSH/token) · the ENGRAM_WIKI_REMOTE env var wins if set',
+      importHead: 'Folder import',
+      importEnabled: 'Enabled', importFolder: 'Folder', importMode: 'Organize', importPublish: 'When done',
+      importModeAi: 'AI organizes it (title, summary, category)', importModeRaw: 'Keep as-is',
+      importPublishPropose: 'Send to approvals (default)', importPublishDirect: 'Publish straight away',
+      importCap: 'Drop documents into this folder and AI reads them and turns them into wiki pages · Reads: text & code · pdf · docx · pptx · xlsx · hwpx · images · audio (wav, mp3)\nOriginals are never deleted or moved — only a processed record is kept elsewhere · Long documents are split into pages by topic, and anything already covered is appended to the existing page instead of creating a new one',
+      importProgress: 'Progress', importScanNow: 'Scan now',
+      importNote: 'Converted pages land in wiki approvals. Each one records which file it came from, so you can trace a bad page back to the original.',
+      importEmpty: 'Nothing imported yet',
+      importNeedFolder: 'Pick a folder first',
+      importScanQueued: 'Scan started', importSaved: 'Saved — applied right away',
+      importDone: 'Done', importPending: 'Waiting', importFailed: 'Failed', importSkipped: 'Skipped',
+      importPages: (n) => `→ ${n} page${n === 1 ? '' : 's'}`, importAppended: 'appended to an existing page',
+      importCounts: (d, p) => `${d} done · ${p} waiting`,
+      importReason: {
+        unsupported: 'unreadable format', legacyHwp: 'legacy .hwp cannot be read (save as .hwpx)',
+        noPdfParser: 'no PDF reader available', noAudioEngine: 'no speech recognition available',
+        compressedAudio: 'm4a/aac cannot be read (convert to wav or mp3)',
+        scannedPdf: 'scanned PDF with no text layer (add it as an image instead)',
+        imageTooLarge: 'image too large', binary: 'not a text file', empty: 'empty file',
+        unreadable: 'could not read the file', damagedZip: 'file is damaged', noText: 'no content',
+        tooLarge: 'over the size limit', imageNeedsAi: 'images need the AI organize mode',
+        organizeParse: 'could not understand the AI response', organizeFailed: 'AI could not organize it',
+      },
       mcpCap: "MCP servers — the standard way to plug tools into AI. Same format as Claude Code's .mcp.json, so editing the file directly works too",
       mcpEmpty: 'No MCP servers',
       mcpSynced: 'Synced from Claude',
@@ -636,7 +722,9 @@
       'sec-repos': [t.secRepos, t.aliases, t.searchRoots, t.aliasCap, t.rootsCap],
       'sec-sched': [t.secSched, 'cron', t.schedCap, t.schedEmpty, t.schedRestart],
       'sec-chat': [t.secChat, t.retentionLabel, t.autoCompactLabel, t.autoCompactCheckboxLabel, t.chatRetentionHint],
-      'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap],
+      'sec-wiki': [t.secWiki, t.wikiRemote, t.wikiBranch, t.wikiInterval, t.wikiCap,
+        t.importHead, t.importFolder, t.importMode, t.importPublish, t.importCap, t.importScanNow, t.importProgress,
+        'pdf', 'docx', 'pptx', 'xlsx', 'hwpx'],
       'sec-mcp': ['MCP', t.addServer, t.addManual, t.mcpExpose, t.mcpPresets, t.mcpCap, t.mcpEmpty, 'playwright', 'github', 'context7', t.mcpWrite,
         t.mcpSynced, t.mcpSyncedCap, t.mcpSyncedEmpty],
       'sec-messenger': ['Discord', t.save],
@@ -1476,6 +1564,112 @@
       $('wiki-hint').hidden = false;
     };
 
+    // ---- 폴더 자동 변환: 감시 폴더 설정 + 진행 상황 ----
+    // 설정창은 config 파일만 쓰고, 실제 변환은 상주 백엔드의 워처가 그 파일 변경을 보고 반영한다
+    // (그래서 저장에 "재시작 필요" 안내가 없다). "지금 검사"는 트리거 파일을 건드려 스캔을 깨운다.
+    function showImportHint(text) {
+      $('import-hint').textContent = text;
+      $('import-hint').hidden = false;
+    }
+
+    async function loadFolderImport() {
+      $('import-hint').hidden = true;
+      const c = await window.engram.getFolderImport();
+      $('import-enabled').checked = c.enabled;
+      $('import-folder').value = c.folder;
+      $('import-mode').value = c.mode;
+      $('import-publish').value = c.publish;
+      await loadImportStatus();
+    }
+
+    async function saveFolderImport() {
+      const folder = $('import-folder').value.trim();
+      // 폴더 없이 켜는 건 아무 일도 안 일어나는 상태다 — 저장은 하되 무엇이 빠졌는지 알려준다.
+      if ($('import-enabled').checked && !folder) {
+        $('import-enabled').checked = false;
+        showImportHint(t.importNeedFolder);
+        return;
+      }
+      await window.engram.setFolderImport({
+        enabled: $('import-enabled').checked,
+        folder,
+        mode: $('import-mode').value,
+        publish: $('import-publish').value,
+      });
+      showImportHint(t.importSaved);
+    }
+
+    // 처리 기록 한 줄의 부가 설명(무엇이 만들어졌는지 / 왜 건너뛰었는지).
+    function importDetail(r) {
+      if (r.status === 'done') {
+        if (r.op === 'append') return t.importAppended;
+        return t.importPages((r.pages || []).length);
+      }
+      if (!r.reason) return '';
+      // 상태 파일엔 언어 중립 코드만 저장된다 — 사람이 읽는 문구는 여기서 붙인다.
+      // 'organizeFailed: rate limit'처럼 코드 뒤에 원인이 붙는 경우엔 그 원인도 함께 보여준다.
+      const raw = String(r.reason);
+      const at = raw.indexOf(':');
+      const key = at > 0 ? raw.slice(0, at).trim() : raw.trim();
+      const label = t.importReason[key];
+      if (!label) return raw;
+      return at > 0 ? label + ' — ' + raw.slice(at + 1).trim() : label;
+    }
+
+    const IMPORT_BADGE = {
+      done: { label: () => t.importDone, color: 'var(--accent)' },
+      pending: { label: () => t.importPending, color: 'var(--warn)' },
+      failed: { label: () => t.importFailed, color: 'var(--danger)' },
+      skipped: { label: () => t.importSkipped, color: 'var(--danger)' },
+    };
+
+    async function loadImportStatus() {
+      const { counts, recent } = await window.engram.folderImportStatus();
+      $('import-counts').textContent = t.importCounts(counts.done, counts.pending);
+      const grp = $('import-recent');
+      grp.textContent = '';
+      if (recent.length === 0) {
+        const row = document.createElement('div'); row.className = 'li';
+        const label = document.createElement('span'); label.style.color = 'var(--dim)'; label.textContent = t.importEmpty;
+        row.appendChild(label); grp.appendChild(row);
+        return;
+      }
+      for (const r of recent) {
+        const row = document.createElement('div'); row.className = 'li';
+        const name = document.createElement('span');
+        name.style.flex = '1'; name.style.minWidth = '0'; name.style.overflow = 'hidden';
+        name.style.textOverflow = 'ellipsis'; name.style.whiteSpace = 'nowrap';
+        name.textContent = r.rel || r.name;
+        name.title = r.rel || r.name;
+        const detail = document.createElement('span');
+        detail.style.cssText = 'color:var(--dim);font-size:11.5px;flex:none;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        detail.textContent = importDetail(r);
+        const badge = document.createElement('span');
+        const style = IMPORT_BADGE[r.status] || IMPORT_BADGE.skipped;
+        badge.textContent = style.label();
+        badge.style.cssText = 'font-size:11px;flex:none;padding:1px 8px;border-radius:99px;border:1px solid ' +
+          style.color + ';color:' + style.color;
+        row.append(name, detail, badge); grp.appendChild(row);
+      }
+    }
+
+    $('btn-import-browse').onclick = async () => {
+      const dir = await window.engram.pickFolder();
+      if (!dir) return;
+      $('import-folder').value = dir;
+      await saveFolderImport();
+    };
+    $('import-enabled').onchange = saveFolderImport;
+    $('import-mode').onchange = saveFolderImport;
+    $('import-publish').onchange = saveFolderImport;
+    $('import-folder').onchange = saveFolderImport;
+    $('btn-import-scan').onclick = async () => {
+      await window.engram.folderImportScan();
+      showImportHint(t.importScanQueued);
+      // 스캔은 백엔드가 비동기로 돈다 — 잠깐 뒤 한 번 더 읽어 결과를 반영한다.
+      setTimeout(() => { loadImportStatus(); }, 4000);
+    };
+
     // ---- MCP: 서버 목록(name/command/args) + 추가/삭제. mcp.json 포맷(Claude Code와 동일) ----
     let mcpServers = [];
 
@@ -1650,6 +1844,7 @@
     loadSchedules();
     loadChatRetention();
     loadWikiRemote();
+    loadFolderImport();
     loadMcpServers();
     loadMcpWriteMode();
     renderMcpExpose();
