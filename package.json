@@ -92,7 +92,10 @@
         "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
         "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
       ]
-    }
+    },
+    "asarUnpack": [
+      "node_modules/unpdf/**"
+    ]
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
