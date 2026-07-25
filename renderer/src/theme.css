@@ -244,7 +244,8 @@ details.thread .msg { max-width:100%; }
 #clearToast .undo { color:var(--accent); font-weight:700; cursor:pointer; }
 /* Task 4(chat-attachments, 목업 A) — 클립 버튼·전송 전 칩 줄·메시지 안 썸네일/파일 칩.
    기존 토큰(--panel-2/--line/--accent/--danger/--dim/--hover)만 사용, 신규 토큰 없음. */
-.attachBtn { flex:none; width:38px; height:38px; padding:0; border-radius:9px; font-size:15px;
+/* 2줄 개편 — 도구 줄의 아이콘 버튼(＋·🎤)은 배지와 같은 28px 라인에 맞춘다. */
+.attachBtn { flex:none; width:28px; height:28px; padding:0; border-radius:8px; font-size:14px; line-height:1;
              background:transparent; border:1px solid var(--line); color:var(--dim); }
 .attachBtn:hover { background:var(--hover); color:var(--text); }
 .pendingChips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:0 16px 8px; }
@@ -265,7 +266,15 @@ details.thread .msg { max-width:100%; }
 .attachChip.file:hover { background:var(--hover); }
 .attachChip.file .meta { color:var(--dim); font-size:11px; }
 .attachChip.loading { opacity:.6; cursor:default; }
-#inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+/* 입력바 2줄 개편(목업 승인 2026-07-25) — 1행 입력(+↵ 힌트) / 2행 도구 줄. 색은 전부 QL 토큰만. */
+#inputbar { display:flex; flex-direction:column; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+#inputbar .composerRow { display:flex; align-items:flex-end; gap:8px; }
+#inputbar .composerTools { align-items:center; justify-content:space-between; gap:8px; }
+.composerLeft, .composerRight { display:flex; align-items:center; gap:6px; min-width:0; }
+.composerLeft { flex:1; min-width:0; }
+/* 1행 우측 끝 ↵ 힌트 — 옅게, 클릭 대상 아님. */
+.enterHint { flex:none; align-self:flex-end; padding-bottom:11px; font-size:12px; color:var(--faint);
+             user-select:none; pointer-events:none; }
 /* T2 리뷰 픽스 — 스펙 형태 스케일(입력·버튼 9px, 배지·필은 fully-rounded 유지 — '7px'는 스펙 오탈자로 정정됨). */
 input[type=text], input[type=password] { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:9px;
                    padding:10px 12px; color:var(--text); outline:none; }
@@ -284,15 +293,19 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
 .stopBtn { background:transparent; border:1px solid var(--danger); color:var(--danger); }
 .stopBtn:disabled { opacity:.5; cursor:default; }
 
-/* Phase 12 — Engram 선택기(입력바 오른쪽, 보내기 옆) */
+/* 2줄 개편 — 도구 줄의 보내기/중지 버튼도 배지 라인(28px)에 맞춘다. */
+#inputbar .composerTools button:not(.attachBtn):not(.micBtn):not(.cbadge) {
+  height:28px; font-size:12.5px; padding:0 14px; }
+
+/* Phase 12 — Engram 선택기(입력바 2행 오른쪽) */
 #engramSelector { position:relative; flex:none; }
 #engramSelector .chip { display:flex; align-items:center; gap:6px; background:var(--panel);
                         border:1px solid var(--line); color:var(--text); font-weight:500;
-                        font-size:12.5px; padding:0 12px; height:38px; border-radius:8px; }
+                        font-size:12.5px; padding:0 10px; height:28px; border-radius:8px; }
 #engramSelector .chip:hover { background:var(--hover); }
 #engramSelector .dot { width:7px; height:7px; border-radius:50%; background:#f26d6d; flex:none; }
 #engramSelector .dot.on { background:#56d364; }
-#engramMenu { position:absolute; bottom:46px; right:0; min-width:200px; background:var(--panel);
+#engramMenu { position:absolute; bottom:34px; right:0; min-width:200px; background:var(--panel);
               border:1px solid var(--line); border-radius:8px; padding:4px; z-index:10;
               box-shadow:0 8px 24px rgba(0,0,0,.4); }
 #engramMenu .item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px;
@@ -303,6 +316,54 @@ button { background:var(--accent); border:0; border-radius:9px; padding:0 16px; 
 #engramMenu .item .check { color:var(--accent); }
 #engramMenu .sep { height:1px; background:var(--line); margin:4px 2px; }
 #engramMenu .item.manage { color:var(--accent); }
+
+/* 입력바 2행 배지(응답 모드·모델·노력) — EngramSelector 칩과 같은 형태 스케일(28px, radius 8px).
+   토큰만 사용해 라이트/다크가 자동으로 따라온다. */
+.cbadgeWrap { position:relative; flex:none; }
+.cbadge { display:flex; align-items:center; gap:5px; height:28px; padding:0 10px; border-radius:8px;
+          background:transparent; border:1px solid var(--line); color:var(--dim);
+          font-size:12.5px; font-weight:500; white-space:nowrap; max-width:180px; overflow:hidden;
+          text-overflow:ellipsis; }
+.cbadge:hover { background:var(--hover); color:var(--text); }
+.cbadgeMenu { position:absolute; bottom:34px; left:0; min-width:190px; background:var(--panel);
+              border:1px solid var(--line); border-radius:8px; padding:4px; z-index:10;
+              box-shadow:0 8px 24px rgba(0,0,0,.28); }
+.composerRight .cbadgeMenu { left:auto; right:0; }
+.cbadgeMenu .item { padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px; color:var(--text);
+                    white-space:nowrap; }
+.cbadgeMenu .item:hover { background:var(--hover); }
+.cbadgeMenu .item.sel { background:var(--accent-soft); font-weight:600; }
+/* 노력 슬라이더 팝오버 — 좌 "더 빠르게" ↔ 우 "더 스마트하게" 5단계. */
+.cbadgeMenu.effortPop { min-width:240px; padding:10px 12px 8px; }
+.effortEnds { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-bottom:6px; }
+.effortSlider { width:100%; accent-color:var(--accent); margin:0; }
+.effortNow { margin-top:6px; text-align:center; font-size:12.5px; font-weight:600; color:var(--text); }
+
+/* 음성 입력 버튼(＋ 옆) — 녹음 중엔 danger 톤으로 상태를 분명히 보여준다. */
+.micBtn { flex:none; width:28px; height:28px; padding:0; border-radius:8px; font-size:13px; line-height:1;
+          background:transparent; border:1px solid var(--line); color:var(--dim); }
+.micBtn:hover:not(:disabled) { background:var(--hover); color:var(--text); }
+.micBtn:disabled { opacity:.55; cursor:default; }
+.micBtn.recording { border-color:var(--danger); color:var(--danger); background:transparent; }
+.micNotice { font-size:11.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.micNotice.error { color:var(--danger); cursor:pointer; }
+
+/* 코드 채널 상단 줄(B안) — 입력바 바로 위. `⑂ main  +1741  −16   [PR 생성]` */
+.gitBranchBar { display:flex; align-items:center; gap:10px; padding:6px 16px 0; font-size:12px;
+                color:var(--dim); min-width:0; }
+.gitBranchBar .gitBranch { font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis;
+                           white-space:nowrap; max-width:280px; }
+.gitBranchBar .gitAdded { color:var(--ok); }
+.gitBranchBar .gitRemoved { color:var(--danger); }
+.gitBranchBar .gitNotice { color:var(--dim); }
+.gitBranchBar .gitPrError { color:var(--danger); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gitBranchBar .gitPrResult { display:flex; align-items:center; gap:8px; }
+.gitBranchBar .gitPrResult a { color:var(--accent); font-weight:600; }
+.gitBranchBar .prBtn { margin-left:auto; flex:none; height:24px; padding:0 10px; font-size:11.5px;
+                       background:transparent; border:1px solid var(--accent); color:var(--accent);
+                       border-radius:7px; font-weight:600; }
+.gitBranchBar .prBtn:hover:not(:disabled) { background:var(--accent); color:var(--accent-text); }
+.gitBranchBar .prBtn:disabled { opacity:.55; cursor:default; }
 
 /* Manage Engrams 모달 */
 #manageOverlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex;

@@ -221,7 +221,8 @@ it('업로드 실패 칩이 있으면 Send가 비활성화되고, 제거하면 �
   fireEvent.paste(input, { clipboardData: { files: [file] } });
   await waitFor(() => expect(document.querySelector('.attachChip.error')).toBeInTheDocument());
 
-  const sendBtn = document.querySelector('#inputbar > button:not(.attachBtn)') as HTMLButtonElement;
+  // 입력바 2줄 개편(2026-07-25) — 보내기 버튼은 이제 2행(.composerRight)의 마지막 자식이다.
+  const sendBtn = document.querySelector('#inputbar .composerRight > button:last-child') as HTMLButtonElement;
   fireEvent.change(input, { target: { value: 'hello' } }); // 텍스트가 있어도 실패 칩이면 막힘
   expect(sendBtn.disabled).toBe(true);
   expect(screen.getByText(/제거하거나 다시 시도|remove it or retry/)).toBeInTheDocument();

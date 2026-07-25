@@ -1,3 +1,4 @@
+import type { EffortLevel } from '../../shared/protocol';
 import { ko } from './config';
 
 // "기본"/"Default" 기본 문구 — default(엔그램 선택기)·brainDefault(채널 두뇌 드롭다운)가 공유(중복 방지, 리뷰 지적).
@@ -189,4 +190,54 @@ export const T = {
   // 자동 업데이트 배너(사용자 요청 2026-07-24) — 새 버전 다운로드 완료 시 상단 배너.
   updateReady: (v: string) => (ko ? `새 버전 v${v} 준비됨` : `New version v${v} is ready`),
   updateRestart: ko ? '재시작해서 업데이트' : 'Restart to update',
+
+  // ─── 입력바 2줄 개편(목업 승인 2026-07-25) ───────────────────────────────────
+  // 1행 우측 힌트(↵)의 툴팁 — 글리프 자체는 로케일 무관.
+  enterHint: ko ? 'Enter로 전송 · Shift+Enter로 줄바꿈' : 'Enter to send · Shift+Enter for a new line',
+  // 응답 모드 배지(자동 ▾) — 기존 채널 ⋯메뉴의 modeAll/modeMention 전환을 배지로 노출한다.
+  respondModeTitle: ko ? '응답 모드' : 'Respond mode',
+  respondAuto: ko ? '자동' : 'Auto',
+  respondMention: ko ? '@멘션' : '@Mention',
+  // 노력(effort) 배지 — 코드 채널 전용. 라벨은 5단계, 미설정이면 서버 기본값 high로 보인다.
+  effortTitle: ko ? '노력' : 'Effort',
+  effortLevel: (l: EffortLevel) => ({
+    low: ko ? '낮음' : 'Low',
+    medium: ko ? '보통' : 'Medium',
+    high: ko ? '높음' : 'High',
+    xhigh: ko ? '매우 높음' : 'Very high',
+    max: ko ? '최대' : 'Max',
+  }[l]),
+  effortFaster: ko ? '더 빠르게' : 'Faster',
+  effortSmarter: ko ? '더 스마트하게' : 'Smarter',
+  // ─── 코드 채널 상단 줄(⑂ 브랜치 +추가 −삭제 [PR 생성]) ──────────────────────
+  gitBranchTitle: ko ? '현재 브랜치' : 'Current branch',
+  gitDetached: ko ? '분리된 HEAD' : 'Detached HEAD',
+  gitAddedTitle: ko ? '추가된 줄' : 'Lines added',
+  gitRemovedTitle: ko ? '삭제된 줄' : 'Lines removed',
+  prCreate: ko ? 'PR 생성' : 'Create PR',
+  prCreating: ko ? 'PR 만드는 중…' : 'Creating PR…',
+  // ⚠️ 확인 문구 — 이 버튼은 push+PR을 즉시 실행한다(되돌리기 어려움).
+  prConfirm: (branch: string) => (ko
+    ? `브랜치 '${branch}'를 푸시하고 PR을 만듭니다. 계속할까요?`
+    : `Push branch '${branch}' and open a pull request?`),
+  prOpen: ko ? 'PR 열기' : 'Open PR',
+  prAlreadyExists: ko ? '이미 PR이 있어요' : 'A pull request already exists',
+  prErrGhMissing: ko ? 'GitHub CLI(gh)가 없어요 — 설치한 뒤 다시 시도하세요' : 'GitHub CLI (gh) is not installed — install it and try again',
+  prErrGhAuth: ko ? 'gh 로그인이 필요해요 — 터미널에서 `gh auth login`' : 'Sign in to gh first — run `gh auth login` in a terminal',
+  prErrNoRemote: ko ? '원격 저장소(origin)가 없어요' : 'This repository has no origin remote',
+  prErrDefaultBranch: ko ? '기본 브랜치에서는 PR을 만들 수 없어요 — 새 브랜치를 만드세요' : "Can't open a PR from the default branch — create a branch first",
+  prErrDetached: ko ? '분리된 HEAD 상태예요 — 브랜치를 체크아웃하세요' : 'HEAD is detached — check out a branch first',
+  prErrPushFailed: ko ? '푸시에 실패했어요' : 'Push failed',
+  prErrPrFailed: ko ? 'PR을 만들지 못했어요' : 'Could not create the pull request',
+  prErrGeneric: ko ? 'PR을 만들지 못했어요' : 'Could not create the pull request',
+  // ─── 음성 입력(마이크) ──────────────────────────────────────────────────────
+  micTitle: ko ? '음성 입력' : 'Voice input',
+  micStop: ko ? '녹음 중 — 클릭하면 중지' : 'Recording — click to stop',
+  micDownloading: (p: number) => (ko ? `음성 모델 내려받는 중 ${p}%` : `Downloading voice model ${p}%`),
+  micTranscribing: ko ? '받아쓰는 중…' : 'Transcribing…',
+  micDenied: ko ? '마이크 권한이 없어요 — 시스템 설정에서 허용해 주세요' : 'Microphone permission denied — allow it in system settings',
+  micUnavailable: ko ? '이 환경에서는 마이크를 쓸 수 없어요' : 'The microphone is not available in this environment',
+  micModelFailed: ko ? '음성 모델을 준비하지 못했어요' : "Couldn't prepare the voice model",
+  micFailed: ko ? '받아쓰기에 실패했어요' : 'Transcription failed',
+  micEmpty: ko ? '들린 말이 없어요' : 'No speech detected',
 };

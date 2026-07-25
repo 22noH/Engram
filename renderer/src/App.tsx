@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Channel, ClientFrame, Message as Msg, RosterEntry, ServerFrame, UserDto } from '../../shared/protocol';
-import { loadConnections, saveConnections, setDefault, addConnection, removeConnection } from './connections';
+import { loadConnections, saveConnections, setDefault, addConnection, removeConnection, isLocalEndpoint } from './connections';
 import { useConnections } from './ws/connections-client';
 import { routeTarget, logicalChannels, mergeThreads, scopedConnections, scopedChannels } from './multi';
 import { loadSessions, saveSessionFor, clearSessionFor } from './sessions';
@@ -13,6 +13,9 @@ import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_I
 import { FolderEmpty } from './components/FolderEmpty';
 import { CodePanel, CodePanelIcons, loadCodeTab, saveCodeTab, type CodeTab } from './components/CodePanel';
 import { EngramSelector } from './components/EngramSelector';
+import { RespondModeBadge, ModelBadge, EffortBadge } from './components/ComposerBadges';
+import { MicButton } from './components/MicButton';
+import { GitBranchBar } from './components/GitBranchBar';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
 import { WikiArea } from './components/WikiArea';
@@ -424,8 +427,16 @@ export default function App() {
       ...(any?.creatorId ? { creatorId: any.creatorId } : {}),
       ...(any?.visibility ? { visibility: any.visibility } : {}),
       ...(any?.brain ? { brain: any.brain } : {}),
+      // 입력바 노력 배지가 현재 값을 읽는 자리(코드 채널만 의미 있음 — 미설정이면 서버 기본 high).
+      ...(any?.effort ? { effort: any.effort } : {}),
     };
   });
+  // 입력바 2행 배지(응답 모드·모델·노력)가 읽는 현재 논리 채널. 사이드바와 같은 합성값을 쓴다
+  // (여러 연결에 동명 채널이 있어도 기본 연결 것을 우선, 없으면 아무 연결 것).
+  const curChan = currentName ? sidebarChannels.find((c) => c.name === currentName) : undefined;
+  // 원격 연결이면 모델·노력 배지를 숨긴다(사용자 명시 요구: 원격은 그 서버 설정을 그대로 따른다).
+  // 연결 배지(EngramSelector)는 원격에서도 그대로 보인다.
+  const isLocalConn = isLocalEndpoint(connState.connections.find((c) => c.id === connState.defaultConnId)?.endpoint);
   // Code 영역(헤더/폴더 empty state)은 간단화: 기본 Engram의 그 채널 기준.
   const defaultChan = currentName
     ? channelsByConn[connState.defaultConnId]?.find((c) => c.name === currentName && (c.mode ?? 'chat') === mode)
@@ -724,6 +735,16 @@ export default function App() {
   };
   const mentionNames = connState.connections.map((c) => c.name);
 
+  // 음성 입력 결과를 입력창에 "삽입"한다(전송은 하지 않는다 — 사용자가 읽고 고칠 수 있게).
+  // 기존 내용이 있으면 공백 하나로 이어붙인다. pickMention과 같은 방식(비제어 textarea + 미러 상태).
+  const insertIntoInput = (text: string) => {
+    const i = document.getElementById('input') as HTMLTextAreaElement | null;
+    if (!i) return;
+    const cur = i.value;
+    const next = cur.trim() ? `${cur.replace(/\s+$/, '')} ${text}` : text;
+    i.value = next; i.focus(); setInputText(next); autosizeTextarea(i);
+  };
+
   // Phase 16a — 로그인 게이트. 기본 연결(defaultConnId)에 저장 세션이 없으면 그 연결의
   // /auth/status를 물어 게이트 표시 여부를 정한다(null=무인증 서버·brain → 게이트 없음).
   // 배포 형태 분리(2026-07-19 설계 §2.2) — localFree(계정 0개+루프백)도 같은 결로 게이트 생략.
@@ -973,13 +994,19 @@ export default function App() {
                     : hasErrorAttachment && <span className="attachNotice">{T.attachHasError}</span>}
                 </div>
               )}
+              {/* 코드 채널 상단 줄(B안, 목업 승인) — 입력바 바로 위 별도 줄. 데스크톱+repoPath일 때만.
+                  refreshKey=메시지 수: 두뇌가 답(=커밋/수정)을 낼 때마다 다시 읽는다(폴링 없음). */}
+              {mode === 'code' && defaultChan?.repoPath && window.engramDesktop?.gitBranchStatus && (
+                <GitBranchBar repoPath={defaultChan.repoPath} refreshKey={mergedMsgs.length} />
+              )}
               <div id="inputbar" style={currentName ? undefined : { display: 'none' }}
                 onDragOver={(e) => { e.preventDefault(); }}
                 onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer?.files); }}>
                 <input ref={fileInputRef} type="file" multiple hidden
                   onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-                <button type="button" className="attachBtn" title={T.attachTitle}
-                  onClick={() => fileInputRef.current?.click()}>📎</button>
+                {/* 입력바 2줄 개편(목업 승인 2026-07-25) — 1행: 입력+↵ 힌트 / 2행: 도구 줄.
+                    기존 입력 동작(오토사이즈·Enter 전송·Shift+Enter·IME 가드·팔레트/멘션)은 전부 그대로다. */}
+                <div className="composerRow">
                 {/* Task 4(여러 줄 입력+생성 중지, 목업 승인) — input→textarea. rows=1 시작, onChange마다
                     autosizeTextarea로 scrollHeight까지 키우고(최대 ~6줄은 theme.css max-height가 clamp).
                     Enter(시프트 없음·팔레트/멘션 닫힘)=전송, Shift+Enter=줄바꿈(네이티브 기본 동작에 기대지
@@ -1051,31 +1078,61 @@ export default function App() {
                       if (sent) clearComposerAttachments();
                     }
                   }} />
-                <EngramSelector
-                  connections={connState.connections}
-                  defaultConnId={connState.defaultConnId}
-                  statusById={statusById}
-                  onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
-                  onManage={() => setShowManage(true)}
-                />
-                {currentName && awaiting.has(currentName) ? (
-                  // Task 4(여러 줄 입력+생성 중지) — 대기 중엔 보내기 대신 ■ 중지(danger 아웃라인). 클릭
-                  // 즉시 잠가(stopping) 중복 stopGeneration 프레임을 막고, 중단 안내(또는 정상 답) 도착 시
-                  // awaiting이 풀리며 자동으로 보내기 버튼으로 되돌아간다(별도 원복 로직 불필요).
-                  <button type="button" className="stopBtn" disabled={stopping.has(currentName)} onClick={stopCurrent}>
-                    ■ {T.stopGen}
-                  </button>
-                ) : (
-                  <button
-                    disabled={attachmentsUploading || hasErrorAttachment || (!inputText.trim() && pendingAttachments.length === 0)}
-                    onClick={() => {
-                      const i = document.getElementById('input') as HTMLTextAreaElement;
-                      const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
-                      const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
-                      autosizeTextarea(i);
-                      if (sent) clearComposerAttachments();
-                    }}>{T.send}</button>
-                )}
+                <span className="enterHint" title={T.enterHint} aria-hidden="true">↵</span>
+                </div>
+                <div className="composerRow composerTools">
+                  <div className="composerLeft">
+                    {/* 응답 모드 — 기존 채널 ⋯메뉴의 setRespondMode를 배지로 노출(같은 프레임·같은 팬아웃). */}
+                    <RespondModeBadge
+                      mode={curChan?.respondMode ?? 'all'}
+                      onChange={(m) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setRespondMode', id, mode: m })); }}
+                    />
+                    <button type="button" className="attachBtn" title={T.attachTitle}
+                      onClick={() => fileInputRef.current?.click()}>＋</button>
+                    <MicButton onText={insertIntoInput} />
+                  </div>
+                  <div className="composerRight">
+                    <EngramSelector
+                      connections={connState.connections}
+                      defaultConnId={connState.defaultConnId}
+                      statusById={statusById}
+                      onSetDefault={(id) => setConnState((s) => setDefault(s, id))}
+                      onManage={() => setShowManage(true)}
+                    />
+                    {/* 모델(채널 두뇌) — 로컬 연결에서만. 원격은 그 서버가 정한 모델을 따른다. */}
+                    {isLocalConn && (
+                      <ModelBadge
+                        brain={curChan?.brain} brainNames={brainNames} defaultBrain={defaultBrain}
+                        onChange={(brain) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setChannelBrain', id, brain })); }}
+                      />
+                    )}
+                    {/* 노력 — 코드 채널 + 로컬 연결에서만(Chat·Team은 서버가 high로 고정, 원격은 서버 설정). */}
+                    {isLocalConn && mode === 'code' && (
+                      <EffortBadge
+                        effort={curChan?.effort ?? 'high'}
+                        onChange={(effort) => { if (currentName) fanoutToName(currentName, (id) => ({ t: 'setChannelEffort', id, effort })); }}
+                      />
+                    )}
+                    {currentName && awaiting.has(currentName) ? (
+                      // Task 4(여러 줄 입력+생성 중지) — 대기 중엔 보내기 대신 ■ 중지(danger 아웃라인). 클릭
+                      // 즉시 잠가(stopping) 중복 stopGeneration 프레임을 막고, 중단 안내(또는 정상 답) 도착 시
+                      // awaiting이 풀리며 자동으로 보내기 버튼으로 되돌아간다(별도 원복 로직 불필요).
+                      <button type="button" className="stopBtn" disabled={stopping.has(currentName)} onClick={stopCurrent}>
+                        ■ {T.stopGen}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={attachmentsUploading || hasErrorAttachment || (!inputText.trim() && pendingAttachments.length === 0)}
+                        onClick={() => {
+                          const i = document.getElementById('input') as HTMLTextAreaElement;
+                          const ids = doneAttachmentIds.length ? doneAttachmentIds : undefined;
+                          const sent = sendText(i.value, undefined, undefined, ids); i.value = ''; setInputText('');
+                          autosizeTextarea(i);
+                          if (sent) clearComposerAttachments();
+                        }}>{T.send}</button>
+                    )}
+                  </div>
+                </div>
               </div>
                 </>
                 );
