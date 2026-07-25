@@ -217,4 +217,22 @@ describe('CodingSpecialist', () => {
       expect(seen).toEqual([undefined, undefined]); // 어느 게이트에도 모드가 안 붙는다
     });
   });
+
+  // 실사용 발견(2026-07-25): 코딩 티켓이 실패해도 로그·화면에 "호출 실패"만 남고 사유(r.raw)가
+  // 통째로 버려져 진단이 불가능했다. 사유가 있으면 반드시 실려야 한다.
+  describe('실패 사유 표면화', () => {
+    const tk = { id: 'tk1', area: 'src/a', instruction: 'i', status: 'PENDING' } as any;
+
+    it('두뇌가 사유(raw)를 주면 에러 메시지에 실린다', async () => {
+      const brain = { complete: () => Promise.resolve({ text: '', costUsd: 0, isError: true, raw: 'Not logged in · Please run /login' }) };
+      const spec = new CodingSpecialist(registry, fence, () => brain as any, logger);
+      await expect(spec.work('Dev', tk, project)).rejects.toThrow(/login/i);
+    });
+
+    it('사유가 없으면 기존 문구 그대로(회귀 0)', async () => {
+      const brain = { complete: () => Promise.resolve({ text: '', costUsd: 0, isError: true }) };
+      const spec = new CodingSpecialist(registry, fence, () => brain as any, logger);
+      await expect(spec.work('Dev', tk, project)).rejects.toThrow(/^코딩 두뇌 호출 실패: Dev\/tk1$/);
+    });
+  });
 });

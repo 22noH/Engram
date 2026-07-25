@@ -7,6 +7,7 @@ import { CodingTicket } from '../knowledge-core/task-store';
 import { ProjectConfig } from '../knowledge-core/project-store';
 import { loadPrompt } from './prompt-store';
 import { outputDirective } from './language';
+import { brainErrorHint } from './brain-error-hints';
 import type { PermMode } from '../../shared/protocol';
 
 // prompts/coding-rules.md 없을 때의 내장 기본값(out-of-box 동작 보장).
@@ -67,7 +68,16 @@ export class CodingSpecialist {
       // 아예 안 붙고, auto/allowlist(restricted)는 assertCommandAllowed가 판정한다.
       ...(this.fence.shellEnabled(permMode) ? { cmdGuard: (cmd: string) => this.fence.assertCommandAllowed(cmd, permMode) } : {}),
     });
-    if (r.isError) throw new Error(`코딩 두뇌 호출 실패: ${personaName}/${ticket.id}`);
+    // 실패 사유를 버리지 않는다(실사용 발견 2026-07-25): 예전엔 이 자리에서 "호출 실패"만 던져
+    // r.raw(CLI가 실제로 뱉은 사유 — 미로그인·사용량 한도·인수 오류 등)가 통째로 사라졌다.
+    // 그 결과 티켓이 실패해도 로그·화면 어디에도 왜인지가 없어 진단이 불가능했다.
+    // 채팅 경로가 이미 쓰는 brainErrorHint와 같은 결로, 사유가 있으면 붙여서 올린다.
+    if (r.isError) {
+      // raw가 없을 때만 기존 문구 그대로(회귀 0) — brainErrorHint는 빈 입력에도 일반 문구를 돌려주므로
+      // 그대로 붙이면 사유가 없는데 있는 것처럼 보인다.
+      const why = r.raw == null || r.raw === '' ? '' : brainErrorHint(r.raw);
+      throw new Error(`코딩 두뇌 호출 실패: ${personaName}/${ticket.id}${why ? ` — ${why}` : ''}`);
+    }
     return r.text;
   }
 }
