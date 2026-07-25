@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { RagStore, withLanceRetry, withBootRetry, isLanceRetryable } from './rag-store';
+import { RagStore, withLanceRetry, withBootRetry, isLanceRetryable, isLanceNativePanic, FTS_REBUILD_LIMIT } from './rag-store';
 import { FakeEmbedder } from './fake-embedder';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { IndexablePage } from './rag.types';
@@ -48,6 +48,19 @@ describe('isLanceRetryable', () => {
   });
   it('무관한 에러는 retryable이 아니다', () => {
     expect(isLanceRetryable(new Error('ENOENT: no such file or directory'))).toBe(false);
+  });
+});
+
+// 계측 보강(2026-07-25): 네이티브 패닉은 JS에 `Panic in async function` 한 줄로만 도달한다.
+// 그 시그니처를 분류할 수 있어야 로그에 "네이티브 패닉"이라고 못박아 다음 사고를 즉시 알아본다.
+describe('isLanceNativePanic', () => {
+  it('napi가 넘겨주는 패닉 메시지를 네이티브 패닉으로 분류한다', () => {
+    expect(isLanceNativePanic(new Error('Error: Panic in async function'))).toBe(true);
+    expect(isLanceNativePanic("thread 'tokio-rt-worker' panicked at builder.rs:856:57")).toBe(true);
+  });
+  it('일반 에러는 네이티브 패닉이 아니다', () => {
+    expect(isLanceNativePanic(new Error('Retryable commit conflict. Please retry.'))).toBe(false);
+    expect(isLanceNativePanic(new Error('ENOENT: no such file'))).toBe(false);
   });
 });
 
@@ -325,6 +338,115 @@ describe('RagStore.quarantineAndReinit (부트 자가치유)', () => {
     await store.indexPage(page('recovered', '재시도 끝에 복구'));
     const results = await store.search('재시도 끝에 복구', 50);
     expect(results.map((r) => r.slug)).toContain('recovered');
+  });
+});
+
+// ★2026-07-25 실사고(프로젝트 최대 미제 "크래시 폭주"의 진범): LanceDB 0.30(lance-index 7.0.0)의
+// FTS(inverted) 인덱스 빌더가 `index out of bounds` 로 네이티브 패닉했다. 실측한 도달 경로는
+// "tokio 워커 패닉 → napi가 일반 rejected promise로 변환 → `Error: Panic in async function` 한 줄"이며,
+// 프로세스는 죽지 않고(사용자 로그: 패닉 수십 회를 안고 9.5시간 생존) uncaughtException/unhandledRejection
+// 에도 안 걸린다. 진짜 피해는 (1) 우리가 그 메시지를 retryable로 분류해 매 쓰기마다 3회 재시도했고
+// (실측: 재시도는 100% 다시 패닉), (2) 인덱스 정비 실패가 indexPage 전체를 실패시켜 RAG 색인이
+// 통째로 멈춘 것이다(사용자 rag 폴더가 7/20 이후 갱신 정지). 아래 테스트가 그 seam을 못박는다.
+describe('RagStore — 네이티브 인덱스 패닉 격리(2026-07-25)', () => {
+  let dir: string;
+  let store: RagStore;
+  const logger = { warn: jest.fn(), log: jest.fn(), error: jest.fn(), debug: jest.fn(), verbose: jest.fn() };
+
+  // optimize/createIndex 시임(renameDir과 같은 관례) — 네이티브 패닉을 결정적으로 주입한다.
+  type Seam = { optimizeTable(): Promise<void>; createFtsIndex(replace?: boolean): Promise<void> };
+  const panic = (): never => { throw new Error('Error: Panic in async function'); };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-rag-panic-'));
+    store = new RagStore(new PathResolver(dir), new FakeEmbedder(), logger as never);
+    await store.init();
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('인덱스 정비(optimize)가 패닉해도 indexPage는 성공하고 색인된 내용은 검색된다(RAG만 디그레이드)', async () => {
+    const spy = jest.spyOn(store as unknown as Seam, 'optimizeTable').mockImplementation(panic);
+
+    // reindexAll은 끝에서 optimize를 강제한다 — 그 정비가 패닉해도 재색인은 성공으로 끝나야 한다.
+    await expect(store.reindexAll([page('panic-1', '패닉 중에도 저장돼야 하는 본문')])).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalled();
+
+    // 데이터 쓰기(delete/add)는 정비 이전에 이미 커밋됐다 — 검색으로 찾을 수 있어야 한다.
+    const hits = await store.search('패닉 중에도 저장돼야 하는 본문', 50);
+    expect(hits.map((h) => h.slug)).toContain('panic-1');
+    // 정비 실패는 예외가 아니라 경고 로그로만 표면화된다.
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('인덱스 정비'), 'RagStore');
+    spy.mockRestore();
+  });
+
+  it('정비 패닉을 재시도로 증폭하지 않는다 — 쓰기 1회당 optimize 호출도 1회뿐', async () => {
+    const spy = jest.spyOn(store as unknown as Seam, 'optimizeTable').mockImplementation(panic);
+    // 강제 정비(force) 경로를 태우기 위해 reindexAll 사용 — 끝에서 1회 optimize.
+    await store.reindexAll([page('r1', '본문 하나')]);
+    expect(spy).toHaveBeenCalledTimes(1); // withLanceRetry의 3회 재시도에 휘말리지 않는다
+    spy.mockRestore();
+  });
+
+  it('정비가 계속 패닉하면 상한 안에서 FTS 인덱스만 재생성하고, 상한을 넘으면 정비를 영구 중단한다(무한 루프 없음)', async () => {
+    const optSpy = jest.spyOn(store as unknown as Seam, 'optimizeTable').mockImplementation(panic);
+    const idxSpy = jest.spyOn(store as unknown as Seam, 'createFtsIndex').mockImplementation(panic);
+
+    // 정비 실패 3회마다 재생성(replace) 1회, 재생성 상한 2회 → 총 6회 실패 후 영구 디그레이드.
+    for (let i = 0; i < 20; i++) await store.reindexAll([page(`x${i}`, `본문 ${i}`)]);
+
+    // 재생성(replace: true) 호출은 상한(2회)을 넘지 않는다.
+    expect(idxSpy.mock.calls.filter((c) => c[0] === true)).toHaveLength(FTS_REBUILD_LIMIT);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('FTS'),
+      expect.anything(),
+      'RagStore',
+    );
+
+    // ★무한 루프 없음의 진짜 증거: 디그레이드 이후엔 네이티브 호출이 단 한 번도 늘지 않는다.
+    const idxCalls = idxSpy.mock.calls.length;
+    const optCalls = optSpy.mock.calls.length;
+    for (let i = 0; i < 20; i++) await store.reindexAll([page(`y${i}`, `본문 ${i}`)]);
+    expect(idxSpy.mock.calls.length).toBe(idxCalls);
+    expect(optSpy.mock.calls.length).toBe(optCalls);
+
+    // ★핵심: 그래도 색인·검색은 계속 동작한다(채팅·위키는 애초에 무관).
+    optSpy.mockRestore();
+    idxSpy.mockRestore();
+    await expect(store.indexPage(page('after-degrade', '디그레이드 후에도 저장'))).resolves.toBeUndefined();
+    const hits = await store.search('디그레이드 후에도 저장', 50);
+    expect(hits.map((h) => h.slug)).toContain('after-degrade');
+  });
+
+  it('FTS 인덱스가 아예 없어도 검색은 빈 배열이 아니라 벡터 단독 결과로 디그레이드한다', async () => {
+    // createIndex를 계속 실패시켜 FTS 인덱스가 한 번도 안 만들어진 상태를 만든다.
+    jest.spyOn(store as unknown as Seam, 'createFtsIndex').mockImplementation(panic);
+    jest.spyOn(store as unknown as Seam, 'optimizeTable').mockImplementation(panic);
+
+    await store.indexPage(page('vec-only', '벡터 단독 폴백 검증 본문'));
+
+    const hits = await store.search('벡터 단독 폴백 검증 본문', 50);
+    expect(hits.map((h) => h.slug)).toContain('vec-only'); // 검색 블랙아웃(빈 배열)이 아니다
+    expect(hits.every((h) => Number.isFinite(h.score))).toBe(true);
+  });
+
+  // 4번(부하 완화)의 근거 테스트: 쓰기마다 optimize()를 부르지 않아도 검색 누락이 없다.
+  // (실측 근거: LanceDB는 FTS 질의 시 아직 색인되지 않은 fragment도 함께 스캔한다.)
+  it('쓰기마다 optimize하지 않아도 방금 쓴 페이지가 즉시 검색된다(검색 누락 없음)', async () => {
+    const spy = jest.spyOn(store as unknown as Seam, 'optimizeTable');
+    await store.indexPage(page('fresh-a', '갓 쓴 문서 알파 고유단어끄트머리'));
+    await store.indexPage(page('fresh-b', '갓 쓴 문서 베타 고유단어끄트머리'));
+
+    // 이 시점까지 optimize는 한 번도 호출되지 않았다(주기 정비 임계값 미달).
+    expect(spy).not.toHaveBeenCalled();
+
+    const hits = await store.search('고유단어끄트머리', 50);
+    const slugs = hits.map((h) => h.slug);
+    expect(slugs).toContain('fresh-a');
+    expect(slugs).toContain('fresh-b');
+    spy.mockRestore();
   });
 });
 

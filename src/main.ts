@@ -109,6 +109,21 @@ process.on('uncaughtException', (err) => { logFatal('uncaughtException', err); p
 // 크래시-재시작 폭주의 진범이었다면, 로그를 남기면서 프로세스를 살려 폭주 자체를 끊는다(회복력 우선).
 process.on('unhandledRejection', (reason) => logFatal('unhandledRejection', reason));
 
+// ★2026-07-25 계측 보강: 위 두 훅이 0건이었던 이유가 밝혀졌다 — LanceDB의 네이티브(Rust) 패닉은
+// napi가 "그 호출을 await한 자리에서 reject되는 평범한 promise"로 바꿔주므로 애초에 프로세스 훅에
+// 걸리지 않는다(상세 패닉 텍스트만 stderr로 새어 나간다). 즉 네이티브 패닉은 프로세스를 죽이지
+// 않았고(사용자 로그: 패닉 수십 회를 안고 9.5시간 생존), code=1 종료는 아직 별개의 미제다.
+// 그래서 남은 종료 경로를 두 갈래로 갈라 잡는다:
+//  - exit: JS가 스스로 끝낸 종료(process.exit·이벤트루프 고갈). 여기에 한 줄이라도 남으면 원인이 JS다.
+//  - beforeExit: 상주 프로세스가 "할 일이 없어" 이벤트 루프가 비었다는 뜻 — 상주에선 일어나면 안 되는
+//    일이라, 찍히는 순간 그 자체가 진단이다(리슨 소켓·타이머가 사라졌다는 증거).
+// 다음 code=1에 이 둘 다 비어 있으면 JS 경로가 아니라는 게 확정된다(네이티브 abort·OOM·외부 kill).
+process.on('beforeExit', (code) => logFatal('beforeExit(이벤트 루프 고갈)', `code=${code} uptime=${Math.round(process.uptime())}s`));
+process.on('exit', (code) => {
+  const m = process.memoryUsage();
+  logFatal('exit', `code=${code} uptime=${Math.round(process.uptime())}s rss=${Math.round(m.rss / 1048576)}MB heapUsed=${Math.round(m.heapUsed / 1048576)}MB`);
+});
+
 /**
  * 폴더 자동 변환(감시 폴더 → 위키) 기동. 설정이 꺼져 있어도 워처는 띄운다 — 설정 파일을 지켜보다가
  * 사용자가 설정창에서 켜면 재시작 없이 바로 붙기 때문이다(꺼진 동안은 폴더를 열지 않는다).

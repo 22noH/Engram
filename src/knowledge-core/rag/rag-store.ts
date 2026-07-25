@@ -10,6 +10,28 @@ import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
 
 const TABLE = 'chunks';
 
+// ★2026-07-25 실사고(프로젝트 최대 미제 "백엔드 크래시/색인 정지"의 진범)
+// LanceDB 0.30(lance-index 7.0.0)의 FTS(inverted) 인덱스 빌더가 `index out of bounds`로 네이티브
+// 패닉했다(lance #7313 — TokenSet::remap이 next_id를 되돌리지 않아 디스크에 오염된 값이 남고,
+// 다음 세그먼트 병합에서 posting_lists 범위를 넘는다. lance-index 8.0.0 = @lancedb/lancedb 0.31.0에서
+// 수정 + 읽는 순간 자가 치유). 이 파일의 격리 코드는 그 업그레이드와 별개로 남는다 —
+// 네이티브 패닉이 다시 나더라도 RAG만 디그레이드되고 채팅·위키·코딩은 살아 있어야 하기 때문이다.
+//
+// 실측한 도달 경로(로컬 재현): tokio 워커 패닉 → napi가 일반 rejected promise로 변환 →
+// 호출한 자리에서 `Error: Panic in async function` 한 줄만 잡힌다(상세 패닉 텍스트는 stderr로만 간다).
+// 프로세스는 죽지 않고(사용자 로그: 패닉 수십 회를 안고 9.5시간 생존) uncaughtException /
+// unhandledRejection에도 안 걸린다 — main.ts 계측이 0건이었던 이유가 이것이다.
+//
+// 인덱스 정비(FTS 생성·optimize) 주기: 쓰기마다 optimize()를 부르던 걸 N회마다로 낮춘다.
+// 근거(실측): FTS 질의는 아직 색인되지 않은 fragment도 함께 스캔하므로 방금 쓴 문서가 즉시 검색된다
+// (rag-store.spec.ts "쓰기마다 optimize하지 않아도 …" 테스트가 이 근거를 못박는다). 부팅 시
+// reindexAll 끝에서 1회 강제 정비해 세션마다 최소 한 번은 통합되게 한다.
+const OPTIMIZE_EVERY_WRITES = 20;
+// 정비 연속 실패 임계 — 이만큼 실패하면 FTS 인덱스만 통째로 재생성해본다(스토어 격리가 아니다).
+const FTS_FAIL_THRESHOLD = 3;
+// 재생성 상한 — 무한 재생성 루프 방지. 넘으면 정비를 영구 중단하고 검색만 디그레이드한다.
+export const FTS_REBUILD_LIMIT = 2;
+
 // LanceDB는 다른 프로세스(앱 상주 vs 헤드리스 MCP가 같은 데이터 폴더 공유)와 커밋이 경합하면
 // "Retryable commit conflict … Please retry"를 던진다 — in-process 큐로는 못 막으므로 재시도가 정답.
 // (2026-07-19 실사고: 승인 중 CreateIndex 경합 → 제안 좀비화)
@@ -22,6 +44,16 @@ const LANCE_RETRYABLE = /retryable commit conflict|please retry|panic in async f
 export function isLanceRetryable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return LANCE_RETRYABLE.test(msg);
+}
+
+// 네이티브(Rust) 패닉이 napi를 거쳐 JS에 도달할 때의 유일한 표식. 상세 패닉 텍스트
+// (`thread 'tokio-rt-worker' panicked at …`)는 stderr로만 나가고 JS 쪽엔 이 한 줄만 온다 —
+// 그래서 로그에 "네이티브 패닉"이라고 못박아 둬야 다음에 같은 부류를 즉시 알아본다(계측 보강).
+const LANCE_NATIVE_PANIC = /panic in async function|panicked at/i;
+
+export function isLanceNativePanic(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return LANCE_NATIVE_PANIC.test(msg);
 }
 
 export async function withLanceRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 200): Promise<T> {
@@ -80,6 +112,11 @@ export class RagStore implements PageIndexer {
   // init()이 끝까지 성공해야 true — 부트 자가치유(근본픽스 2026-07-20)가 격리 후 재생성마저
   // 실패하면 false로 남아 모든 소비 메서드가 안전하게 no-op/빈 결과로 디그레이드한다(크래시 방지).
   private ready = false;
+  // 인덱스 정비 상태(2026-07-25 패닉 격리). 데이터 쓰기와 분리된 축이다 — 정비가 죽어도 색인·검색은 산다.
+  private writesSinceOptimize = 0;
+  private ftsFailures = 0; // 연속 실패 수(성공하면 0으로 복귀)
+  private ftsRebuilds = 0; // FTS 인덱스 재생성 시도 수(상한 FTS_REBUILD_LIMIT)
+  private ftsDegraded = false; // true면 정비를 아예 시도하지 않는다(검색은 계속 동작)
 
   constructor(
     private readonly paths: PathResolver,
@@ -89,6 +126,10 @@ export class RagStore implements PageIndexer {
 
   async init(): Promise<void> {
     this.ready = false;
+    // 주기 정비 카운터만 초기화한다. 재생성 상한(ftsRebuilds)·영구 디그레이드(ftsDegraded)는
+    // 일부러 초기화하지 않는다 — init()을 다시 타는 경로(quarantineAndReinit)로 상한이 리셋되면
+    // "재생성 → 실패 → 재init → 재생성 …" 루프가 살아나기 때문(무한 루프 방지가 우선).
+    this.writesSinceOptimize = 0;
     this.db = await lancedb.connect(this.paths.getRagDir());
     const names = await this.db.tableNames();
     if (names.includes(TABLE)) {
@@ -169,17 +210,88 @@ export class RagStore implements PageIndexer {
     ]);
   }
 
-  // 청크 색인 후 FTS 인덱스를 보장한다.
-  // - listIndices()로 실제 인덱스 존재를 확인 후 없으면 생성(idempotent).
-  // - 재오픈 경로에서도 ftsReady 가드 없이 항상 실행되므로 stale 인덱스 문제가 없다.
-  // - 빈 테이블엔 인덱스를 만들 수 없으므로 데이터가 있는 후(indexPage 내부)에서만 호출한다.
-  private async ensureFts(): Promise<void> {
+  // 네이티브 호출 시임(renameDir과 같은 관례) — 테스트가 spyOn으로 패닉을 결정적으로 주입한다.
+  // 이 두 메서드만이 lance의 인덱스 빌더(=2026-07-25 패닉의 진앙)를 건드리는 지점이다.
+  protected async createFtsIndex(replace = false): Promise<void> {
+    await this.table.createIndex('text', { config: lancedb.Index.fts(), replace });
+  }
+  protected async optimizeTable(): Promise<void> {
+    await this.table.optimize();
+  }
+
+  private async hasFtsIndex(): Promise<boolean> {
     const indices = await this.table.listIndices();
-    const hasFts = indices.some(
-      (idx) => idx.columns.includes('text'),
+    return indices.some((idx) => idx.columns.includes('text'));
+  }
+
+  // 인덱스 정비(FTS 생성 + 주기적 optimize). ★절대 호출자에게 예외를 전파하지 않는다★ —
+  // 여기가 2026-07-25 패닉이 indexPage 전체를 실패시켜 RAG 색인을 통째로 멈춰버린 seam이다.
+  // 데이터 쓰기(delete/add)는 이 호출 이전에 이미 커밋돼 있으므로, 정비 실패는 "검색 품질 저하"일
+  // 뿐 데이터 손실이 아니다. force=true면 주기와 무관하게 즉시 optimize(부팅 재색인 끝 등).
+  private async maintainIndex(force = false): Promise<void> {
+    if (this.ftsDegraded) return; // 상한 소진 — 더 시도하지 않는다(무한 루프 방지)
+    try {
+      if (!(await this.hasFtsIndex())) await this.createFtsIndex();
+      this.writesSinceOptimize++;
+      if (force || this.writesSinceOptimize >= OPTIMIZE_EVERY_WRITES) {
+        await this.optimizeTable();
+        this.writesSinceOptimize = 0;
+      }
+      this.ftsFailures = 0; // 한 번이라도 성공하면 연속 실패 카운터 복귀
+    } catch (err) {
+      await this.onMaintenanceFailure(err);
+    }
+  }
+
+  // 정비 실패 처리(상한 있는 자가치유). 연속 FTS_FAIL_THRESHOLD회 실패마다 FTS 인덱스"만" 통째로
+  // 재생성한다 — rag 폴더 전체 격리(quarantineAndReinit)를 쓰지 않는 이유는 실측 결과 이 패닉이
+  // 스토어를 손상시키지 않기 때문이다(행 수·스키마·검색 모두 정상, 재오픈도 정상). 전체 격리는
+  // 건강한 스토어를 오탐 폐기하고 전 코퍼스 재임베딩 비용을 무는 과잉 대응이다.
+  // 재생성도 FTS_REBUILD_LIMIT회까지만 — 넘으면 정비를 영구 중단(ftsDegraded)하고 검색은 계속한다.
+  private async onMaintenanceFailure(err: unknown): Promise<void> {
+    this.ftsFailures++;
+    const msg = err instanceof Error ? err.message : String(err);
+    // 네이티브 패닉은 JS에 `Panic in async function` 한 줄로만 온다 — 계측을 위해 그 사실을 명시한다.
+    const native = isLanceNativePanic(err) ? ' [네이티브 패닉 — 상세 스택은 stderr 참조]' : '';
+    this.logger?.warn(
+      `RAG 인덱스 정비 실패(${this.ftsFailures}회 연속, 색인 데이터는 이미 커밋됨)${native}: ${msg}`,
+      'RagStore',
     );
-    if (!hasFts) {
-      await this.table.createIndex('text', { config: lancedb.Index.fts() });
+    if (this.ftsFailures < FTS_FAIL_THRESHOLD) return;
+    if (this.ftsRebuilds >= FTS_REBUILD_LIMIT) {
+      this.ftsDegraded = true;
+      this.logger?.error(
+        `RAG FTS 인덱스 재생성 상한(${FTS_REBUILD_LIMIT}회) 소진 — 인덱스 정비를 중단한다. ` +
+          '검색은 벡터+미색인 스캔으로 계속 동작하고, 색인·채팅·위키·코딩은 영향 없다.',
+        msg,
+        'RagStore',
+      );
+      return;
+    }
+    this.ftsRebuilds++;
+    this.ftsFailures = 0;
+    try {
+      await this.createFtsIndex(true); // replace: 오염된 인덱스를 버리고 처음부터 다시 만든다
+      this.writesSinceOptimize = 0;
+      this.logger?.warn(
+        `RAG FTS 인덱스 재생성 성공(${this.ftsRebuilds}/${FTS_REBUILD_LIMIT}회차) — 정비 재개`,
+        'RagStore',
+      );
+    } catch (rebuildErr) {
+      const rmsg = rebuildErr instanceof Error ? rebuildErr.message : String(rebuildErr);
+      this.logger?.warn(
+        `RAG FTS 인덱스 재생성 실패(${this.ftsRebuilds}/${FTS_REBUILD_LIMIT}회차): ${rmsg}`,
+        'RagStore',
+      );
+      if (this.ftsRebuilds >= FTS_REBUILD_LIMIT) {
+        this.ftsDegraded = true;
+        this.logger?.error(
+          `RAG FTS 인덱스 재생성 상한(${FTS_REBUILD_LIMIT}회) 소진 — 인덱스 정비를 중단한다. ` +
+            '검색은 벡터+미색인 스캔으로 계속 동작하고, 색인·채팅·위키·코딩은 영향 없다.',
+          rmsg,
+          'RagStore',
+        );
+      }
     }
   }
 
@@ -191,12 +303,14 @@ export class RagStore implements PageIndexer {
       return;
     }
     const userId = page.userId ?? DEFAULT_USER;
-    // 본문 전체를 재시도 단위로 — delete/add/인덱스가 모두 멱등이라 통째 재실행이 안전하다.
-    return this.enqueue(() => withLanceRetry(async () => {
+    // 데이터 쓰기만 재시도 단위로 둔다(delete/add는 멱등이라 통째 재실행이 안전).
+    // 인덱스 정비는 이 단위 밖 — 정비 실패로 데이터 쓰기를 다시 돌리면(2026-07-25 이전 동작)
+    // 패닉 1건이 쓰기 3회로 증폭되고 색인 자체가 통째로 실패한다.
+    await this.enqueue(() => withLanceRetry(async () => {
       // 멱등: 같은 (userId, slug)의 기존 청크 제거 — userId 범위 한정으로 타 유저 데이터 보호.
       await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(page.slug)}`);
       const chunks = chunkBody(page.body);
-      if (chunks.length === 0) return;
+      if (chunks.length === 0) return false;
       const vectors = await this.embedder.embed(chunks);
       const now = new Date().toISOString();
       const rows = chunks.map((text, i) => ({
@@ -212,10 +326,11 @@ export class RagStore implements PageIndexer {
         updated: now,
       }));
       await this.table.add(rows);
-      await this.ensureFts();
-      // 쓰기마다 optimize()로 FTS 인덱스·tombstone 정비(정확성보단 성능, 누락 방지 목적).
-      await this.table.optimize();
-    }));
+      return true;
+    }).then(
+      // 정비는 쓰기 성공 후에만, 그리고 절대 throw하지 않는다(maintainIndex 내부에서 흡수).
+      (wrote) => (wrote ? this.maintainIndex() : undefined),
+    ));
   }
 
   async removePage(slug: string, userId: string = DEFAULT_USER): Promise<void> {
@@ -226,10 +341,11 @@ export class RagStore implements PageIndexer {
     await this.enqueue(() => withLanceRetry(async () => {
       // userId 범위 한정 삭제: 타 유저 동명 페이지를 건드리지 않는다.
       await this.table.delete(`userId = ${sql(userId)} AND slug = ${sql(slug)}`);
-      // 삭제 후 optimize: tombstone 정비. startup reindexAll이 페이지마다 호출하므로
-      // 코퍼스 수백+ 시 배치/주기 인덱스로 승격 여부를 측정 후 결정(현재 YAGNI).
-      await this.table.optimize();
-    }));
+    }).then(
+      // tombstone 정비도 주기 정비에 위임한다(즉시 optimize 불필요 — 삭제는 deletion vector로
+      // 질의 시점에 반영되므로 "지운 게 검색된다" 회귀가 없다. spec의 removePage 테스트가 근거).
+      () => this.maintainIndex(),
+    ));
   }
 
   // 페이지별 try/catch(리뷰 후속): 정상 부팅 경로(ok-path)에서 한 페이지가 파싱·임베딩 실패 등으로
@@ -253,27 +369,32 @@ export class RagStore implements PageIndexer {
         );
       }
     }
+    // 세션당 최소 1회 통합: 대량 쓰기 끝에서 한 번만 강제 정비한다(쓰기마다 부르지 않는 대신).
+    // 실패해도 maintainIndex가 흡수하므로 여기서 재색인이 실패로 뒤집히지 않는다.
+    await this.maintainIndex(true);
     this.logger?.log(`전체 재색인 완료(${ok}/${pages.length}건)`, 'RagStore');
   }
 
   async search(query: string, limit = 5, userId: string = DEFAULT_USER): Promise<SearchResult[]> {
     // 디그레이드 상태 — 빈 결과로 폴백(검색 UI가 "결과 없음"으로 안전 처리, 크래시 없음).
     if (!this.ready) return [];
-    // FTS 인덱스가 없으면(아직 indexPage가 한 번도 호출되지 않은 상태) 빈 결과 반환.
-    const indices = await this.table.listIndices();
-    if (!indices.some((idx) => idx.columns.includes('text'))) return [];
+    // FTS 인덱스 유무를 확인한다. 없으면(아직 한 번도 색인 전이거나, 인덱스 정비가 디그레이드된
+    // 상태) 예전처럼 빈 배열로 블랙아웃하지 않고 ★벡터 단독 검색으로 폴백★한다 —
+    // "RAG는 품질만 떨어지고 계속 동작한다"는 이 파일의 디그레이드 관례(2026-07-20)의 연장이다.
+    const hasFts = await this.hasFtsIndex();
     const [qvec] = await this.embedder.embed([query]);
     // userId WHERE 프리필터: 벡터+FTS 양쪽 leg에 격리 조건 적용(설계 §15).
     // select 없이 모든 필드를 반환 — _score(FTS)와 _distance(벡터) 모두 포함.
     // 0.30에서 select에 점수 필드를 빠뜨리면 deprecated 경고 발생하므로, select 자체를 생략한다.
-    const rows = (await this.table
+    const base = this.table
       .query()
       .where(`userId = ${sql(userId)}`) // 사용자 격리 프리필터
       .nearestTo(qvec)
-      .fullTextSearch(query)
-      .rerank(this.reranker)
-      .limit(limit)
-      .toArray()) as Array<Record<string, unknown>>;
+      .limit(limit);
+    const rows = (await (hasFts
+      ? base.fullTextSearch(query).rerank(this.reranker)
+      : base
+    ).toArray()) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       userId: String(r.userId),
       slug: String(r.slug),
