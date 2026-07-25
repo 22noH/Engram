@@ -9,6 +9,8 @@ import { askBrainDef, runAskBrain } from './brain-tools';
 import { askUserDef, runAskUser } from './ask-user-tool';
 import { CODING_TOOL_DEFS, executeCodingTool, MAX_CODING_ITERATIONS } from './coding-tools';
 import { BASH_TOOL_DEF, runShellTool } from './shell-tool';
+import { BROWSER_TOOL_DEFS, executeBrowserTool } from './browser-tools';
+import { isBrowserToolName } from '../../shared/browser-ops';
 import { McpSession, MCP_TOOL_PREFIX } from './mcp-client';
 import { loadMcpServers } from './mcp-config';
 
@@ -65,9 +67,14 @@ export class AnthropicApiBrain implements BrainProvider {
             ]
           : prompt,
       }];
-      const toolDefs: WebToolDef[] = coding
-        ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
-        : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : []), ...(opts?.askUser ? [askUserDef()] : [])];
+      // AI 웹 조작(2단계): browser 클로저가 주입된 턴에만 browser_* 도구를 붙인다(코딩·채팅 공통 —
+      // "만든 화면을 열어보는" 순환은 코딩 턴에서 가장 필요하다). 미주입이면 도구 목록 바이트 동일(회귀 0).
+      const toolDefs: WebToolDef[] = [
+        ...(coding
+          ? [...CODING_TOOL_DEFS, ...(opts!.cmdGuard ? [BASH_TOOL_DEF] : [])]
+          : [...WEB_TOOL_DEFS, ...(opts?.delegate ? [askBrainDef(opts.delegate.brains)] : []), ...(opts?.askUser ? [askUserDef()] : [])]),
+        ...(opts?.browser ? BROWSER_TOOL_DEFS : []),
+      ];
       // 8c-1: mcp.json 서버의 도구를 채팅·코딩 공통 toolDefs 끝에 병합(라우팅은 mcp__ 프리픽스 우선 판정).
       const mcpSessions: McpSession[] = [];
       const executor = (name: string, input: unknown): Promise<string> => {
@@ -75,6 +82,7 @@ export class AnthropicApiBrain implements BrainProvider {
           const s = mcpSessions.find((x) => x.owns(name));
           return s ? s.callTool(name, input) : Promise.resolve(`mcp error: unknown tool ${name}`);
         }
+        if (isBrowserToolName(name)) return executeBrowserTool(name, input, opts?.browser);
         return coding
           ? name === 'Bash'
             ? runShellTool(input, opts!.cwd!, opts!.cmdGuard!, ctrl.signal)

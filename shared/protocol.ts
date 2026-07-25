@@ -2,6 +2,8 @@
 // 인터페이스만(런타임 값 0) → 양쪽에서 `import type`로 참조, 컴파일 시 erase.
 // 현행 프레임을 명문화만 한다(신규 프레임 없음). Phase 11b에서 Message.actions 추가 예정.
 
+import type { BrowserOp } from './browser-ops';
+
 export interface Action {
   label: string;
   send: string;
@@ -128,7 +130,10 @@ export type ClientFrame =
   | { t: 'setChannelMembers'; id: string; memberIds: string[] }
   | { t: 'channelRoster' }
   // Task 4(여러 줄 입력+생성 중지): 이 채널의 진행 중인 두뇌 턴을 중단. 무턴이면 서버가 조용히 무시.
-  | { t: 'stopGeneration'; channelId: string };
+  | { t: 'stopGeneration'; channelId: string }
+  // AI 웹 조작(2단계): browserOp의 짝. 화면(독 브라우저 칸)이 조작을 끝내고 결과를 돌려준다.
+  // opId로만 짝을 맞춘다 — 모르는/늦은 id는 서버가 조용히 버린다.
+  | { t: 'browserResult'; opId: string; ok: boolean; text: string };
 
 // 서버 → 클라
 export type ServerFrame =
@@ -159,4 +164,8 @@ export type ServerFrame =
   // 답변 실시간 스트리밍: 생성 중인 답의 "증분" 텍스트 — activity와 똑같이 휘발성(저장 안 함,
   // 브로드캐스트만). 누적 전체가 아니라 증분이라 렌더러가 이어붙인다. 최종 확정은 항상 'msg' 프레임이고
   // 렌더러는 그 시점에 누적 버퍼를 버린다(중복 표시 금지). 서버가 짧은 간격으로 코얼레싱해서 보낸다.
-  | { t: 'delta'; channelId: string; text: string };
+  | { t: 'delta'; channelId: string; text: string }
+  // AI 웹 조작(2단계): 두뇌가 요청한 브라우저 조작 1건. 그 채널을 보고 있는 데스크톱 클라이언트가
+  // <webview>에서 수행하고 browserResult로 답한다(안전 확인·차단 판정은 전부 클라 쪽 — 화면과
+  // 사용자 설정이 거기 있다). webview가 없는 클라(폰 브라우저)는 그대로 무시한다.
+  | { t: 'browserOp'; channelId: string; opId: string; op: BrowserOp };

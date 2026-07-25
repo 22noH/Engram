@@ -12,6 +12,7 @@ import { Semaphore } from '../brain/semaphore';
 import { TurnBudget } from './turn-budget';
 import { BrainProvider, BRAIN, EffortLevel } from '../brain/brain.port';
 import type { PermMode } from '../../shared/protocol';
+import type { BrowserOp, BrowserOpResult } from '../../shared/browser-ops';
 import { parseJsonBlock } from './parse-json-block';
 import { ProjectStore, ProjectConfig } from '../knowledge-core/project-store';
 import { VerificationGate } from './verification-gate';
@@ -95,6 +96,10 @@ export class Orchestrator {
   // 리뷰 지적 Finding 1: resumeInterrupted의 재개 발사가 채널 브레인을 안 실어보내던 것 — 부팅 시점에
   // "현재" 채널 브레인을 조회해 넣는다(재시작 사이 채널 브레인이 바뀌었어도 최신 값 반영).
   private chatStoreForBrain?: { listChannels(): Array<{ id: string; brain?: string }> };
+  // AI 웹 조작(2단계) — main.ts에서 setter 주입(scheduler와 동일 결, DI 밖). 코드 채널 턴에서만
+  // 쓰인다: 자체 하네스엔 CompleteOpts.browser 클로저로(채널이 클로저에 묶임), CLI 하네스엔
+  // spawn env(ENGRAM_CHANNEL_ID)로 — 후자가 MCP 도구에 채널 정체성을 넘기는 유일한 경로다.
+  private browserBus?: { request(channelId: string, op: BrowserOp): Promise<BrowserOpResult> };
   // /compact 실행기(CompactService) — main.ts에서 setter 주입(구조적 타입, 순환 회피 —
   // main.ts에서만 조립 가능한 chatStore를 CompactService가 필요로 해 DI로는 못 넣는다. clear-compact Task 3b).
   // summarizeToWiki는 Task 5(자동 compact)가 쓴다 — 같은 CompactService 인스턴스가 두 메서드를 다 가진다.
@@ -187,6 +192,12 @@ export class Orchestrator {
   // ChatStore를 채널→브레인 조회로 주입(구조적 타입, 순환 회피 — Finding 1). main.ts에서 chatStore 있을 때만 호출.
   setChannelBrainSource(source: { listChannels(): Array<{ id: string; brain?: string }> }): void {
     this.chatStoreForBrain = source;
+  }
+
+  // AI 웹 조작(2단계): BrowserBus 주입(main.ts). 미주입이면 코드 채널 턴이 8c 이전과 완전히 동일하다
+  // (도구도 env도 안 붙는다 — 회귀 0).
+  setBrowserBus(bus: { request(channelId: string, op: BrowserOp): Promise<BrowserOpResult> }): void {
+    this.browserBus = bus;
   }
 
   // CompactService 주입(clear-compact Task 3b). main.ts에서 wiki 배선이 있을 때만(메인 서버) 호출 —
@@ -679,9 +690,23 @@ export class Orchestrator {
     });
     // 읽기전용 도구 + --add-dir로 레포 읽기 보장(헤드리스 claude가 cwd 밖을 막을 수 있음).
     // 읽기전용은 이 allowedTools에 쓰기 도구가 없음에 의존한다 — 프로필(brains.json)이 Edit/Write를 직접 주면 깨질 수 있음(기본 프로필 extraArgs는 비어 안전).
+    // AI 웹 조작(2단계): 버스가 배선돼 있을 때만 두 가지가 더 붙는다 —
+    //  ① CLI 하네스: 엔그램 MCP를 허용 목록에 넣고(browser_* 도구가 그리로 온다) 스폰 env에
+    //     ENGRAM_CHANNEL_ID를 심는다. claude가 스폰하는 MCP 자식이 이 env를 물려받는 것이 실측 확인됐다.
+    //  ② 자체 하네스: 채널이 묶인 클로저(browser)로 직접 노출.
+    // 미배선이면 인수·env·도구 전부 기존과 바이트 동일(회귀 0).
+    const webControl = this.browserBus
+      ? {
+          allowed: 'Read,Glob,Grep,WebSearch,WebFetch,mcp__engram,mcp__plugin_engram_engram',
+          // threadKey가 곧 채널 id다(self 채팅은 threadId를 안 쓴다 — cancelByChannel 주석과 동일 근거).
+          env: { ENGRAM_CHANNEL_ID: threadKey },
+          browser: (op: BrowserOp): Promise<BrowserOpResult> => this.browserBus!.request(threadKey, op),
+        }
+      : null;
     const r = await useBrain.complete(prompt, onChunk, {
       cwd: msg.repoPath,
-      extraArgs: ['--allowedTools', 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
+      extraArgs: ['--allowedTools', webControl?.allowed ?? 'Read,Glob,Grep,WebSearch,WebFetch', '--add-dir', msg.repoPath],
+      ...(webControl ? { env: webControl.env, browser: webControl.browser } : {}),
       ...(effort ? { effort } : {}),
     });
     if (r.isError) return { reply: brainErrorHint(r.raw) };

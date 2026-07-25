@@ -41,6 +41,7 @@ import { AttachmentStore } from './edge/messenger/attachment-store';
 import { AttachmentsHttp } from './edge/messenger/attachments-http';
 import type { McpDeps } from './edge/mcp/engram-mcp';
 import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
+import { BrowserBus } from './edge/browser/browser-bus';
 import * as fs from 'fs';
 import { listBrainNames, defaultBrainName } from './brain/brain.config';
 import { BrainDelegator } from './agent-layer/brain-delegator';
@@ -250,6 +251,13 @@ async function bootstrap(): Promise<void> {
     // 한다. self 채팅의 threadKey는 항상 channelId(threadId 미사용, messenger-bridge.ts 참고)라
     // orchestrator.cancelByChannel이 그대로 맞는 조회 키다.
     const stopHandler = (channelId: string): boolean => orchestrator.cancelByChannel(channelId);
+    // AI 웹 조작(2단계): 두뇌 도구 호출 ↔ 화면(<webview>) 왕복 버스. stopHandler와 같은 결로 isServer와
+    // 무관하게 항상 배선한다(브레인 모드에서도 코드 채널은 돌아간다). self.adapter가 소켓 sender를
+    // 꽂고 browserResult를 settle하며, orchestrator는 코드 채널 턴에서 request로 조작을 보낸다.
+    // /mcp 경로(CLI 하네스)도 같은 버스를 쓴다 — 채널 id는 브리지가 스폰 env에서 읽어 인자로 실어준다.
+    const browserBus = new BrowserBus();
+    orchestrator.setBrowserBus(browserBus);
+    if (mcpDeps) mcpDeps.browser = (channelId, op) => browserBus.request(channelId, op);
     self = new SelfMessenger(chatCfg, chatStore, {
       logger,
       brainNames: () => listBrainNames(paths.getConfigDir()),
@@ -260,6 +268,7 @@ async function bootstrap(): Promise<void> {
       defaultCommandMode: readCommandMode(paths.getConfigDir()),
       compactHandler,
       stopHandler,
+      browserBus,
     },
       isServer ? { wiki: app.get(WikiEngine), proposals: app.get(ProposalStore), applier: app.get(ProposalApplier) } : undefined,
       authDeps, mcpDeps, adminDeps, attachmentsDeps);

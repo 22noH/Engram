@@ -1,6 +1,7 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { ServerFrame, Action, Message, EffortLevel, PermMode } from '../../../shared/protocol';
+import type { BrowserOp } from '../../../shared/browser-ops';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore, isEffortLevel, isPermMode } from './chat-store';
 import type { ChatChannel } from './chat-store';
@@ -132,6 +133,9 @@ export class SelfMessenger implements MessengerPort {
       // Task 4(여러 줄 입력+생성 중지): stopGeneration ws 케이스가 부르는 훅 — 그 채널의 진행 중 두뇌
       // 턴을 중단(true=있었음, false=무턴). 미주입이면 조용한 no-op(compactHandler와 동일 결).
       stopHandler?: (channelId: string) => boolean;
+      // AI 웹 조작(2단계): 두뇌 도구 호출 ↔ 화면 왕복 버스. start()에서 sender를 꽂고(소켓은 여기만
+      // 안다) browserResult 프레임을 settle로 흘린다. 미주입이면 조작 프레임 자체가 안 나간다(회귀 0).
+      browserBus?: { setSender(s: ((channelId: string, opId: string, op: BrowserOp) => boolean) | null): void; settle(opId: string, r: { ok: boolean; text: string }): void };
     },
     private readonly wikiDeps?: WikiDeps,
     private readonly authDeps?: AuthDeps,
@@ -224,6 +228,8 @@ export class SelfMessenger implements MessengerPort {
       res.end('not found');
     });
     this.wss = new WebSocketServer({ server: this.server });
+    // AI 웹 조작(2단계): 소켓을 쥔 곳이 여기뿐이라 sender를 여기서 꽂는다(stop()에서 뗀다).
+    this.opts.browserBus?.setSender((channelId, opId, op) => this.sendBrowserOp(channelId, opId, op));
     // ws는 http 서버의 error를 wss 'error'로 재방출한다. 리스너가 없으면 Node가 throw해 상주가 죽는다
     // (특히 EADDRINUSE). 여기서 흡수 → start()의 promise reject만 남고 상주는 생존(채팅만 비활성).
     this.wss.on('error', (err) => {
@@ -294,6 +300,21 @@ export class SelfMessenger implements MessengerPort {
       if (ch && !this.canAccessChannel(c, ch)) continue;
       try { c.send(data); } catch { /* 격리 */ }
     }
+  }
+
+  // AI 웹 조작(2단계): 조작 1건을 그 채널을 볼 수 있는 소켓들에 보낸다. broadcastToChannel과 같은
+  // 접근 게이트를 쓰되 **몇 명에게 갔는지**를 돌려준다 — 0명이면 두뇌에게 "창을 열어달라"고 즉시
+  // 답해야 하기 때문(그냥 타임아웃까지 기다리면 2분을 버린다).
+  private sendBrowserOp(channelId: string, opId: string, op: BrowserOp): boolean {
+    const ch = this.store.listChannels().find((c) => c.id === channelId);
+    const data = JSON.stringify({ t: 'browserOp', channelId, opId, op } satisfies ServerFrame);
+    let sent = 0;
+    for (const c of this.wss?.clients ?? []) {
+      if (c.readyState !== WebSocket.OPEN || !this.isConnected(c)) continue;
+      if (ch && !this.canAccessChannel(c, ch)) continue;
+      try { c.send(data); sent += 1; } catch { /* 격리 */ }
+    }
+    return sent > 0;
   }
 
   // Phase 16a: owner 전용 관리 프레임 집합. 비owner 소켓(또는 authDeps 미주입)의 admin 프레임은
@@ -560,6 +581,15 @@ export class SelfMessenger implements MessengerPort {
             if (ch && this.canAccessChannel(ws, ch)) {
               this.opts.stopHandler?.(f.channelId);
             }
+          }
+          return;
+        }
+        case 'browserResult': {
+          // AI 웹 조작(2단계): 화면이 조작을 끝내고 돌려준 결과. opId로만 짝을 맞춘다 — 모르는 id·
+          // 늦은 응답·중복은 BrowserBus가 조용히 버린다(별도 게이트 불필요: opId는 서버가 방금 만든
+          // 난수라 추측 불가하고, 결과 텍스트는 요청한 두뇌 턴에게만 돌아간다).
+          if (typeof f.opId === 'string' && this.opts.browserBus) {
+            this.opts.browserBus.settle(f.opId, { ok: f.ok === true, text: typeof f.text === 'string' ? f.text : '' });
           }
           return;
         }
@@ -869,6 +899,7 @@ export class SelfMessenger implements MessengerPort {
   }
 
   async stop(): Promise<void> {
+    this.opts.browserBus?.setSender(null); // 닫힌 소켓으로 조작을 보내지 않는다
     for (const c of this.wss?.clients ?? []) {
       try { c.terminate(); } catch { /* 무시 */ }
     }

@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
 import { ENGRAM_MCP_INSTRUCTIONS } from './edge/mcp/engram-mcp';
 import { confirmWikiSave, declinedText, WikiSaveRequest } from './edge/mcp/mcp-elicit';
+import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
 
 // 독립 stdio↔HTTP 브리지 엔트리(설계 §3.3). 구형(stdio 전용) MCP 클라이언트가 상주의
 // /mcp(HTTP, Task 1·2)에 접속할 수 있게 해준다: `node dist/src/mcp-bridge.js [--port N]`.
@@ -42,6 +43,28 @@ async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>, 
       /* 종료 실패 무해 — 이번 요청은 이미 끝났음 */
     }
   }
+}
+
+// ★AI 웹 조작(2단계)의 채널 정체성 바인딩 — 이 파일이 그 유일한 통로다.
+//
+// 문제: MCP 도구는 "어느 대화에서 불렸는지"를 모른다(위키 ask-user-ui-mcp 선례 — 그래서 ask_user의
+// MCP안이 폐기됐다). 브라우저 조작은 다단계라 펜스 텍스트로 우회할 수도 없다.
+// 해결: 엔그램의 CLI 하네스는 턴마다 `claude -p`를 새로 스폰하고, claude는 그 env를 그대로 물려준
+// stdio MCP 서버(=이 브리지)를 띄운다. 실측 확인(2026-07-25): 부모가 ENGRAM_CHANNEL_ID를 걸면
+// MCP 서버 자식이 그 값을 그대로 본다. 그래서 이 프로세스의 env가 곧 "이 턴의 채널"이다.
+//
+// 절대 하지 않는 것: env가 없을 때 "마지막에 활성화된 채널" 같은 추측. 채널 두 개를 동시에 쓰면
+// 조용히 남의 화면을 조작하게 된다 — 정체성이 없으면 상류가 정직하게 실패한다(engram-mcp.ts).
+export function withChannelIdentity(
+  name: string,
+  args: Record<string, unknown>,
+  env: NodeJS.ProcessEnv,
+): Record<string, unknown> {
+  if (!isBrowserToolName(name)) return args;
+  const channelId = (env.ENGRAM_CHANNEL_ID ?? '').trim();
+  if (!channelId) return args;
+  // 모델이 보낸 _channel은 신뢰하지 않는다(스키마에도 없다) — env 값으로 덮어쓴다.
+  return { ...args, [CHANNEL_ARG]: channelId };
 }
 
 // 저장(=사람 승인이 필요한) 도구인지 판정. 그 외 도구는 그대로 패스스루.
@@ -86,8 +109,10 @@ export function makeBridgeServer(url: string): Server {
       if (save && (await confirmWikiSave(server, save)) === 'decline') {
         return { content: [{ type: 'text', text: declinedText(save) }] };
       }
+      // ★채널 정체성 주입(AI 웹 조작) — browser_* 호출에만 붙는다(다른 도구는 인자 바이트 동일).
+      const args = withChannelIdentity(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, process.env);
       return (await withUpstream(url, (client) =>
-        client.callTool({ name: req.params.name, arguments: req.params.arguments ?? {} }),
+        client.callTool({ name: req.params.name, arguments: args }),
       )) as CallToolResult;
     } catch (e) {
       return {

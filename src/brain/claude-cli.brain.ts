@@ -117,7 +117,10 @@ export class ClaudeCliBrain implements BrainProvider {
       ];
       const child = spawn(this.profile.cli, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...this.profile.env },
+        // AI 웹 조작(2단계): opts.env가 프로필 env보다 뒤에 온다 — 호출별 정체성(ENGRAM_CHANNEL_ID)이
+        // 최우선이다. claude -p가 이 env로 MCP 서버(stdio)를 스폰하는 것이 실측 확인돼(2026-07-25),
+        // 그 턴의 MCP 도구 호출이 "어느 채널인가"를 알 수 있는 유일한 경로가 된다.
+        env: { ...process.env, ...this.profile.env, ...(opts?.env ?? {}) },
         cwd: opts?.cwd,
       });
 

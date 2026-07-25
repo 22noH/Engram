@@ -6,7 +6,8 @@ import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { handleMcpRequest } from './edge/mcp/mcp-http';
 import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
-import { makeBridgeServer, parseBridgeArgs } from './mcp-bridge';
+import { makeBridgeServer, parseBridgeArgs, withChannelIdentity } from './mcp-bridge';
+import { CHANNEL_ARG } from '../shared/browser-ops';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}bridge__${bare}`;
 
@@ -201,5 +202,29 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
     } finally {
       await upstream.close();
     }
+  });
+});
+
+// ★AI 웹 조작(2단계) — 채널 정체성 바인딩. 이 브리지가 유일한 통로다(파일 상단 주석 참조).
+describe('withChannelIdentity — 스폰 env의 채널 id를 browser_* 인자에 실어준다', () => {
+  it('browser 도구 + env 있음 → _channel이 붙는다', () => {
+    const out = withChannelIdentity('browser_click', { target: '#a' }, { ENGRAM_CHANNEL_ID: 'chan-42' });
+    expect(out).toEqual({ target: '#a', [CHANNEL_ARG]: 'chan-42' });
+  });
+
+  it('env 없음 → 붙이지 않는다(상류가 정직하게 실패한다 — 추측 금지)', () => {
+    const args = { target: '#a' };
+    expect(withChannelIdentity('browser_click', args, {})).toEqual({ target: '#a' });
+    expect(withChannelIdentity('browser_click', args, { ENGRAM_CHANNEL_ID: '   ' })).toEqual({ target: '#a' });
+  });
+
+  it('모델이 보낸 _channel은 신뢰하지 않고 env 값으로 덮어쓴다(남의 화면 조작 차단)', () => {
+    const out = withChannelIdentity('browser_click', { target: '#a', [CHANNEL_ARG]: 'victim' }, { ENGRAM_CHANNEL_ID: 'mine' });
+    expect(out[CHANNEL_ARG]).toBe('mine');
+  });
+
+  it('browser가 아닌 도구는 인자를 손대지 않는다(같은 객체 그대로 — 회귀 0)', () => {
+    const args = { query: 'x' };
+    expect(withChannelIdentity('wiki_search', args, { ENGRAM_CHANNEL_ID: 'chan-42' })).toBe(args);
   });
 });

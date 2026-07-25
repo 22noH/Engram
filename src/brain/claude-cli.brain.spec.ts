@@ -472,4 +472,43 @@ describe('ClaudeCliBrain', () => {
       expect(r.text).toBe('답');
     });
   });
+
+  // AI 웹 조작(2단계) — 채널 정체성 바인딩의 유일한 경로. claude -p가 스폰하는 MCP 서버(stdio)가
+  // 이 env를 그대로 물려받는다는 것이 실측 확인됐다(2026-07-25 probe MCP 서버로 검증).
+  describe('opts.env — 호출별 env 주입(MCP 자식이 물려받는다)', () => {
+    it('spawn env에 그대로 실린다', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q', undefined, { env: { ENGRAM_CHANNEL_ID: 'chan-42' } });
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답' }) + '\n');
+      child.emit('close', 0);
+      await p;
+      const passed = (spawn as unknown as jest.Mock).mock.calls[0][2].env;
+      expect(passed.ENGRAM_CHANNEL_ID).toBe('chan-42');
+      expect(passed.PATH ?? passed.Path).toBeDefined(); // process.env는 그대로 유지
+    });
+
+    it('프로필 env보다 호출별 env가 우선(정체성이 조용히 덮이면 안 된다)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain({ ...PROFILE, env: { ENGRAM_CHANNEL_ID: 'stale' } });
+      const p = brain.complete('q', undefined, { env: { ENGRAM_CHANNEL_ID: 'fresh' } });
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답' }) + '\n');
+      child.emit('close', 0);
+      await p;
+      expect((spawn as unknown as jest.Mock).mock.calls[0][2].env.ENGRAM_CHANNEL_ID).toBe('fresh');
+    });
+
+    it('미주입이면 기존 그대로(회귀 0)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답' }) + '\n');
+      child.emit('close', 0);
+      await p;
+      expect((spawn as unknown as jest.Mock).mock.calls[0][2].env.ENGRAM_CHANNEL_ID).toBeUndefined();
+    });
+  });
 });

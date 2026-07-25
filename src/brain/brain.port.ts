@@ -1,4 +1,5 @@
 import type { QuestionItem, EffortLevel } from '../../shared/protocol';
+import type { BrowserOp, BrowserOpResult } from '../../shared/browser-ops';
 
 // 노력 수준(claude --help 확인값: low·medium·high·xhigh·max). 정의는 계층 중립인 shared/protocol.ts
 // 한 곳에만 두고 여기서 재수출한다 — 두뇌·엣지·렌더러가 같은 유니온을 본다.
@@ -43,6 +44,15 @@ export interface CompleteOpts {
   // 내부 타임아웃 AbortController에 이 signal을 연동(abort 전파, addEventListener+cleanup). claude-cli는
   // 이 signal의 abort로 spawn된 자식을 kill. 미주입(기존 압도적 다수 호출부)이면 회귀 0.
   signal?: AbortSignal;
+  // AI 웹 조작(2단계): 있으면 자체 하네스가 browser_* 도구를 노출하고, 호출을 이 클로저로 흘린다.
+  // askUser·delegate와 같은 결(closure-injection) — 클로저 안에 **채널 id가 이미 묶여** 있어
+  // "어느 화면을 조작하는가"가 도구 인자가 아니라 주입 시점에 확정된다(채널 정체성 바인딩).
+  // CLI 하네스는 이 클로저를 못 쓰므로(우리 도구 루프를 안 탄다) 아래 env로 같은 정체성을 넘긴다.
+  browser?: (op: BrowserOp) => Promise<BrowserOpResult>;
+  // 자식 프로세스 env 덧씌우기(CLI 하네스 전용). claude -p가 스폰하는 MCP 서버(stdio)가 이 env를
+  // 그대로 물려받는 것이 실측 확인됐다 — 그래서 ENGRAM_CHANNEL_ID를 여기 실으면 그 턴의 MCP 도구
+  // 호출이 채널 정체성을 갖는다(ENGRAM_INSTANCE_ID 주입 선례와 같은 결). 미주입이면 기존과 동일.
+  env?: Record<string, string>;
   // 노력(effort): 이 호출에 쓸 추론 노력 수준. claude CLI의 `--effort <level>`과 1:1(허용값도 CLI와 동일).
   // 채널별로 정해진 값이 orchestrator 한 지점에서 결정돼 여기까지 관통한다(코드 채널=저장값, 그 외=high).
   // 미주입이면 어떤 두뇌도 아무 인수를 안 붙인다(회귀 0).

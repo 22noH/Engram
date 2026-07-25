@@ -2,6 +2,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { McpProposalsDeps } from './mcp-proposals';
 import { confirmWikiSave, declinedText } from './mcp-elicit';
+import type { BrowserOp, BrowserOpResult } from '../../../shared/browser-ops';
+import { BROWSER_TOOL_DEFS, CHANNEL_ARG, isBrowserToolName, toBrowserOp } from '../../../shared/browser-ops';
 
 // 주입 의존성(§3.1) — main이 실 WikiEngine/ProposalStore/BrainDelegator를 배선, 테스트는 가짜 주입.
 export interface McpDeps {
@@ -19,6 +21,11 @@ export interface McpDeps {
   // (mcp-wiring.ts makeFileSearch)이다 — true면 wiki_search 도구 설명에 그 사실을 덧붙인다(사용자가
   // "의미검색"을 기대하고 결과 품질을 오판하지 않게). 미지정/false=기존 설명 그대로(브리지·앱 무변경).
   searchFallback?: boolean;
+  // AI 웹 조작(2단계): 주입되면 browser_* 도구 7종을 노출한다. **채널 정체성이 인자로 온다** —
+  // MCP 도구 자체는 "어느 채널인지"를 모르기 때문(위키 ask-user-ui-mcp 선례). 그 값은 브리지가
+  // 스폰 env(ENGRAM_CHANNEL_ID)에서 읽어 `_channel` 인자로 실어 보낸다(mcp-bridge.ts).
+  // 미주입/null이면 도구 자체가 안 뜬다(회귀 0).
+  browser?: ((channelId: string, op: BrowserOp) => Promise<BrowserOpResult>) | null;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -236,6 +243,24 @@ async function callAskBrain(deps: McpDeps, args: Record<string, unknown>): Promi
   return ok(result);
 }
 
+// AI 웹 조작(2단계) — MCP 경로. ★핵심: 채널 정체성이 없으면 **아무것도 하지 않는다**.
+// MCP 도구는 자기가 어느 대화에서 불렸는지 모르므로(위키 ask-user-ui-mcp 선례), 브리지가 스폰
+// env에서 읽어 넣어준 _channel만 신뢰한다. 없으면 "마지막 채널" 같은 추측을 하지 않고 정직하게 실패한다
+// — 채널 두 개를 동시에 쓰는 순간 조용히 남의 화면을 조작하게 되기 때문.
+const NO_CHANNEL_HINT =
+  'browser error: this tool call has no channel identity, so Engram cannot tell which screen to drive. ' +
+  'This happens when the MCP bridge was not spawned by an Engram turn — ask the user in the Engram app instead.';
+
+async function callBrowserTool(deps: McpDeps, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.browser) return fail('browser tools are not available (the Engram app is not running)');
+  const channelId = typeof args[CHANNEL_ARG] === 'string' ? (args[CHANNEL_ARG] as string).trim() : '';
+  if (!channelId) return fail(NO_CHANNEL_HINT);
+  const op = toBrowserOp(name, args);
+  if (typeof op === 'string') return fail(op);
+  const r = await deps.browser(channelId, op);
+  return r.ok ? ok(r.text) : fail(r.text);
+}
+
 // MCP 프롬프트 — 클라이언트(Claude Code 등)의 `/` 메뉴에 슬래시 명령으로 뜬다
 // (도구는 모델이 알아서 쓰는 것, 프롬프트는 사람이 `/`로 부르는 진입점 — 둘 다 노출해야 발견성이 산다).
 // 내용은 "이 도구를 이렇게 써라"는 지시문(도구 정의는 위에 이미 있음). 지시문은 영어(모델 대상 관례).
@@ -305,6 +330,12 @@ export function buildMcpServer(deps: McpDeps): Server {
     if (deps.askBrain) tools.push(askBrainTool(deps.brainNames()));
     if (deps.proposals) tools.push(LIST_PROPOSALS_TOOL, APPROVE_PROPOSAL_TOOL, REJECT_PROPOSAL_TOOL);
     if (deps.write) tools.push(WIKI_WRITE_TOOL);
+    // AI 웹 조작: 앱이 배선했을 때만. inputSchema는 shared 정의 그대로(_channel은 스키마에 없다).
+    if (deps.browser) {
+      for (const d of BROWSER_TOOL_DEFS) {
+        tools.push({ name: d.name, description: d.description, inputSchema: d.parameters as Tool['inputSchema'] });
+      }
+    }
     return { tools };
   });
 
@@ -332,6 +363,7 @@ export function buildMcpServer(deps: McpDeps): Server {
         case 'wiki_write':
           return await callWikiWrite(server, deps, args);
         default:
+          if (isBrowserToolName(name)) return await callBrowserTool(deps, name, args);
           return fail(`unknown tool: ${name}`);
       }
     } catch (e) {
