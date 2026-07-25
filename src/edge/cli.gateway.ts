@@ -7,6 +7,7 @@ import { ProposalStore } from '../knowledge-core/proposal-store';
 import { ProposalApplier } from './proposal-applier';
 import { MeetingEngine } from '../agent-layer/meeting-engine';
 import { loadMeetings, saveMeetings } from './meeting-config';
+import { runSettingsCommand } from './settings-cli';
 import { InsightStore } from '../knowledge-core/insight/insight-store';
 import { createSupervisor, buildServiceSpecs } from '../pal/supervisor/supervisor.factory';
 import { SupervisorPort } from '../pal/supervisor/supervisor.port';
@@ -53,6 +54,15 @@ export class CliGateway {
       const confirm = rest.includes('--confirm');
       const goal = rest.filter((a) => a !== '--confirm').join(' ');
       await this.code(argv[1], goal, confirm);
+    } else if (argv[0] === 'config') {
+      // 보통은 src/cli.ts가 Nest 부팅 전에 가로채는 경로(빠른 종료). 여기 도달하는 건 REPL에서
+      // `config …`를 친 경우 — 같은 함수를 부르므로 결과는 완전히 동일하다(로직 중복 0).
+      const configDir = this.paths?.getConfigDir();
+      process.stdout.write(
+        configDir
+          ? runSettingsCommand(argv.slice(1), configDir).output
+          : '설정 경로를 알 수 없습니다(PathResolver 미주입).\n',
+      );
     } else if (argv[0] === 'service') {
       await this.service(argv.slice(1));
     } else if (argv[0] === 'pause') {
@@ -64,7 +74,7 @@ export class CliGateway {
     } else if (argv.length === 0) {
       await this.repl();
     } else {
-      process.stdout.write('사용법: engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram insights [run] | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram service install|uninstall|start|stop|status | engram (REPL)\n');
+      process.stdout.write('사용법: engram config get|set | engram ask "질문" | engram digest | engram review | engram team <names> <q> | engram meeting add|list|remove|run | engram insights [run] | engram code <path> "goal" [--confirm] | engram pause | engram resume | engram stop | engram service install|uninstall|start|stop|status | engram (REPL)\n');
     }
   }
 

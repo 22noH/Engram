@@ -137,6 +137,83 @@ export async function confirmWikiSave(
   }
 }
 
+// ── 위험한 설정 변경 승인(2026-07-25) ────────────────────────────────────────
+// 저장 승인과 같은 대화상자 메커니즘을 재사용하되 **폴백 규칙이 정반대**다.
+//  - 위키 저장: 못 물어보면(unavailable) 기존 경로로 조용히 진행(게이트는 '추가'였다).
+//  - 설정 변경: 못 물어보면 **거부**한다 — "AI에게 말로 설정"을 열어준 대가로, 사람이 볼 수 없는
+//    맥락에서 위키 원격 주소나 승인 우회 스위치가 조용히 바뀌는 일은 절대 없어야 한다.
+//    (그 판정은 호출자(mcp-settings.ts)가 하고, 여기선 승인 결과만 정직하게 돌려준다.)
+export interface SettingChangeRequest {
+  key: string;
+  /** 현재 값(빈 문자열 = 미설정). */
+  from: string;
+  to: string;
+  /** 왜 위험한지 한 문장. */
+  reason: string;
+}
+
+function shownValue(v: string): string {
+  return v === '' ? '(not set)' : v;
+}
+
+export function settingConfirmMessage(req: SettingChangeRequest): string {
+  return [
+    'Change an Engram setting?',
+    '',
+    `Setting: ${req.key}`,
+    `From: ${shownValue(req.from)}`,
+    `To: ${shownValue(req.to)}`,
+    '',
+    `Why you are being asked: ${req.reason}`,
+  ].join('\n');
+}
+
+export function settingConfirmParams(req: SettingChangeRequest): ElicitRequestFormParams {
+  return {
+    mode: 'form',
+    message: settingConfirmMessage(req),
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        decision: {
+          type: 'string',
+          title: `Change ${req.key}?`,
+          description: `${shownValue(req.from)} -> ${shownValue(req.to)} — ${req.reason}`,
+          enum: ['change', 'cancel'],
+          enumNames: ['Change it', 'Cancel'],
+          // 저장 승인과 달리 기본값은 취소 — 위험한 쪽이 기본이 되면 안 된다.
+          default: 'cancel',
+        },
+      },
+      required: ['decision'],
+    },
+  };
+}
+
+// never-throw. 'unavailable'은 "물어볼 수 없었다"이며, 설정 경로에선 곧 거부 사유가 된다.
+export async function confirmSettingChange(
+  server: Pick<Server, 'getClientCapabilities' | 'elicitInput'>,
+  req: SettingChangeRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SaveConfirm> {
+  if (env[ELICIT_OFF_ENV]) return 'unavailable';
+  if (isElicitationDisabled(server)) return 'unavailable';
+  if (!supportsFormElicitation(server)) return 'unavailable';
+  try {
+    const result = await server.elicitInput(settingConfirmParams(req), {
+      timeout: elicitTimeoutMs(env),
+      resetTimeoutOnProgress: false,
+    });
+    if (result.action === 'accept') {
+      // 값이 없으면(느슨한 클라이언트) 승인으로 보지 않는다 — 설정 변경은 명시 승인만 인정.
+      return result.content?.decision === 'change' ? 'accept' : 'decline';
+    }
+    return 'decline';
+  } catch {
+    return 'unavailable';
+  }
+}
+
 // 사용자가 거부했을 때 도구가 돌려줄 결과 텍스트(에러가 아니라 명확한 결과).
 export function declinedText(req: WikiSaveRequest): string {
   return `cancelled: the user declined to ${req.op === 'write' ? 'publish' : 'save'} "${req.title}" to the Engram wiki — nothing was ${req.op === 'write' ? 'written' : 'proposed'}.`;

@@ -11,6 +11,7 @@ import { ProposalStore } from './knowledge-core/proposal-store';
 import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { makeMcpProposals } from './edge/mcp/mcp-proposals';
+import { makeMcpSettings } from './edge/mcp/mcp-settings';
 import { makeWikiMcpDepsCore, makeWikiWrite } from './edge/mcp/mcp-wiring';
 import { makeHeadlessWikiSync } from './edge/mcp/headless-wiki-sync';
 import { WikiGit } from './knowledge-core/wiki/wiki-git';
@@ -170,6 +171,7 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
 
   const wiki = app.get(WikiEngine);
   const proposals = app.get(ProposalStore);
+  const paths = app.get(PathResolver);
   // ProposalApplier는 DI 없이도 되는 순수 클래스(WikiEngine+ProposalStore만 소비) — HeadlessCoreModule에
   // 등록해 EdgeModule 전체를 끌어올 필요 없이 직접 생성.
   const applier = new ProposalApplier(wiki, proposals);
@@ -182,13 +184,15 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
     brainNames: () => [],
     proposals: makeMcpProposals(proposals, applier), // 헤드리스 자체 in-flight Set(앱 ws와 별개 프로세스)
     write: writeMode ? makeWikiWrite(wiki) : null,
+    // 설정 조회·변경(2026-07-25) — MCP만 쓰는 사용자(앱 설정 화면이 없는 사람)가 감시 폴더·위키
+    // 원격을 말로 바꿀 수 있게. 위험한 값은 elicitation 승인이 없으면 거부된다(engram-mcp.ts).
+    settings: makeMcpSettings(paths.getConfigDir()),
   };
 
   // 위키 git 원격 동기화(main.ts:124 배선의 헤드리스 짝) — config/wiki-remote.json에 원격이 있을
   // 때만 배선된다. 없으면 makeHeadlessWikiSync가 null을 돌려주고 deps는 손도 안 댄 원본 그대로다.
   // 두뇌 병합기(setBodyMerger)는 붙이지 않는다 — 헤드리스엔 두뇌가 없으므로 union 폴백(main.ts의
   // 배선 실패 시 폴백과 동일 결)이 맞다. 자세한 설계 근거는 headless-wiki-sync.ts 상단 주석.
-  const paths = app.get(PathResolver);
   const sync = makeHeadlessWikiSync({
     mode,
     cfg: loadWikiRemote(paths.getConfigDir()),

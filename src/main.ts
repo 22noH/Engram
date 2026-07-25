@@ -41,6 +41,7 @@ import { AttachmentStore } from './edge/messenger/attachment-store';
 import { AttachmentsHttp } from './edge/messenger/attachments-http';
 import type { McpDeps } from './edge/mcp/engram-mcp';
 import { makeWikiMcpDeps, makeWikiWrite } from './edge/mcp/mcp-wiring';
+import { makeMcpSettings } from './edge/mcp/mcp-settings';
 import { BrowserBus } from './edge/browser/browser-bus';
 import * as fs from 'fs';
 import { listBrainNames, defaultBrainName } from './brain/brain.config';
@@ -242,6 +243,11 @@ async function bootstrap(): Promise<void> {
         ...makeWikiMcpDeps(wiki, proposals),
         askBrain: null, // 아래에서 BrainDelegator가 해소되면 채운다(8d 위임 계약 재사용).
         brainNames: () => listBrainNames(paths.getConfigDir()),
+        // 설정 조회·변경 도구(2026-07-25). 앱 설정창과 **같은 파일·같은 로더**를 쓴다
+        // (edge/settings-registry.ts가 단일 출처). 위험한 변경은 승인 대화상자가 필요한데
+        // /mcp는 stateless HTTP라 elicitation이 꺼져 있어(mcp-http.ts) 거부된다 — 앱이 떠 있는
+        // 상황이므로 "앱 설정 화면에서 바꾸세요" 안내가 그대로 맞는 안내가 된다.
+        settings: makeMcpSettings(paths.getConfigDir()),
       };
       try {
         const delegator = app.get(BrainDelegator);

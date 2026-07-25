@@ -1,7 +1,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { McpProposalsDeps } from './mcp-proposals';
-import { confirmWikiSave, declinedText } from './mcp-elicit';
+import { confirmSettingChange, confirmWikiSave, declinedText } from './mcp-elicit';
+import type { McpSettingsPort } from './mcp-settings';
 import type { BrowserOp, BrowserOpResult } from '../../../shared/browser-ops';
 import { BROWSER_TOOL_DEFS, CHANNEL_ARG, isBrowserToolName, toBrowserOp } from '../../../shared/browser-ops';
 
@@ -26,6 +27,9 @@ export interface McpDeps {
   // 스폰 env(ENGRAM_CHANNEL_ID)에서 읽어 `_channel` 인자로 실어 보낸다(mcp-bridge.ts).
   // 미주입/null이면 도구 자체가 안 뜬다(회귀 0).
   browser?: ((channelId: string, op: BrowserOp) => Promise<BrowserOpResult>) | null;
+  // 설정 조회·변경(2026-07-25). 주입되면 engram_config_get/engram_config_set 2종을 노출한다 —
+  // 앱 설정 화면이 없는 MCP 전용 사용자가 JSON을 손으로 고치지 않아도 되게. 미주입=도구 없음(회귀 0).
+  settings?: McpSettingsPort | null;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -144,6 +148,67 @@ const WIKI_WRITE_TOOL: Tool = {
     required: ['title', 'content'],
   },
 };
+
+const CONFIG_GET_TOOL: Tool = {
+  name: 'engram_config_get',
+  description:
+    "Read Engram's settings (wiki git sync, folder auto-import, current brain). Safe to call any time — this only reads.",
+  inputSchema: {
+    type: 'object',
+    properties: { key: { type: 'string', description: 'optional — one setting key, e.g. import.folder. Omit for all settings.' } },
+  },
+};
+
+const CONFIG_SET_TOOL: Tool = {
+  name: 'engram_config_set',
+  description:
+    'Change one Engram setting (same settings file the Engram app writes). Use it when the user asks for things like ' +
+    '"watch this folder", "sync my wiki with this repo", or "keep the original text". Sensitive settings ' +
+    '(wiki git remote, publishing without human approval, very broad watch folders) require the user to confirm in a ' +
+    'dialog; if this client cannot show one, the change is refused — tell the user to change it in the Engram app or ' +
+    'with `engram config set` in a terminal. Call engram_config_get first if you are unsure of the key or the current value.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      key: { type: 'string', description: 'setting key from engram_config_get, e.g. import.enabled' },
+      value: { type: 'string', description: 'new value; see the "allowed" line from engram_config_get' },
+    },
+    required: ['key', 'value'],
+  },
+};
+
+async function callConfigGet(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.settings) return fail('engram_config_get is not available (no settings adapter configured)');
+  const key = typeof args.key === 'string' ? args.key.trim() : '';
+  if (!key) return ok(deps.settings.view());
+  const one = deps.settings.viewOne(key);
+  return one ? ok(one) : fail(`unknown setting "${key}"\n\n${deps.settings.view()}`);
+}
+
+// 위험 설정을 승인 없이 바꾸지 못하게 하는 문구 — 사람이 실제로 갈 수 있는 두 경로를 함께 준다.
+function settingRefusedText(key: string, to: string, reason: string): string {
+  return [
+    `refused: "${key}" is a sensitive setting — ${reason}.`,
+    'Changing it requires a confirmation dialog, and this MCP client cannot show one.',
+    `Ask the user to change it in the Engram app's settings screen, or to run in a terminal:  engram config set ${key} ${to || 'none'}`,
+  ].join(' ');
+}
+
+async function callConfigSet(server: Server, deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.settings) return fail('engram_config_set is not available (no settings adapter configured)');
+  const key = typeof args.key === 'string' ? args.key : '';
+  const value = typeof args.value === 'string' ? args.value : '';
+  const plan = deps.settings.plan(key, value);
+  if (!plan.ok) return fail(plan.error);
+  if (plan.unchanged) return ok(`unchanged — ${plan.key} is already set to that value`);
+  if (plan.risk === 'danger') {
+    // ★폴백으로 그냥 허용하지 않는다(위키 저장 경로와 정반대) — 물어볼 수 없으면 거부한다.
+    const confirm = await confirmSettingChange(server, { key: plan.key, from: plan.from, to: plan.to, reason: plan.reason });
+    if (confirm === 'decline') return ok(`cancelled: the user declined to change ${plan.key} — nothing was changed.`);
+    if (confirm === 'unavailable') return fail(settingRefusedText(plan.key, plan.to, plan.reason));
+  }
+  return ok(`updated ${deps.settings.apply(plan)}`);
+}
 
 function askBrainTool(names: string[]): Tool {
   return {
@@ -287,6 +352,16 @@ const PROMPTS: EngramPrompt[] = [
     args: [{ name: 'id', description: 'proposal id (or number from /proposals)', required: true }],
     text: (a) => `The user explicitly asked to approve the Engram wiki proposal: ${a.id ?? ''}. If this is a number from a previous list_proposals call, resolve it to the full proposal id (call list_proposals again if needed). Then call approve_proposal with that id and report the result.`,
   },
+  {
+    name: 'config', description: "Show Engram's current settings (wiki sync, folder auto-import)",
+    args: [{ name: 'key', description: 'optional — one setting key to look at', required: false }],
+    text: (a) => `Call the engram_config_get tool${a.key ? ` with key "${a.key}"` : ''} and show the user their current Engram settings in a readable list. Explain what each one does in one short line. Do not change anything — if the user wants a change, use engram_config_set with the exact key and value they asked for.`,
+  },
+  {
+    name: 'config-set', description: 'Change one Engram setting (sensitive ones ask the user to confirm)',
+    args: [{ name: 'change', description: 'what to change, e.g. "watch C:\\Inbox" or "import.publish direct"', required: true }],
+    text: (a) => `The user wants to change an Engram setting: ${a.change ?? ''}. Call engram_config_get first to see the exact key names, allowed values and current value, then call engram_config_set once with the single key and value that matches the request. Never guess a key. If the tool refuses because the setting is sensitive, relay its message — do not try to work around it by editing config files.`,
+  },
 ];
 
 // MCP initialize 결과의 instructions — 연결한 클라이언트의 시스템 프롬프트에 주입되는 사용 안내
@@ -304,8 +379,12 @@ export function buildMcpServer(deps: McpDeps): Server {
   );
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
-    // 승인 계열 프롬프트는 승인 어댑터가 있을 때만(도구 노출 조건과 일치).
-    const prompts = PROMPTS.filter((p) => (p.name === 'proposals' || p.name === 'approve' ? !!deps.proposals : true));
+    // 승인 계열 프롬프트는 승인 어댑터가, 설정 프롬프트는 설정 어댑터가 있을 때만(도구 노출 조건과 일치).
+    const prompts = PROMPTS.filter((p) => {
+      if (p.name === 'proposals' || p.name === 'approve') return !!deps.proposals;
+      if (p.name === 'config' || p.name === 'config-set') return !!deps.settings;
+      return true;
+    });
     return {
       prompts: prompts.map((p) => ({
         name: p.name,
@@ -330,6 +409,7 @@ export function buildMcpServer(deps: McpDeps): Server {
     if (deps.askBrain) tools.push(askBrainTool(deps.brainNames()));
     if (deps.proposals) tools.push(LIST_PROPOSALS_TOOL, APPROVE_PROPOSAL_TOOL, REJECT_PROPOSAL_TOOL);
     if (deps.write) tools.push(WIKI_WRITE_TOOL);
+    if (deps.settings) tools.push(CONFIG_GET_TOOL, CONFIG_SET_TOOL);
     // AI 웹 조작: 앱이 배선했을 때만. inputSchema는 shared 정의 그대로(_channel은 스키마에 없다).
     if (deps.browser) {
       for (const d of BROWSER_TOOL_DEFS) {
@@ -362,6 +442,10 @@ export function buildMcpServer(deps: McpDeps): Server {
           return await callRejectProposal(deps, args);
         case 'wiki_write':
           return await callWikiWrite(server, deps, args);
+        case 'engram_config_get':
+          return await callConfigGet(deps, args);
+        case 'engram_config_set':
+          return await callConfigSet(server, deps, args);
         default:
           if (isBrowserToolName(name)) return await callBrowserTool(deps, name, args);
           return fail(`unknown tool: ${name}`);

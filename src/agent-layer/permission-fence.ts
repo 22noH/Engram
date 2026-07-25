@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
-import * as path from 'path';
 import { Persona } from './persona-registry';
+import { isWithin, systemDirs } from '../pal/path-safety';
 import type { PermMode } from '../../shared/protocol';
 
 export interface FenceConfig {
@@ -23,15 +23,8 @@ export const DEFAULT_COMMANDS = [
   'dotnet', 'msbuild', 'cmake', 'make', 'nmake', 'qmake', 'tsc', 'jest', 'vitest', 'eslint', 'prettier', 'gradle', 'mvn',
 ];
 
-// 시스템 디렉터리(설정·writePaths 무관 항상 거부 백스톱). env에서 실제 경로를 해소하고
-// (다른 드라이브·로캘 대비) 하드코딩 폴백을 더한다. isWithin이 슬래시/대소문자 정규화하므로 백슬래시 값도 OK.
-function systemDirs(): string[] {
-  const e = process.env;
-  return [
-    e.SystemRoot, e.windir, e.ProgramFiles, e['ProgramFiles(x86)'], e.ProgramW6432, e.ProgramData,
-    'C:/Windows', 'C:/Program Files', 'C:/Program Files (x86)', 'C:/ProgramData',
-  ].filter((d): d is string => !!d);
-}
+// 시스템 디렉터리(설정·writePaths 무관 항상 거부 백스톱). 목록·포함검사 로직은 pal/path-safety.ts
+// 한 곳에만 있다(설정 경로 검증 edge/settings-registry.ts가 같은 판정을 공유 — 복사 금지).
 const SYSTEM_DENY = systemDirs();
 
 // 권한 모드 → 명령 실행 정책. 채널 권한 모드가 이번 턴에 주입되면 전역 commandMode 대신 이 표를 쓴다
@@ -76,12 +69,9 @@ export class PermissionFence {
     }
   }
 
-  // 경로 포함 검사(설계 §9 자기수정 차단). Windows 대소문자 무감지 + .. 정규화 후 접두사 비교.
+  // 경로 포함 검사(설계 §9 자기수정 차단) — 구현은 pal/path-safety.ts(설정 경로 검증과 공유).
   private static isWithin(targetPath: string, basePath: string): boolean {
-    const norm = (p: string): string => path.normalize(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-    const t = norm(targetPath);
-    const b = norm(basePath);
-    return t === b || t.startsWith(b + '/');
+    return isWithin(targetPath, basePath);
   }
 
   // Claude Code 하네스 위에서 도는 두뇌만 도구 가능(진짜 Claude + 로컬LLM 백엔드).
