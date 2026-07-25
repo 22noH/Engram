@@ -196,4 +196,49 @@ function renderMarkdown(text: string): DocumentFragment {
   return root;
 }
 
-export { renderMarkdown, renderChart, mdInline };
+// ── HTML 인라인 미리보기(브리프) — 메시지 텍스트를 "마크다운 조각 / html 코드블록"으로 쪼갠다.
+// Message.tsx가 html 세그먼트만 카드(HtmlPreview)로 바꾸고 나머지는 기존 renderMarkdown에 그대로
+// 넘긴다. 토크나이즈 규칙은 renderMarkdown과 동일(``` split, 홀수 인덱스=코드블록) — 둘이 어긋나면
+// 같은 텍스트가 두 렌더에서 다르게 잘린다.
+export type MsgSegment = { kind: 'md'; text: string } | { kind: 'html'; code: string };
+
+// 안전장치: 이 크기를 넘는 html은 iframe 미리보기 대신 코드블록으로 폴백한다(거대한 srcdoc이
+// 렌더러를 멈추게 하는 사고 방지). 문자 수 기준(대략 바이트 상한과 같은 자릿수).
+export const HTML_PREVIEW_MAX = 200 * 1024;
+
+function splitHtmlBlocks(text: string): MsgSegment[] {
+  const src = String(text);
+  const segs = src.split('```');
+  const out: MsgSegment[] = [];
+  let buf = '';
+  let found = false;
+  const flush = () => {
+    // html 카드와 붙는 마크다운 조각은 앞뒤 빈 줄을 털어낸다 — .body가 white-space:pre-wrap이라
+    // 남은 개행이 카드 위아래 빈 줄로 보인다.
+    const t = buf.replace(/^\n+/, '').replace(/\n+$/, '');
+    if (t) out.push({ kind: 'md', text: t });
+    buf = '';
+  };
+  segs.forEach((seg, idx) => {
+    if (idx % 2 === 0) { buf += seg; return; }
+    // 펜스가 홀수 개면 마지막 조각은 아직 안 닫힌 코드블록(스트리밍 중)이다 — 반쪽 html을
+    // iframe에 밀어 넣지 않고 코드로 둔다.
+    const unclosed = idx === segs.length - 1 && segs.length % 2 === 0;
+    const lang = (seg.match(/^([\w-]*)\n/) || [, ''])[1];
+    const body = seg.replace(/^[\w-]*\n/, '').replace(/\n$/, '');
+    if (!unclosed && lang === 'html' && body.trim() && body.length <= HTML_PREVIEW_MAX) {
+      found = true;
+      flush();
+      out.push({ kind: 'html', code: body });
+      return;
+    }
+    buf += '```' + seg + (unclosed ? '' : '```');
+  });
+  flush();
+  // html이 하나도 없으면 원문 한 덩어리 그대로 — 기존 렌더 경로(회귀 0)를 그대로 태우기 위해
+  // 조립본이 아니라 src를 돌려준다.
+  if (!found) return [{ kind: 'md', text: src }];
+  return out;
+}
+
+export { renderMarkdown, renderChart, mdInline, splitHtmlBlocks };

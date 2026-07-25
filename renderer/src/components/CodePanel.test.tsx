@@ -173,6 +173,32 @@ describe('CodePanel — 프리뷰 탭', () => {
     expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms');
   });
 
+  // HTML 인라인 미리보기 "크게 보기" — 프리뷰 탭에 srcdoc(HTML 문자열) 모드를 additive로 추가.
+  // URL 모드(기존)는 그대로 두고, previewHtml이 있으면 그게 우선한다.
+  it('previewHtml이 있으면 srcdoc iframe(sandbox=allow-scripts)으로 크게 보여준다', () => {
+    render(<CodePanel channelId="ch1" repoPath="/repo" tab="preview" previewHtml="<h1>big</h1>"
+      onChangeTab={() => {}} onClose={() => {}} />);
+    const iframe = document.querySelector('iframe');
+    expect(iframe?.getAttribute('srcdoc')).toBe('<h1>big</h1>');
+    expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(iframe?.getAttribute('src')).toBeNull();
+  });
+
+  it('previewHtml 모드에서 URL로 이동하면 srcdoc을 비우도록 알린다', () => {
+    const onClearPreviewHtml = vi.fn();
+    render(<CodePanel channelId="ch1" repoPath="/repo" tab="preview" previewHtml="<h1>big</h1>"
+      onClearPreviewHtml={onClearPreviewHtml} onChangeTab={() => {}} onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText('http://localhost:5173'), { target: { value: 'http://localhost:5173' } });
+    fireEvent.click(screen.getByText(T.codePreviewGo));
+    expect(onClearPreviewHtml).toHaveBeenCalled();
+  });
+
+  it('previewHtml이 없으면 기존 URL 프리뷰 동작 그대로다(회귀 0)', () => {
+    render(<CodePanel channelId="ch1" repoPath="/repo" tab="preview" onChangeTab={() => {}} onClose={() => {}} />);
+    expect(screen.getByText(T.codePreviewEmpty)).toBeInTheDocument();
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+
   it('새로고침 버튼은 iframe을 리마운트(key 변경)한다', () => {
     render(<CodePanel channelId="ch1" repoPath="/repo" tab="preview" onChangeTab={() => {}} onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText('http://localhost:5173'), { target: { value: 'http://localhost:5173' } });

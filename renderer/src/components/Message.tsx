@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Message as Msg, AttachmentMeta } from '../../../shared/protocol';
-import { renderMarkdown } from '../render/markdown';
+import { renderMarkdown, splitHtmlBlocks } from '../render/markdown';
 import { ko } from '../config';
 import { ActionButtons } from './ActionButtons';
+import { HtmlPreview } from './HtmlPreview';
 import { QuestionCard } from './QuestionCard';
 import { fetchAttachmentBlobUrl } from '../auth-api';
 import { T } from '../i18n';
@@ -86,6 +87,17 @@ function Attachment({ a, ctx }: { a: AttachmentMeta; ctx?: AttachmentCtx }) {
   );
 }
 
+// html 카드와 섞여 있을 때의 마크다운 조각 하나. 렌더 방식은 기존 본문과 완전히 같다
+// (renderMarkdown DOM 빌더를 ref로 마운트) — 조각으로 나뉘었을 뿐 파이프라인은 동일하다.
+function MdChunk({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.replaceChildren(renderMarkdown(text));
+  }, [text]);
+  return <div className="mdChunk" ref={ref} />;
+}
+
 // 메시지 1개. 본문은 검증된 DOM 빌더를 ref로 마운트(React 이스케이프 밖이지만 빌더가 XSS 안전).
 // 선택이 필요한 결정 지점은 actions 버튼(ActionButtons)이 담당 — 번호 나열은 그냥 텍스트다.
 // onSend: actions 버튼 클릭 시 그 send 문자열을 현재 채널로 보낸다(App.sendText로 연결). 기존 테스트 호환 위해 optional.
@@ -96,12 +108,19 @@ function Attachment({ a, ctx }: { a: AttachmentMeta; ctx?: AttachmentCtx }) {
 // 카드가 원본 — 텍스트와 카드를 같이 보여주지 않는다). answeredText/onAnswer는 Task 5(App→Thread)에서 내려온다.
 // attachmentCtx(Task 4): m.attachments 렌더에 필요한 연결 정보(App→Thread→Message로 전달, optional —
 // 없으면 기존 테스트·attachments 없는 메시지 회귀 0).
-export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx }: {
+// onExpandHtml(HTML 인라인 미리보기): html 카드의 확대 버튼을 우측 코드 패널로 연결한다. App이
+// 패널을 띄울 수 있을 때만 내려주고(코드 채널), 없으면 카드에서 확대 버튼 자체가 사라진다.
+export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx, onExpandHtml }: {
   m: Msg; onSend?: (text: string) => void; myName?: string;
   answeredText?: string; onAnswer?: (text: string, answersId: string) => void;
   attachmentCtx?: AttachmentCtx;
+  onExpandHtml?: (html: string) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  // ```html 블록이 하나라도 있을 때만 세그먼트 렌더로 갈라진다 — 없으면(대다수 메시지) 아래
+  // useEffect+단일 .body 경로가 예전과 100% 동일하게 돈다(회귀 0).
+  const segments = useMemo(() => splitHtmlBlocks(m.text), [m.text]);
+  const hasHtml = segments.some((s) => s.kind === 'html');
   const isEngram = m.authorId === 'engram';
   const isMe = !isEngram && (myName === undefined || m.authorId === myName);
   const who = isEngram ? 'Engram' : isMe ? (ko ? '나' : 'me') : (m.authorName ?? m.authorId);
@@ -120,6 +139,12 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
       )}
       {m.question ? (
         <QuestionCard msgId={m.id} question={m.question} answeredText={answeredText} onAnswer={onAnswer ?? (() => {})} />
+      ) : hasHtml ? (
+        <div className="body">
+          {segments.map((s, i) => (s.kind === 'html'
+            ? <HtmlPreview key={'h' + i} code={s.code} onExpand={onExpandHtml} />
+            : <MdChunk key={'m' + i} text={s.text} />))}
+        </div>
       ) : (
         <div className="body" ref={bodyRef} />
       )}

@@ -219,7 +219,15 @@ function isHttpUrl(u: string): boolean {
 // 외부 열기는 <a target="_blank">만으로 충분하다 — 데스크톱 메인 프로세스(main.ts)의
 // setWindowOpenHandler가 이미 모든 target=_blank 네비게이션을 shell.openExternal로 돌려보낸다
 // (기존 관례, 레포 조사 결과 — 신규 preload API 불필요, 구현자 판단).
-function PreviewTab() {
+//
+// previewHtml(HTML 인라인 미리보기 "크게 보기"): 채팅 카드의 확대 버튼이 넘긴 HTML 문자열.
+// URL 모드는 그대로 두고 srcdoc 모드를 additive로 얹었다 — previewHtml이 있으면 그게 우선하고,
+// 사용자가 URL로 이동하면 onClearPreviewHtml로 상위 상태를 비워 원래 URL 프리뷰로 돌아간다.
+// srcdoc iframe의 sandbox는 allow-scripts 하나뿐이다(allow-same-origin 금지 — 두뇌가 만든 HTML이
+// 앱 출처를 얻으면 안 된다). URL 모드의 기존 sandbox 값은 건드리지 않는다(회귀 0).
+function PreviewTab({ previewHtml, onClearPreviewHtml }: {
+  previewHtml?: string | null; onClearPreviewHtml?: () => void;
+}) {
   const [url, setUrl] = useState('');
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
@@ -229,6 +237,7 @@ function PreviewTab() {
     const u = url.trim();
     if (!isHttpUrl(u)) { setError(T.codePreviewInvalidUrl); return; }
     setError(null);
+    onClearPreviewHtml?.();
     setLoadedUrl(u);
     setIframeKey((k) => k + 1);
   };
@@ -240,14 +249,17 @@ function PreviewTab() {
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') go(); }} />
         <button type="button" onClick={go}>{T.codePreviewGo}</button>
-        <button type="button" disabled={!loadedUrl} title={T.codeRefresh}
+        <button type="button" disabled={!loadedUrl && !previewHtml} title={T.codeRefresh}
           onClick={() => setIframeKey((k) => k + 1)}>⟳</button>
         {loadedUrl && (
           <a href={loadedUrl} target="_blank" rel="noopener noreferrer" title={T.codePreviewOpenExternal}>↗</a>
         )}
       </div>
       {error && <div className="codePreviewError">{error}</div>}
-      {loadedUrl ? (
+      {previewHtml ? (
+        <iframe key={'srcdoc-' + iframeKey} srcDoc={previewHtml} title={T.htmlPreviewTab}
+          sandbox="allow-scripts" />
+      ) : loadedUrl ? (
         <iframe key={iframeKey} src={loadedUrl} title={T.codePreviewTab}
           sandbox="allow-scripts allow-same-origin allow-forms" />
       ) : (
@@ -337,9 +349,11 @@ function DiffTab({ repoPath, onCount }: { repoPath: string; onCount: (n: number)
 
 // 패널 본체 — 탭 행+스플리터+탭별 본문. 폭은 자체 로컬 state(localStorage 퍼시스트) — 다른 상태에
 // 영향 없는 순수 표현 값이라 상위로 끌어올릴 이유가 없다(레포 첫 스플리터).
-export function CodePanel({ channelId, repoPath, tab, onChangeTab, onClose }: {
+export function CodePanel({ channelId, repoPath, tab, onChangeTab, onClose, previewHtml, onClearPreviewHtml }: {
   channelId: string; repoPath: string; tab: CodeTab;
   onChangeTab: (tab: CodeTab) => void; onClose: () => void;
+  // HTML 인라인 미리보기 "크게 보기"(선택) — 없으면 프리뷰 탭은 기존 URL 전용 그대로다.
+  previewHtml?: string | null; onClearPreviewHtml?: () => void;
 }) {
   const [width, setWidth] = useState<number>(() => clampWidth(loadWidth()));
   const [shellName, setShellName] = useState<string>(T.codeTerminalTab);
@@ -388,7 +402,7 @@ export function CodePanel({ channelId, repoPath, tab, onChangeTab, onClose }: {
       </div>
       <div className="codeTabBody">
         {tab === 'terminal' && <TerminalTab channelId={channelId} repoPath={repoPath} onShellName={setShellName} />}
-        {tab === 'preview' && <PreviewTab />}
+        {tab === 'preview' && <PreviewTab previewHtml={previewHtml} onClearPreviewHtml={onClearPreviewHtml} />}
         {tab === 'diff' && <DiffTab repoPath={repoPath} onCount={setDiffCount} />}
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { Message, aggregateTools } from './Message';
 import { T } from '../i18n';
 
@@ -144,6 +144,56 @@ describe('Message 첨부 렌더', () => {
     });
 
     expect(revoke).toHaveBeenCalledWith('blob:mock-i3'); // state에 반영하지 않고 즉시 revoke
+  });
+});
+
+// HTML 인라인 미리보기 — ```html 블록은 카드(기본 미리보기)로, 그 외 코드블록은 기존 그대로.
+describe('Message html 코드블록 인라인 미리보기', () => {
+  const htmlMsg = (text: string, id = 'h1') =>
+    ({ id, authorId: 'engram', ts: new Date(0).toISOString(), text }) as any;
+  const render_mixed = () => (
+    <Message m={htmlMsg('앞말\n- 목록\n```html\n<p>y</p>\n```\n뒷말', 'mix1')} />
+  );
+
+  it('```html 블록은 미리보기 카드(sandbox iframe)로 렌더된다', () => {
+    const { container } = render(<Message m={htmlMsg('```html\n<h1>hi</h1>\n```')} />);
+    const card = container.querySelector('.body .htmlCard');
+    expect(card).toBeTruthy();
+    const frame = card?.querySelector('iframe');
+    expect(frame?.getAttribute('srcdoc')).toBe('<h1>hi</h1>');
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
+  });
+
+  it('html 블록 앞뒤 마크다운도 같이 렌더된다(카드가 본문을 삼키지 않는다)', () => {
+    const { container } = render(
+      render_mixed(),
+    );
+    expect(container.textContent).toContain('앞말');
+    expect(container.textContent).toContain('뒷말');
+    expect(container.querySelector('.htmlCard')).toBeTruthy();
+    expect(container.querySelector('.body ul li')?.textContent).toBe('목록');
+  });
+
+  // 회귀 0: html이 아닌 코드블록은 카드 없이 기존 pre>code 그대로여야 한다.
+  it('js/bash 등 다른 코드블록은 기존 pre>code 렌더 그대로다(회귀 0)', () => {
+    const text = '설명\n```js\nconst a = 1;\n```\n끝';
+    const { container } = render(<Message m={htmlMsg(text, 'js1')} />);
+    expect(container.querySelector('.htmlCard')).toBeNull();
+    expect(container.querySelector('.body pre > code')?.textContent).toBe('const a = 1;');
+  });
+
+  it('onExpandHtml 미전달(일반 채팅)이면 확대 버튼이 없다', () => {
+    const { container } = render(<Message m={htmlMsg('```html\n<p>x</p>\n```', 'h2')} />);
+    expect(container.querySelector('.htmlCardExpand')).toBeNull();
+  });
+
+  it('onExpandHtml 전달 시 확대 버튼 클릭이 그 html을 그대로 올려보낸다', () => {
+    const onExpandHtml = vi.fn();
+    const { container } = render(
+      <Message m={htmlMsg('```html\n<p>x</p>\n```', 'h3')} onExpandHtml={onExpandHtml} />,
+    );
+    fireEvent.click(container.querySelector('.htmlCardExpand') as HTMLButtonElement);
+    expect(onExpandHtml).toHaveBeenCalledWith('<p>x</p>');
   });
 });
 

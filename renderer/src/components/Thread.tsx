@@ -15,21 +15,23 @@ export function Thread(props: {
   getAnsweredText?: (id: string) => string | undefined;
   onAnswer?: (text: string, answersId: string) => void;
   getAttachmentCtx?: (id: string) => AttachmentCtx | undefined;
+  // HTML 인라인 미리보기 — 카드의 확대 버튼을 우측 코드 패널로 잇는다(App이 패널 가능할 때만 전달).
+  onExpandHtml?: (html: string) => void;
 }) {
   const { anchor, replies } = props;
   const answeredText = props.getAnsweredText?.(anchor.id);
-  if (replies.length === 0) return <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} />;
+  if (replies.length === 0) return <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} onExpandHtml={props.onExpandHtml} />;
   if (replies.length === 1) {
     return (<>
-      <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} />
-      <div className="msg reply"><Message m={replies[0]} onSend={props.onSend} myName={props.myName} answeredText={props.getAnsweredText?.(replies[0].id)} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(replies[0].id)} /></div>
+      <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} onExpandHtml={props.onExpandHtml} />
+      <div className="msg reply"><Message m={replies[0]} onSend={props.onSend} myName={props.myName} answeredText={props.getAnsweredText?.(replies[0].id)} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(replies[0].id)} onExpandHtml={props.onExpandHtml} /></div>
     </>);
   }
   return (<>
-    <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} />
+    <Message m={anchor} onSend={props.onSend} myName={props.myName} answeredText={answeredText} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(anchor.id)} onExpandHtml={props.onExpandHtml} />
     <details className="thread" open={!props.collapsed} onToggle={(e) => props.onToggle(!(e.target as HTMLDetailsElement).open)}>
       <summary>{'🧵 ' + T.replies(replies.length)}</summary>
-      {replies.map((r) => <Message key={r.id} m={r} onSend={props.onSend} myName={props.myName} answeredText={props.getAnsweredText?.(r.id)} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(r.id)} />)}
+      {replies.map((r) => <Message key={r.id} m={r} onSend={props.onSend} myName={props.myName} answeredText={props.getAnsweredText?.(r.id)} onAnswer={props.onAnswer} attachmentCtx={props.getAttachmentCtx?.(r.id)} onExpandHtml={props.onExpandHtml} />)}
       <div className="treply">
         <input type="text" placeholder={T.replyPh} value={props.draft}
           onChange={(e) => props.onDraft(e.target.value)}

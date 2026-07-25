@@ -435,6 +435,18 @@ export default function App() {
   };
   const codePanelGate = mode === 'code' && !!defaultChan?.repoPath && !!window.engramDesktop?.ptyStart;
 
+  // HTML 인라인 미리보기 "크게 보기" — 채팅 카드의 확대 버튼이 넘긴 HTML을 우측 패널 프리뷰 탭에
+  // srcdoc으로 띄운다. 패널을 못 여는 영역(일반 Chat/Team, 비데스크톱)에는 onExpandHtml 자체를
+  // 내려주지 않아 카드에서 확대 버튼이 사라진다 — 눌러도 아무 일 없는 버튼을 두지 않는다.
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  useEffect(() => { setPreviewHtml(null); }, [mode, defaultChan?.id]);
+  const expandHtml = (html: string) => {
+    if (!defaultChan) return;
+    setPreviewHtml(html);
+    setCodeTab('preview');
+    saveCodeTab(defaultChan.id, 'preview');
+  };
+
   // 그 이름 채널을 가진 모든 연결에 프레임을 보낸다(삭제·respondMode 변경 팬아웃).
   // team 모드는 스코프된 연결(viewConns=기본 연결 하나)에만 보낸다 — 안 그러면 동명 팀채널이
   // 다른 브레인에도 있을 때 그쪽까지 삭제/변경되어 Phase14가 금지한 교차 연결 오염이 재발한다.
@@ -887,7 +899,8 @@ export default function App() {
                       onSend={(text) => sendText(text)}
                       getAnsweredText={(id) => answeredById.get(id)}
                       onAnswer={(text, answersId) => sendText(text, undefined, answersId)}
-                      getAttachmentCtx={attachmentCtxFor} />
+                      getAttachmentCtx={attachmentCtxFor}
+                      onExpandHtml={codePanelGate ? expandHtml : undefined} />
                   ));
                 })()}
                 {currentName && awaiting.has(currentName) && (
@@ -1037,7 +1050,8 @@ export default function App() {
                   <div className="codeMainRow">
                     <div className="chatCol">{codeChildren}</div>
                     <CodePanel channelId={defaultChan.id} repoPath={defaultChan.repoPath as string} tab={codeTab}
-                      onChangeTab={openCodeTab} onClose={closeCodePanel} />
+                      onChangeTab={openCodeTab} onClose={closeCodePanel}
+                      previewHtml={previewHtml} onClearPreviewHtml={() => setPreviewHtml(null)} />
                   </div>
                 ) : (
                   <div className="chatCol">{codeChildren}</div>

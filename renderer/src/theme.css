@@ -124,6 +124,26 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .chart .cval { fill:var(--text); font-size:10.5px; }
 .chart .cgrid { stroke:var(--line); stroke-width:1; }
 .chart .chole { fill:var(--pre-bg); }
+/* HTML 인라인 미리보기 카드 — 헤더(라벨+토글+확대) + 본문(iframe 미리보기 | 코드).
+   .chart와 같은 결(pre-bg 패널·--line 보더·8px 라운드)로 본문 안에서 튀지 않게 한다. */
+.htmlCard { margin:8px 0; border:1px solid var(--line); border-radius:8px; overflow:hidden;
+            background:var(--pre-bg); white-space:normal; }
+.htmlCardBar { display:flex; align-items:center; gap:8px; padding:5px 8px; border-bottom:1px solid var(--line); }
+.htmlCardLabel { flex:1; min-width:0; font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.htmlCardTabs { flex:none; display:flex; gap:2px; }
+.htmlCardTab { padding:3px 9px; font-size:11px; color:var(--dim); background:transparent;
+               border:1px solid transparent; border-radius:6px; cursor:pointer; }
+.htmlCardTab:hover { color:var(--text); background:var(--hover); }
+.htmlCardTab.active { color:var(--accent); background:var(--accent-soft); border-color:var(--accent-line); }
+.htmlCardExpand { flex:none; width:24px; height:22px; font-size:12px; line-height:1; color:var(--dim);
+                  background:transparent; border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+.htmlCardExpand:hover { color:var(--text); background:var(--hover); }
+/* 미리보기 프레임: 기본 280px(브리프). 폭은 카드에 꽉 차게 — 안쪽 콘텐츠가 넘쳐도 iframe이
+   자체 스크롤을 가지므로 채팅 페이지 자체엔 가로 스크롤이 생기지 않는다. */
+.htmlCardFrame { display:block; width:100%; height:280px; border:none; background:var(--panel-2); }
+.body .htmlCardCode { margin:0; border:none; border-radius:0; max-height:280px; overflow:auto; }
+/* html 카드와 섞인 마크다운 조각 — 기존 .body 흐름 그대로(추가 여백 없음). */
+.body .mdChunk { white-space:pre-wrap; }
 .body ul.check { list-style:none; margin-left:4px; padding:0; }
 .body ul.check li { display:flex; align-items:flex-start; gap:7px; }
 .body ul.check input { margin-top:3px; accent-color:var(--accent); }
