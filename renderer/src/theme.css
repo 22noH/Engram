@@ -58,6 +58,27 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 #updateBanner .updateBtn:hover { background:var(--accent); color:var(--accent-text); }
 #updateBanner .updateDismiss { -webkit-app-region:no-drag; cursor:pointer; border:none; background:transparent;
                 color:var(--dim); font-size:13px; padding:0 2px; }
+/* CLI 두뇌 로그인 배너(목업 ①②) — 업데이트 배너와 같은 자리(타이틀바 아래), 같은 얇은 스트립 결.
+   둘 다 뜨면 세로로 쌓인다(각각 flex:none인 #root의 형제). 경고 톤은 승인 대기 카드와 같은
+   --pending-* 앰버 페어(라이트/다크 모두 정의됨 — 하드코딩 색 없음). */
+#cliAuthBanner { flex:none; display:flex; flex-direction:column;
+                 background:var(--pending-bg); border-bottom:1px solid var(--pending-line);
+                 font-size:12.5px; color:var(--text); }
+#cliAuthBanner .cliAuthRow { display:flex; align-items:center; gap:10px; padding:7px 14px; }
+#cliAuthBanner .cliAuthText { flex:1; min-width:0; }
+#cliAuthBanner .cliAuthBtn { -webkit-app-region:no-drag; cursor:pointer; font-size:12px; padding:3px 12px;
+                 border:1px solid var(--pending-line); color:var(--text); background:var(--panel);
+                 border-radius:6px; white-space:nowrap; }
+#cliAuthBanner .cliAuthBtn:hover:not(:disabled) { background:var(--hover); }
+#cliAuthBanner .cliAuthBtn:disabled { cursor:default; color:var(--dim); }
+#cliAuthBanner .cliAuthDismiss { -webkit-app-region:no-drag; cursor:pointer; border:none; background:transparent;
+                 color:var(--dim); font-size:13px; padding:0 2px; }
+/* 인라인 확장(목업 ②) — 배너 안에서 한 줄 더 내려온다(모달 없이, 레이아웃은 그대로 쌓임) */
+#cliAuthBanner .cliAuthFix { display:flex; align-items:center; flex-wrap:wrap; gap:8px;
+                 padding:0 14px 8px 40px; color:var(--dim); }
+#cliAuthBanner .cliAuthCmd { font-family:ui-monospace,'Cascadia Code',Consolas,monospace; font-size:12px;
+                 background:var(--code-bg); border:1px solid var(--pending-line); border-radius:5px; padding:1px 7px;
+                 color:var(--text); }
 #app { flex:1; display:flex; min-height:0; }
 #side { width:220px; background:var(--panel); border-right:1px solid var(--line);
         display:flex; flex-direction:column; }

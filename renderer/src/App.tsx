@@ -21,6 +21,7 @@ import { MentionAutocomplete, mentionCandidates } from './components/MentionAuto
 import { WikiArea } from './components/WikiArea';
 import { AdminArea } from './components/AdminArea';
 import { LoginGate } from './components/LoginGate';
+import { CliAuthBanner } from './components/CliAuthBanner';
 import { allow } from './permissions';
 import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit, AdminUserDto, AdminSettings } from '../../shared/protocol';
 import { T } from './i18n';
@@ -820,6 +821,9 @@ export default function App() {
           <button className="updateDismiss" title={T.close} onClick={() => setUpdateReady(null)}>✕</button>
         </div>
       )}
+      {/* CLI 두뇌 로그인 배너 — 업데이트 배너 바로 아래(같은 자리). 조회·구독·표시 판단은 컴포넌트가
+          전부 들고 있고(데스크톱 아니면 스스로 null), 둘 다 뜨면 세로로 쌓인다. */}
+      <CliAuthBanner />
       {showManage && (
         <ManageEngrams
           connections={connState.connections}

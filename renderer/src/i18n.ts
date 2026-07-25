@@ -194,6 +194,19 @@ export const T = {
   // 자동 업데이트 배너(사용자 요청 2026-07-24) — 새 버전 다운로드 완료 시 상단 배너.
   updateReady: (v: string) => (ko ? `새 버전 v${v} 준비됨` : `New version v${v} is ready`),
   updateRestart: ko ? '재시작해서 업데이트' : 'Restart to update',
+  // CLI 두뇌 로그인 배너(목업 ①②) — 물어보기 전에 미리 알려준다. 'logged-out'일 때만 노출한다
+  // ('unknown'은 판단 불가 = 오경보 금지). label은 고유명(Claude CLI / Codex CLI)이라 번역하지 않는다.
+  cliAuthTitle: (label: string) => (ko ? `${label} 로그인이 필요합니다` : `${label} sign-in required`),
+  cliAuthBody: ko ? '이 상태로는 답변을 만들 수 없어요.' : "Replies can't be generated until you sign in.",
+  cliAuthHowTo: ko ? '해결 방법' : 'How to fix',
+  cliAuthFixClaude: ko
+    ? '터미널에서 아래를 실행한 뒤 /login 을 입력하세요.'
+    : 'Run the command below in a terminal, then type /login.',
+  cliAuthFixCodex: ko ? '터미널에서 아래를 실행하세요.' : 'Run the command below in a terminal.',
+  cliAuthCopy: ko ? '명령 복사' : 'Copy command',
+  cliAuthCopied: ko ? '복사됨' : 'Copied',
+  cliAuthRecheck: ko ? '다시 확인' : 'Check again',
+  cliAuthChecking: ko ? '확인 중…' : 'Checking…',
 
   // ─── 입력바 2줄 개편(목업 승인 2026-07-25) ───────────────────────────────────
   // 1행 우측 힌트(↵)의 툴팁 — 글리프 자체는 로케일 무관.

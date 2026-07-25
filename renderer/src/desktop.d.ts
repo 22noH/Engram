@@ -18,6 +18,15 @@ export type CreatePrResult =
 
 export interface SttProgress { percent: number; loadedBytes: number; totalBytes: number; file: string }
 
+// CLI 두뇌 로그인 상태(chat-preload.ts의 cliAuth* 계약). null = 기본 두뇌가 CLI가 아님 = 배너 없음.
+// state='unknown'은 "판단 불가"라 경고하지 않는다(오경보 금지 — 배너는 'logged-out'에서만).
+export interface CliAuthState {
+  provider: string;   // 'claude-cli' | 'codex-cli'
+  state: string;      // 'logged-in' | 'logged-out' | 'unknown'
+  detail?: string;    // 예: 'a@b.com (max)'
+  fixCommand: string; // 복사용 명령(claude / codex login)
+}
+
 declare global {
   interface Window {
     engramDesktop?: {
@@ -50,6 +59,10 @@ declare global {
       sttTranscribe?: (audio: ArrayBuffer, opts?: { sampleRate?: number; language?: string })
         => Promise<{ ok: true; text: string; ms: number } | { error: string }>;
       onSttProgress?: (cb: (s: SttProgress) => void) => () => void;
+      // CLI 두뇌 로그인 상태(desktop Task — cli-auth.ts). 배너 UI는 렌더러(CliAuthBanner) 담당.
+      cliAuthState?: () => Promise<CliAuthState | null>;
+      cliAuthRefresh?: () => Promise<CliAuthState | null>;
+      onCliAuthChanged?: (cb: (s: CliAuthState | null) => void) => () => void;
       // 자동 업데이트 상태(사용자 요청 2026-07-24) — 현재 버전 표시 + 다운로드된 새 버전 배너/설치 버튼.
       updateState?: () => Promise<{ current: string; pending: string | null }>;
       installUpdate?: () => Promise<void>;
