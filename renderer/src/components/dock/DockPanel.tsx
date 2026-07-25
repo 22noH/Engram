@@ -241,7 +241,7 @@ export function DockPanel({ channelId, repoPath, layout, onLayout }: {
         </div>
         <div className="dockPaneBody">
           {pane.tool === 'browser' && (
-            <BrowserPane tabs={pane.tabs} activeTabId={activeTab?.id ?? null} prefs={prefs}
+            <BrowserPane channelId={channelId} tabs={pane.tabs} activeTabId={activeTab?.id ?? null} prefs={prefs}
               onTabPatch={(tabId, patch) => onLayout(updateTab(layout, pane.id, tabId, patch))}
               onNewTab={(url) => doNewTab(pane, url ? { url, title: urlTitle(url) } : undefined)} />
           )}

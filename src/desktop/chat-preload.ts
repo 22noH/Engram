@@ -39,6 +39,17 @@ contextBridge.exposeInMainWorld('engramDesktop', {
   // saveScreenshot: webview.capturePage()로 만든 PNG 바이트를 저장(대화상자는 메인). 저장 경로 반환.
   saveScreenshot: (png: ArrayBuffer, suggested?: string): Promise<string | null> =>
     ipcRenderer.invoke('engram:save-screenshot', png, suggested),
+  // 허용된 사이트(단일 출처=렌더러 localStorage)를 메인에 밀어 넣는다. 메인은 게스트 webview의
+  // will-navigate/will-redirect를 이 목록으로 판정한다(페이지 안 링크 클릭은 렌더러가 못 막는다).
+  setAllowedSites: (sites: string[]): Promise<void> => ipcRenderer.invoke('engram:set-allowed-sites', sites),
+  // 메인이 이동을 막았을 때 알림(조용한 차단 금지 — 왜 안 넘어갔는지 화면에 보여준다).
+  onNavBlocked: (cb: (url: string) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, url: string): void => cb(url);
+    ipcRenderer.on('engram:nav-blocked', listener);
+    return () => ipcRenderer.removeListener('engram:nav-blocked', listener);
+  },
+  // AI 웹 조작: 대화상자 없이 임시 폴더에 스크린샷 저장(경로 반환) — 두뇌가 그 파일을 읽어 본다.
+  saveShotTemp: (png: ArrayBuffer): Promise<string | null> => ipcRenderer.invoke('engram:save-shot-temp', png),
   // 파일 끌어다 놓기: Electron 32+에서 File.path가 사라졌다 — 실제 경로는 webUtils로만 얻는다.
   // 이 함수는 preload(격리된 컨텍스트)에서만 동작한다(렌더러엔 webUtils가 없다).
   filePath: (file: File): string => {

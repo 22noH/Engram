@@ -1,6 +1,6 @@
 import {
   addServer, allowSite, DEFAULT_PREFS, forgetSite, isSiteAllowed, loadAllowedSites, loadPrefs,
-  loadServers, previewPartition, removeServer, saveServers, savePrefs, serverUrl,
+  loadServers, nextConfirmMode, previewPartition, removeServer, saveServers, savePrefs, serverUrl,
 } from './prefs';
 
 beforeEach(() => localStorage.clear());
@@ -83,8 +83,23 @@ describe('토글 · 파티션', () => {
   });
 
   it('저장하고 다시 읽는다', () => {
-    savePrefs({ openLinksHere: true, keepSession: true });
-    expect(loadPrefs()).toEqual({ openLinksHere: true, keepSession: true });
+    savePrefs({ ...DEFAULT_PREFS, openLinksHere: true, keepSession: true });
+    expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, openLinksHere: true, keepSession: true });
+  });
+
+  // AI 웹 조작(2단계) — 조작 허용은 기본 켬, 확인 단계 기본은 "내 컴퓨터에서만".
+  it('AI 조작 기본값: 허용 켬 + 내 컴퓨터에서만', () => {
+    expect(DEFAULT_PREFS.agentEnabled).toBe(true);
+    expect(DEFAULT_PREFS.confirmMode).toBe('local');
+  });
+
+  it('확인 단계는 3단계를 순환하고, 오염된 저장값은 기본값으로 떨어진다', () => {
+    expect(nextConfirmMode('ask')).toBe('local');
+    expect(nextConfirmMode('local')).toBe('auto');
+    expect(nextConfirmMode('auto')).toBe('ask');
+    localStorage.setItem('engram.dock.prefs', JSON.stringify({ confirmMode: 'nonsense', agentEnabled: false }));
+    expect(loadPrefs().confirmMode).toBe('local');
+    expect(loadPrefs().agentEnabled).toBe(false); // 명시적 false는 존중
   });
 
   it('깨진 값은 기본값', () => {

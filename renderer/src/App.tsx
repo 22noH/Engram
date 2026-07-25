@@ -18,6 +18,10 @@ import {
 } from './dock/layout';
 import { loadPrefs } from './dock/prefs';
 import { toNavUrl, urlTitle } from './dock/url';
+import { getView } from './dock/views';
+import { appendAgentLog, consoleLines, requestConfirm } from './dock/agent-store';
+import { runBrowserOp } from './dock/agent-run';
+import type { BrowserOp } from '../../shared/browser-ops';
 import { EngramSelector } from './components/EngramSelector';
 import { RespondModeBadge, ModelBadge, EffortBadge, PermModeBadge } from './components/ComposerBadges';
 import { MicButton } from './components/MicButton';
@@ -231,6 +235,10 @@ export default function App() {
       if (name && awaiting.has(name)) {
         setStreamTexts((prev) => new Map(prev).set(name, (prev.get(name) ?? '') + f.text));
       }
+    } else if (f.t === 'browserOp') {
+      // AI 웹 조작(2단계) — 실제 수행은 handleBrowserOp(아래 정의). never-throw: 실패해도 프레임
+      // 루프가 죽으면 안 되고, 두뇌는 결과 프레임이 오지 않으면 타임아웃으로 흡수한다.
+      void handleBrowserOp(connId, f).catch(() => {});
     } else if (f.t === 'historyCleared') {
       // Task 4(clear-compact) — 그 채널 transcript를 즉시 비우고(모달·시스템 메시지 없음) 실행취소 토스트를 띄운다.
       setMsgsByConnCh((prev) => new Map(prev).set(`${connId}::${f.channelId}`, []));
@@ -489,6 +497,42 @@ export default function App() {
       ? updateTab(next, browser.id, activeTab.id, { url, title: title ?? urlTitle(url) })
       : addTab(next, browser.id, makeTab({ url, title: title ?? urlTitle(url) }));
     applyDock(next);
+  };
+
+  // AI 웹 조작(2단계) — 두뇌가 보낸 조작 1건을 이 화면의 <webview>에서 수행하고 결과를 돌려준다.
+  //
+  // 누가 답하는가: **데스크톱 앱이면서 그 코드 채널을 열고 있는** 클라이언트만. 폰 브라우저 등
+  // webview가 없는 클라는 조용히 무시한다(중복 응답 방지 — 먼저 온 답만 채택되지만 애초에 못 하는
+  // 클라가 "못 한다"고 답해 진짜 화면의 답을 가로채면 안 된다). 열고 있지 않으면 타임아웃(2분)까지
+  // 매달리는 대신 무엇을 해야 하는지 즉시 알려준다.
+  const answerBrowserOp = (connId: string, opId: string, r: { ok: boolean; text: string }) => {
+    send(connId, { t: 'browserResult', opId, ok: r.ok, text: r.text });
+  };
+  const handleBrowserOp = async (connId: string, f: { channelId: string; opId: string; op: BrowserOp }) => {
+    if (!window.engramDesktop) return; // webview가 없는 클라 — 침묵(다른 클라가 답한다)
+    if (!defaultChan || defaultChan.id !== f.channelId || mode !== 'code') {
+      answerBrowserOp(connId, f.opId, {
+        ok: false,
+        text: 'browser error: this code channel is not open in the Engram window — ask the user to open it first',
+      });
+      return;
+    }
+    const prefs = loadPrefs();
+    const browserPane = dock ? findPaneByTool(dock, 'browser') : null;
+    const activeTabId = browserPane?.activeTabId ?? null;
+    const activeTab = browserPane?.tabs.find((t) => t.id === activeTabId);
+    const result = await runBrowserOp(f.op, {
+      channelId: f.channelId,
+      view: getView(activeTabId),
+      currentUrl: activeTab?.url ?? '',
+      prefs: { agentEnabled: prefs.agentEnabled, confirmMode: prefs.confirmMode },
+      navigate: (url) => openInDockBrowser(url),
+      confirm: (label, url) => requestConfirm(f.channelId, label, url),
+      log: (e) => { appendAgentLog(f.channelId, e); },
+      consoleLines: () => consoleLines(activeTabId),
+      saveShot: async (png) => (await window.engramDesktop?.saveShotTemp?.(png)) ?? null,
+    });
+    answerBrowserOp(connId, f.opId, result);
   };
 
   // HTML 인라인 미리보기 "크게 보기" — 채팅 카드의 확대 버튼이 넘긴 HTML을 브라우저 칸의 새 탭으로

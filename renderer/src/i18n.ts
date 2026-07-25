@@ -228,6 +228,25 @@ export const T = {
   dockAllowOnce: ko ? '이번만' : 'Just once',
   dockAllowAlways: ko ? '항상 허용' : 'Always allow',
   dockCancel: ko ? '취소' : 'Cancel',
+  // 메인 프로세스가 막은 이동(페이지 안 링크 클릭·리다이렉트) — 조용한 차단 금지.
+  dockNavBlocked: (host: string) => (ko
+    ? `${host} 로 넘어가려는 걸 막았어요 — 허용된 사이트가 아닙니다(⋮ → 허용된 사이트 관리).`
+    : `Blocked a jump to ${host} — it is not in your allowed sites (⋮ → Allowed sites).`),
+  // AI 웹 조작(2단계, 목업 승인분)
+  dockAgentSection: ko ? 'AI 웹 조작' : 'AI web control',
+  dockAgentEnabled: ko ? '조작 허용' : 'Allow AI control',
+  dockAgentConfirm: ko ? '자동 확인' : 'Auto-approve',
+  dockAgentConfirmAsk: ko ? '매번 묻기' : 'Ask every time',
+  dockAgentConfirmLocal: ko ? '내 컴퓨터에서만' : 'On my computer only',
+  dockAgentConfirmAuto: ko ? '항상 자동' : 'Always automatic',
+  dockAgentConfirmHint: ko
+    ? '외부 사이트에서 AI가 클릭·입력하는 건 되돌리기 어려울 수 있어 기본값은 "내 컴퓨터에서만"입니다. 로그인·결제 정보 입력은 어떤 설정에서도 하지 않습니다.'
+    : 'Clicking and typing on external sites can be hard to undo, so the default is "On my computer only". Sign-in and payment details are never typed, whatever the setting.',
+  dockAgentAsk: (what: string, where: string) => (ko ? `${what} — ${where}` : `${what} — ${where}`),
+  dockAgentAllow: ko ? '허용' : 'Allow',
+  dockAgentSkip: ko ? '건너뛰기' : 'Skip',
+  dockAgentLog: ko ? '행동 로그' : 'Activity log',
+  dockAgentLogClear: ko ? '지우기' : 'Clear',
   // HTML 인라인 미리보기 — 메시지 안 ```html 블록 카드(헤더 토글 2개+확대 버튼).
   htmlPreviewTab: ko ? '미리보기' : 'Preview',
   htmlCodeTab: ko ? '코드' : 'Code',

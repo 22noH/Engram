@@ -735,6 +735,27 @@ body.dockDragging .dockWebview, body.dockDragging iframe { pointer-events:none; 
 .dockWebview.active { visibility:visible; z-index:1; }
 .dockEmpty { position:absolute; inset:0; z-index:2; }
 
+/* AI 웹 조작(2단계) — 확인 줄 + 행동 로그(목업 ①). 브라우저 칸 아래에 붙는다. */
+.dockAgentBar { flex:none; display:flex; align-items:center; gap:9px; padding:8px 11px; font-size:12px;
+                background:var(--accent-soft); border-top:1px solid var(--line); }
+.dockAgentBar .ic { font-size:14px; }
+.dockAgentBar button { padding:3px 10px; font-size:11px; border:1px solid var(--line); border-radius:6px;
+                       background:var(--panel); color:var(--text); cursor:pointer; }
+.dockAgentBar button:hover { background:var(--hover); }
+.dockAgentBar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.dockAgentLog { flex:none; max-height:132px; overflow-y:auto; padding:6px 11px 8px;
+                border-top:1px solid var(--line); background:var(--panel-2); font-size:11.5px; }
+.dockAgentLogHead { display:flex; align-items:center; justify-content:space-between;
+                    color:var(--muted); font-size:11px; padding-bottom:3px; }
+.dockAgentLogHead button { border:none; background:none; color:var(--muted); font-size:11px; cursor:pointer; }
+.dockAgentLogHead button:hover { color:var(--text); text-decoration:underline; }
+.dockAgentLogRow { display:flex; gap:7px; align-items:baseline; line-height:1.75; color:var(--muted); }
+.dockAgentLogRow .mark { flex:none; width:9px; }
+.dockAgentLogRow .txt { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dockAgentLogRow.ok .mark { color:var(--ok, #2f6b3c); }
+.dockAgentLogRow.fail .mark, .dockAgentLogRow.blocked .mark { color:var(--danger); }
+.dockAgentLogRow.blocked .txt { color:var(--danger); }
+
 /* 드롭다운(서버·더보기) — 탭 줄 오른쪽에 매달린다. */
 .dockMenuWrap { position:absolute; top:100%; right:6px; z-index:20; }
 .dockMenu { width:250px; padding:6px 0; border-radius:10px; background:var(--panel);

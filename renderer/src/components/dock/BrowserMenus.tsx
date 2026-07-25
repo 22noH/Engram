@@ -1,6 +1,16 @@
 import { useState } from 'react';
 import { T } from '../../i18n';
-import { addServer, type DevServer, type DockPrefs, forgetSite, loadAllowedSites, removeServer } from '../../dock/prefs';
+import {
+  addServer, type ConfirmMode, type DevServer, type DockPrefs, forgetSite, loadAllowedSites,
+  nextConfirmMode, removeServer,
+} from '../../dock/prefs';
+
+// 자동 확인 3단계 라벨(목업 승인분) — 한 줄을 누르면 다음 단계로 돈다.
+const CONFIRM_LABEL: Record<ConfirmMode, string> = {
+  ask: T.dockAgentConfirmAsk,
+  local: T.dockAgentConfirmLocal,
+  auto: T.dockAgentConfirmAuto,
+};
 
 // 브라우저 칸의 두 드롭다운(목업 dock-menus-mockup.html 승인분).
 //  ① 서버 — 개발 서버 목록/실행 표시/시작·중지/서버 추가
@@ -74,6 +84,20 @@ export function MoreMenu({ prefs, onPrefs, onOpenFile, onScreenshot, onClose }: 
 
   return (
     <div className="dockMenu wide" onMouseDown={(e) => e.stopPropagation()}>
+      {/* AI 웹 조작(2단계) — 1단계에서 일부러 비워뒀던 자리. 조작 없이 넣으면 빈 껍데기였다. */}
+      <div className="dockMenuHead">{T.dockAgentSection}</div>
+      <div className="dockMenuItem clickable" onClick={() => onPrefs({ ...prefs, agentEnabled: !prefs.agentEnabled })}>
+        <span className="dockMenuIcon">🤖</span>
+        <span className="dockMenuLabel">{T.dockAgentEnabled}</span>
+        <span className="dockMenuCheck">{prefs.agentEnabled ? '✓' : ''}</span>
+      </div>
+      <div className="dockMenuItem clickable" title={T.dockAgentConfirmHint}
+        onClick={() => onPrefs({ ...prefs, confirmMode: nextConfirmMode(prefs.confirmMode) })}>
+        <span className="dockMenuIcon" />
+        <span className="dockMenuLabel">{T.dockAgentConfirm}</span>
+        <span className="dockMenuVal">{CONFIRM_LABEL[prefs.confirmMode]} ›</span>
+      </div>
+      <div className="dockMenuSep" />
       <div className="dockMenuItem clickable" onClick={() => { onOpenFile(); onClose(); }}>
         <span className="dockMenuIcon">📂</span><span className="dockMenuLabel">{T.dockOpenFile}</span>
       </div>

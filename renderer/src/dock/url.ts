@@ -70,18 +70,7 @@ export function urlTitle(url: string): string {
   } catch { return url; }
 }
 
-/** 앱과 분리된 파티션이라도 외부 사이트는 사용자 확인을 거친다 — 내 컴퓨터/로컬 파일은 예외. */
-export function isLocalUrl(url: string): boolean {
-  if (!url) return true;
-  if (url.startsWith('file:') || url.startsWith('data:') || url.startsWith('about:')) return true;
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    return LOCAL_HOSTS.has(h) || h.endsWith('.localhost') || /^192\.168\./.test(h) || /^10\./.test(h)
-      || /^127\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
-  } catch { return false; }
-}
-
-/** 허용 목록 대조에 쓰는 키(호스트). URL이 아니면 null. */
-export function hostOf(url: string): string | null {
-  try { return new URL(url).hostname.toLowerCase() || null; } catch { return null; }
-}
+// 앱과 분리된 파티션이라도 외부 사이트는 사용자 확인을 거친다 — 내 컴퓨터/로컬 파일은 예외.
+// ★판정 자체는 shared/site-gate.ts 한 곳에만 있다(2026-07-25): 메인 프로세스도 같은 함수로
+// 게스트 webview의 이동을 막기 때문 — 여기에 사본을 두면 두 벌이 되어 반드시 어긋난다.
+export { isLocalNavUrl as isLocalUrl, hostOfUrl as hostOf } from '../../../shared/site-gate';

@@ -36,6 +36,7 @@ import { createPullRequest } from './git-pr';
 import { SttEngine, SttDownloadState } from './stt';
 import { classifyHealth } from './health-identity';
 import { killOrphanEngramOnPort } from './orphan-cleanup';
+import { attachNavGate } from './nav-gate';
 import * as nodeHttp from 'http';
 import { randomUUID } from 'crypto';
 
@@ -87,8 +88,18 @@ ptyManager.onExit((sid, code) => {
 
 // ---- 코드 독 패널의 브라우저 칸(<webview>) 안전 규칙(스펙 2026-07-25 §안전 설정) ----
 // 게스트 웹콘텐츠가 만들어질 때마다 걸린다. 렌더러가 못 끄는 자리(메인)에서 강제하는 것이 핵심이다.
+//
+// 허용된 사이트 목록의 소유자는 렌더러(localStorage — dock/prefs.ts)다. 메인은 판정을 위해 최신
+// 스냅샷만 들고 있고, 판정 함수 자체는 shared/site-gate.ts 하나를 렌더러와 공유한다(두 벌 금지).
+// 렌더러가 아직 안 보냈으면 빈 목록 = 로컬만 통과(안전 우선, 기존 로컬 기능은 그대로 동작).
+let allowedSites: string[] = [];
 app.on('web-contents-created', (_e, contents) => {
   if (contents.getType() !== 'webview') return;
+  // ★1단계 구멍 봉합: 페이지 안에서 링크를 눌러 외부로 나가는 이동은 렌더러가 취소할 수 없다 —
+  // 메인이 막고, 왜 안 넘어갔는지 화면에 알린다(조용한 차단 금지). 리다이렉트도 같은 판정.
+  attachNavGate(contents, () => allowedSites, (url) => {
+    chatWin?.webContents.send('engram:nav-blocked', url);
+  });
   // 새 창(target=_blank·window.open) 요청은 앱 안에 창을 띄우지 않고 OS 기본 브라우저로 넘긴다.
   contents.setWindowOpenHandler(({ url: ext }) => {
     if (/^https?:/i.test(ext)) void shell.openExternal(ext);
@@ -643,6 +654,23 @@ function registerIpc(): void {
   ipcMain.handle('engram:pty-kill-key', (_e, key: string) => { ptyManager.killKey(key); });
   ipcMain.handle('engram:pty-alive', (_e, keys: string[]) => ptyManager.aliveKeys(Array.isArray(keys) ? keys : []));
   ipcMain.handle('engram:pty-replay', (_e, sid: string) => ptyManager.replay(sid));
+  // 허용된 사이트 목록 동기화(단일 출처는 렌더러 localStorage). 렌더러가 mount 시·목록 변경 시
+  // 밀어 넣고, 메인은 will-navigate/will-redirect 판정에만 쓴다.
+  ipcMain.handle('engram:set-allowed-sites', (_e, sites: unknown) => {
+    allowedSites = Array.isArray(sites) ? sites.filter((s): s is string => typeof s === 'string' && !!s) : [];
+  });
+  // AI 웹 조작 스크린샷: 대화상자 없이 임시 폴더에 저장하고 경로를 돌려준다(두뇌가 그 파일을 읽는다).
+  // 사용자가 직접 누르는 "스크린샷 저장"(engram:save-screenshot)과 달리 대화상자가 없으므로 저장
+  // 위치를 앱 임시 폴더로 고정한다 — 임의 경로 쓰기 통로가 되지 않게.
+  ipcMain.handle('engram:save-shot-temp', (_e, png: ArrayBuffer) => {
+    try {
+      const dir = path.join(app.getPath('temp'), 'engram-shots');
+      fs.mkdirSync(dir, { recursive: true });
+      const p = path.join(dir, `shot-${Date.now()}.png`);
+      fs.writeFileSync(p, Buffer.from(png));
+      return p;
+    } catch { return null; }
+  });
   // 독 패널 더보기(⋮) — 파일 열기: 브라우저 칸에서 file://로 열 로컬 파일 하나를 고른다.
   ipcMain.handle('engram:pick-file', async () => {
     const res = await dialog.showOpenDialog({ properties: ['openFile'] });

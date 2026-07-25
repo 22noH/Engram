@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WebviewElement } from '../../desktop.d';
 import { registerView } from '../../dock/views';
+import { clearConsole, pushConsole } from '../../dock/agent-store';
 
 // 브라우저 탭 하나 = <webview> 하나(스펙 §핵심 기술 결정).
 //
@@ -54,10 +55,19 @@ export function BrowserView({ tabId, url, partition, active, onState }: {
       } catch { /* 아직 attach 전 — 무시 */ }
     };
     const onDomReady = () => { readyRef.current = true; sync(); };
-    const onStart = () => stateRef.current({ loading: true, error: null });
+    // 새 로드가 시작되면 콘솔 버퍼를 비운다 — 지난 페이지의 오류가 이번 페이지 것으로 오인되면 안 된다.
+    const onStart = () => { clearConsole(tabId); stateRef.current({ loading: true, error: null }); };
     const onStop = () => { stateRef.current({ loading: false }); sync(); };
     const onNavigate = () => sync();
     const onTitle = (e: Event) => stateRef.current({ title: (e as unknown as { title: string }).title || '' });
+    // AI 웹 조작(2단계): 페이지 콘솔을 탭별 링버퍼에 모은다 — 두뇌가 browser_console로 읽어
+    // 자기가 만든 오류를 스스로 발견하는 순환의 재료다. 표시에는 영향이 없다(수집만).
+    const onConsole = (e: Event) => {
+      const ev = e as unknown as { level?: number; message?: string; line?: number; sourceId?: string };
+      const level = ['debug', 'log', 'warning', 'error'][ev.level ?? 1] ?? 'log';
+      const where = ev.sourceId ? ` (${String(ev.sourceId).split('/').pop()}:${ev.line ?? 0})` : '';
+      pushConsole(tabId, `[${level}] ${ev.message ?? ''}${where}`);
+    };
     const onFail = (e: Event) => {
       const ev = e as unknown as { errorCode: number; errorDescription: string; isMainFrame?: boolean };
       // -3 = ABORTED(사용자가 다른 주소로 넘어간 경우 등) — 오류로 보여주면 오경보가 된다.
@@ -72,6 +82,7 @@ export function BrowserView({ tabId, url, partition, active, onState }: {
     el.addEventListener('did-navigate-in-page', onNavigate);
     el.addEventListener('page-title-updated', onTitle);
     el.addEventListener('did-fail-load', onFail);
+    el.addEventListener('console-message', onConsole);
     return () => {
       el.removeEventListener('dom-ready', onDomReady);
       el.removeEventListener('did-start-loading', onStart);
@@ -80,6 +91,7 @@ export function BrowserView({ tabId, url, partition, active, onState }: {
       el.removeEventListener('did-navigate-in-page', onNavigate);
       el.removeEventListener('page-title-updated', onTitle);
       el.removeEventListener('did-fail-load', onFail);
+      el.removeEventListener('console-message', onConsole);
     };
   }, []);
 

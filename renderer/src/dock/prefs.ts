@@ -1,3 +1,7 @@
+import { DEFAULT_CONFIRM_MODE, isConfirmMode, type ConfirmMode } from '../../../shared/site-gate';
+
+export type { ConfirmMode };
+
 // 독 패널의 저장 값(순수 로직 + localStorage). Electron 비의존.
 //  ① 개발 서버 목록(채널별) — 서버 메뉴
 //  ② 허용된 사이트(앱 전역) — 외부 사이트를 열기 전 확인, 한 번 허용하면 기억
@@ -93,15 +97,27 @@ export function isSiteAllowed(host: string | null): boolean {
   return !!host && loadAllowedSites().includes(host.toLowerCase());
 }
 
+/**
+ * 이 목록의 **주인은 여기(localStorage)** 다. 메인 프로세스는 게스트 webview의 이동
+ * (will-navigate/will-redirect — 렌더러가 취소할 수 없는 자리)을 판정하려고 최신 스냅샷만 받아둔다.
+ * 판정 함수 자체는 shared/site-gate.ts 하나를 양쪽이 공유한다(두 벌 금지).
+ * 목록이 바뀔 때마다·앱이 뜰 때마다 이걸 부른다.
+ */
+export function pushAllowedSites(): void {
+  try { void window.engramDesktop?.setAllowedSites?.(loadAllowedSites()); } catch { /* 무시 */ }
+}
+
 export function allowSite(host: string): void {
   const h = host.trim().toLowerCase();
   if (!h) return;
   const list = loadAllowedSites();
   if (!list.includes(h)) writeJson(SITES_KEY, [...list, h]);
+  pushAllowedSites();
 }
 
 export function forgetSite(host: string): void {
   writeJson(SITES_KEY, loadAllowedSites().filter((h) => h !== host.toLowerCase()));
+  pushAllowedSites();
 }
 
 // ---- ③ 토글 ----
@@ -111,20 +127,41 @@ export interface DockPrefs {
   openLinksHere: boolean;
   /** 로그인·쿠키를 기억할지. 기본은 "유지 안 함"(앱과 완전 분리된 비영속 파티션). */
   keepSession: boolean;
+  /** AI 웹 조작(2단계) 허용 여부. 꺼져 있으면 두뇌의 조작 요청은 전부 거절된다. */
+  agentEnabled: boolean;
+  /** 자동 확인 3단계 — 매번 묻기 / 내 컴퓨터에서만(기본) / 항상 자동. */
+  confirmMode: ConfirmMode;
 }
 
-export const DEFAULT_PREFS: DockPrefs = { openLinksHere: false, keepSession: false };
+export const DEFAULT_PREFS: DockPrefs = {
+  openLinksHere: false, keepSession: false, agentEnabled: true, confirmMode: DEFAULT_CONFIRM_MODE,
+};
 
 export function loadPrefs(): DockPrefs {
   const o = readJson<Record<string, unknown>>(PREFS_KEY, {});
   return {
     openLinksHere: o.openLinksHere === true,
     keepSession: o.keepSession === true,
+    // 조작 허용은 기본 켬(목업 ✓) — 대신 확인 단계 기본값이 "내 컴퓨터에서만"이라 외부 사이트는
+    // 매 조작 물어본다. 저장값이 없으면(구버전 사용자) 기본값 그대로.
+    agentEnabled: o.agentEnabled !== false,
+    confirmMode: isConfirmMode(o.confirmMode) ? o.confirmMode : DEFAULT_CONFIRM_MODE,
   };
 }
 
 export function savePrefs(p: DockPrefs): void {
-  writeJson(PREFS_KEY, { openLinksHere: !!p.openLinksHere, keepSession: !!p.keepSession });
+  writeJson(PREFS_KEY, {
+    openLinksHere: !!p.openLinksHere,
+    keepSession: !!p.keepSession,
+    agentEnabled: !!p.agentEnabled,
+    confirmMode: isConfirmMode(p.confirmMode) ? p.confirmMode : DEFAULT_CONFIRM_MODE,
+  });
+}
+
+/** 자동 확인 3단계 순환(⋮ 메뉴에서 한 줄을 눌러 돌린다). */
+export const CONFIRM_MODES: ConfirmMode[] = ['ask', 'local', 'auto'];
+export function nextConfirmMode(m: ConfirmMode): ConfirmMode {
+  return CONFIRM_MODES[(CONFIRM_MODES.indexOf(m) + 1) % CONFIRM_MODES.length];
 }
 
 /**

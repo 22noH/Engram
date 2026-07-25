@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { T } from '../../i18n';
 import type { DockTab } from '../../dock/layout';
-import { allowSite, type DockPrefs, isSiteAllowed, previewPartition } from '../../dock/prefs';
+import { allowSite, type DockPrefs, isSiteAllowed, previewPartition, pushAllowedSites } from '../../dock/prefs';
+import { agentLog, agentPending, answerConfirm, cancelPendingFor, clearAgentLog, subscribeAgent } from '../../dock/agent-store';
 import { displayUrl, hostOf, isLocalUrl, toNavUrl, urlTitle } from '../../dock/url';
 import { callView } from '../../dock/views';
 import { BrowserView, EMPTY_VIEW_STATE, type ViewState } from './BrowserView';
@@ -17,7 +18,8 @@ import { BrowserView, EMPTY_VIEW_STATE, type ViewState } from './BrowserView';
 // ※ 페이지 **안에서** 링크를 눌러 넘어가는 이동은 여기서 막지 않는다(webview의 will-navigate는
 //   렌더러에서 취소할 수 없다) — 이 확인은 "앱이 여는 주소"에 대한 문지기다.
 
-export function BrowserPane({ tabs, activeTabId, prefs, onTabPatch, onNewTab }: {
+export function BrowserPane({ channelId, tabs, activeTabId, prefs, onTabPatch, onNewTab }: {
+  channelId: string;
   tabs: DockTab[];
   activeTabId: string | null;
   prefs: DockPrefs;
@@ -31,6 +33,28 @@ export function BrowserPane({ tabs, activeTabId, prefs, onTabPatch, onNewTab }: 
   const [badAddr, setBadAddr] = useState(false);
   const [pendingSite, setPendingSite] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
+  // 메인 프로세스가 막은 이동(페이지 안 링크·리다이렉트) — 조용한 차단 금지(2026-07-25 이동 게이트).
+  const [navBlocked, setNavBlocked] = useState<string | null>(null);
+  // AI 웹 조작(2단계): 확인 줄 + 행동 로그는 모듈 장부(agent-store)를 구독해 그린다 —
+  // 실행하는 쪽(App의 ws 처리)과 보여주는 쪽(여기)이 다른 컴포넌트라 props로는 못 잇는다.
+  const [agentTick, setAgentTick] = useState(0);
+  useEffect(() => subscribeAgent(() => setAgentTick((n) => n + 1)), []);
+  const pendingAsk = agentPending();
+  const log = agentLog(channelId);
+  void agentTick; // 구독 갱신용 상태(값 자체는 안 쓴다)
+
+  // 허용 목록의 주인은 여기(localStorage)지만 판정은 메인도 해야 한다 — 최신 스냅샷을 밀어 넣는다.
+  useEffect(() => {
+    pushAllowedSites();
+    return window.engramDesktop?.onNavBlocked?.((url) => setNavBlocked(url));
+  }, []);
+  useEffect(() => {
+    if (!navBlocked) return;
+    const id = setTimeout(() => setNavBlocked(null), 6000);
+    return () => clearTimeout(id);
+  }, [navBlocked]);
+  // 채널을 떠나면 답 없는 확인은 거절로 정리(두뇌가 타임아웃까지 매달리지 않게).
+  useEffect(() => () => cancelPendingFor(channelId), [channelId]);
 
   const partition = previewPartition(prefs.keepSession);
   const st = (active && states[active.id]) || EMPTY_VIEW_STATE;
@@ -98,6 +122,7 @@ export function BrowserPane({ tabs, activeTabId, prefs, onTabPatch, onNewTab }: 
 
       {badAddr && <div className="dockBar warn">{T.dockBadAddress}</div>}
       {st.error && <div className="dockBar warn">{T.dockLoadFailed(st.error)}</div>}
+      {navBlocked && <div className="dockBar warn">{T.dockNavBlocked(hostOf(navBlocked) ?? navBlocked)}</div>}
       {pendingSite && (
         <div className="dockBar confirm">
           <span className="dockBarText">{T.dockConfirmSite(pendingHost ?? pendingSite)}</span>
@@ -123,6 +148,32 @@ export function BrowserPane({ tabs, activeTabId, prefs, onTabPatch, onNewTab }: 
           <div className="codeEmptyNotice dockEmpty">{dropping ? T.dockDropHint : T.dockNewTabEmpty}</div>
         )}
       </div>
+
+      {/* AI 웹 조작 — 확인 줄(목업 ①의 🤖 바). 이 채널의 요청만 보여준다. */}
+      {pendingAsk && pendingAsk.channelId === channelId && (
+        <div className="dockAgentBar">
+          <span className="ic">🤖</span>
+          <span className="dockBarText">{T.dockAgentAsk(pendingAsk.label, displayUrl(pendingAsk.url) || pendingAsk.url)}</span>
+          <button type="button" onClick={() => answerConfirm(pendingAsk.id, false)}>{T.dockAgentSkip}</button>
+          <button type="button" className="primary" onClick={() => answerConfirm(pendingAsk.id, true)}>{T.dockAgentAllow}</button>
+        </div>
+      )}
+
+      {/* 행동 로그 — 무엇을 했는지 사후 추적(차단·건너뛰기도 남는다). */}
+      {log.length > 0 && (
+        <div className="dockAgentLog">
+          <div className="dockAgentLogHead">
+            <span>{T.dockAgentLog}</span>
+            <button type="button" onClick={() => clearAgentLog(channelId)}>{T.dockAgentLogClear}</button>
+          </div>
+          {log.slice(-8).map((e) => (
+            <div key={e.id} className={'dockAgentLogRow ' + e.status}>
+              <span className="mark">{e.status === 'ok' ? '✓' : e.status === 'skipped' ? '·' : '✗'}</span>
+              <span className="txt">{e.label}{e.detail ? ` — ${e.detail}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
