@@ -12,6 +12,10 @@ import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { makeMcpProposals } from './edge/mcp/mcp-proposals';
 import { makeWikiMcpDepsCore, makeWikiWrite } from './edge/mcp/mcp-wiring';
+import { makeHeadlessWikiSync } from './edge/mcp/headless-wiki-sync';
+import { WikiGit } from './knowledge-core/wiki/wiki-git';
+import { loadWikiRemote } from './knowledge-core/wiki/wiki-remote.config';
+import { PathResolver } from './pal/path-resolver';
 import { makeBridgeServer } from './mcp-bridge';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
 
@@ -153,7 +157,7 @@ async function runBridge(port: number): Promise<void> {
   await server.connect(transport);
 }
 
-async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
+async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'bridge'): Promise<void> {
   // Nest 부팅 이전에 데이터 경로를 스스로 설정(§3.1) — PathResolver가 DI 해소 시점에 1회 읽는다.
   // ★ENGRAM_RESIDENT는 세팅하지 않는다 — 헤드리스는 상주가 아니다(하트비트·watchdog 오판 방지,
   // src/pal/heartbeat.ts 참조). 이미 설정돼 있으면(사용자 env) 존중 — 강제 덮어쓰기 안 함.
@@ -180,7 +184,26 @@ async function runCore(dataDir: string, writeMode: boolean): Promise<void> {
     write: writeMode ? makeWikiWrite(wiki) : null,
   };
 
-  const server = buildMcpServer(deps);
+  // 위키 git 원격 동기화(main.ts:124 배선의 헤드리스 짝) — config/wiki-remote.json에 원격이 있을
+  // 때만 배선된다. 없으면 makeHeadlessWikiSync가 null을 돌려주고 deps는 손도 안 댄 원본 그대로다.
+  // 두뇌 병합기(setBodyMerger)는 붙이지 않는다 — 헤드리스엔 두뇌가 없으므로 union 폴백(main.ts의
+  // 배선 실패 시 폴백과 동일 결)이 맞다. 자세한 설계 근거는 headless-wiki-sync.ts 상단 주석.
+  const paths = app.get(PathResolver);
+  const sync = makeHeadlessWikiSync({
+    mode,
+    cfg: loadWikiRemote(paths.getConfigDir()),
+    git: app.get(WikiGit),
+    stateDir: paths.getStateDir(),
+    log: (m) => process.stderr.write(`[mcp-headless] ${m}\n`),
+  });
+  if (sync) {
+    // git이 자격증명 프롬프트로 행(hang)되면 stdio MCP 프로세스가 통째로 멈춘다 — 물어보지 말고
+    // 즉시 실패하게 해서 사유가 로그/도구 응답에 뜨도록(사용자 env가 이미 정했으면 존중).
+    process.env.GIT_TERMINAL_PROMPT ??= '0';
+    void sync.start(); // 시작 pull/push는 백그라운드(MCP initialize를 네트워크에 물리지 않는다)
+  }
+
+  const server = buildMcpServer(sync ? sync.wrap(deps) : deps);
   server.onerror = (e) => console.error('[mcp-headless] core server error:', e);
   const transport = new StdioServerTransport();
 
@@ -210,7 +233,7 @@ async function main(): Promise<void> {
     await runBridge(port);
     return;
   }
-  await runCore(dataDir, writeMode);
+  await runCore(dataDir, writeMode, mode);
 }
 
 // 엔트리(직접 실행될 때만) — require.main===module로 테스트 임포트 시 자동실행 방지(mcp-bridge.ts와 동형).
