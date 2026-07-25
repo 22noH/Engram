@@ -25,6 +25,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # 태그가 버전의 단일 출처다(사용자 결정 2026-07-25): v0.0.15를 밀면 그 숫자가 package.json·
+      # plugin.json에 그대로 적용된 채로 빌드된다. 사람이 버전을 미리 올릴 필요가 없다.
+      # 커밋은 하지 않는다(빌드 입력만 바꾼다) — 저장소 되돌림은 npm-publish 잡이 한 번만 처리.
+      - name: Apply version from tag
+        shell: bash
+        run: node scripts/apply-tag-version.js "$GITHUB_REF_NAME"
       # 렌더러·콘솔은 별도 워크스페이스(자체 package.json) — 실사고(2026-07-24): 이 두 빌드가 빠져
       # CI 설치본에 화면 파일(renderer/dist·console/dist)이 없었고, 앱이 헬스 ok 후 로드 실패를
       # 무한 반복(영구 '시작 중'). 로컬 desktop:build와 동일 체인을 CI에도 강제한다.
