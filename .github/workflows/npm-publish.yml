@@ -1,0 +1,52 @@
+# npm 신뢰 게시(OIDC) — 토큰·2FA 코드 없이 GitHub Actions가 직접 npm에 게시한다.
+# npm 웹 Settings → Trusted Publisher에 이 파일 이름(npm-publish.yml)을 등록해야 동작한다.
+name: npm-publish
+
+on:
+  # v* 태그를 밀면 데스크톱 릴리스(desktop-release.yml)와 함께 npm도 게시된다.
+  push:
+    tags: ['v*']
+  # 태그 없이 손으로 돌리고 싶을 때(예: 게시만 재시도).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # ← OIDC 신뢰 게시의 핵심. 없으면 인증 실패한다.
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      # 신뢰 게시는 npm 11.5.1+ 에서만 된다. setup-node가 주는 npm이 더 낮을 수 있어 명시적으로 올린다.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # package.json의 files가 dist·console/dist를 싣는다 — 둘 다 최신이어야 한다.
+      - run: npm run build
+      - run: npm run console:build
+
+      # 이미 올라간 버전이면 조용히 건너뛴다(태그를 다시 밀거나 재실행해도 빨갛게 실패하지 않게).
+      - name: Skip if this version is already on npm
+        id: check
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VER" version >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "$NAME@$VER 은 이미 게시됨 — 건너뜀"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # OIDC라 NODE_AUTH_TOKEN이 필요 없다. provenance(출처 증명)도 자동으로 붙는다.
+      - name: Publish
+        if: steps.check.outputs.already == 'false'
+        run: npm publish
