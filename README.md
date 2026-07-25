@@ -30,9 +30,9 @@ Runs entirely on your PC. No account, no login — open it and use it.
    - It's unsigned, so on Windows click **More info → Run anyway**; on macOS right-click the app → **Open**.
 2. It lives in the tray and starts with your computer. If it ever crashes it restarts itself.
 
-**What you get** — four tabs:
+**What you get** — three tabs:
 
-- **Chatbot** — talk to your AI. It can search the web, read your wiki, and answer.
+- **Chat** — talk to your AI. It can search the web, read your wiki, and answer.
 - **Code** — point it at a folder and it writes and edits code directly (runs and fixes its own tests/builds).
 - **Wiki** — your accumulated knowledge as searchable pages, plus an approval inbox: when the AI wants to save something it learned, it proposes it here and you approve or reject.
 - Right-click the tray icon → **Settings** to add models, API keys, and MCP tools (below).
@@ -118,7 +118,7 @@ Hand out the desktop app together with the `preset.json` from the console (drop 
 
 ## Wiki inside Claude Code (MCP)
 
-You can use Engram's wiki as a set of tools inside Claude Code, Codex, or any MCP client — no Engram app required. It runs the same knowledge core (semantic search + the propose-and-approve flow).
+You can use Engram's wiki as a set of tools inside Claude Code, Codex, or any MCP client — no Engram app required. It runs the same knowledge core: your pages, and the propose-and-approve flow that guards them.
 
 ### Plugin (recommended — adds short commands)
 
@@ -127,7 +127,7 @@ claude plugin marketplace add 22noH/Engram
 claude plugin install engram@engram
 ```
 
-Then in any project: `/engram:wiki-search <query>` · `/engram:wiki-save` · `/engram:proposals` · `/engram:approve <id>`.
+Then in any project: `/engram:wiki-search <query>` · `/engram:wiki-save` · `/engram:wiki-list` · `/engram:proposals` · `/engram:approve <id>`.
 
 ### Or add the MCP server directly
 
@@ -139,15 +139,23 @@ claude mcp add engram -- npx -y engram-wiki-mcp
 
 | Tool | What it does |
 |---|---|
-| `wiki_search` | Search the wiki (by meaning, not just keywords) |
-| `wiki_read` | Read a page |
-| `wiki_list` | List pages |
-| `wiki_propose` | Suggest saving knowledge — you approve it before it's kept |
-| `ask_brain` | Hand a sub-task to another registered model |
+| `wiki_search` | Find pages about something |
+| `wiki_read` | Read one page |
+| `wiki_list` | List published pages |
+| `wiki_propose` | Suggest saving knowledge — approved before it's kept |
+| `list_proposals` | Show what's waiting for approval |
+| `approve_proposal` | Approve a pending suggestion and write it into the wiki |
+| `reject_proposal` | Discard a pending suggestion |
+| `wiki_write` | Write a page straight away, no proposal — only with `--write-mode` |
+| `ask_brain` | Hand a sub-task to another model you've registered — only while the Engram app is running |
 
-**Nothing is saved without your approval.** When the AI proposes knowledge, it queues up; you review it in chat ("show the proposals" → "approve #1") before it lands. Turn on `--write-mode` only if you want a trusted automation to write directly with no approval step.
+Clients that show MCP prompts also get the same commands there (`wiki-search`, `wiki-save`, `proposals`, `approve`), so the plugin is a convenience, not a requirement.
 
-**Data is shared with the app.** Headless mode uses the same data folder as the desktop app, so if you start here and install the app later, your wiki carries over. If the app is already running, the MCP auto-bridges to it (so they never fight over the same data).
+**Nothing is saved without your approval.** When your AI wants to save something, a confirmation dialog opens right in your client — the title, where it goes, and a preview of the text, with **Save** or **Cancel**. Cancel and nothing is written or queued. This works in Claude Code 2.1.76+ and Codex v0.119+; on clients that can't show a dialog, the suggestion queues up instead and you approve it in chat ("show the proposals" → "approve #1") or in the Engram app. Either way a person says yes before anything lands. `--write-mode` is the opt-out, for a trusted automation that should write with no proposal queue.
+
+**Search works best with the app running.** With the Engram app open, the MCP hands off to it and search matches by meaning. On its own it doesn't load the embedding index — search is then a plain text match over your pages, which finds less when you paraphrase. Reading, listing, proposing, and approving are the same either way.
+
+**Data is shared with the app.** Standalone mode uses the same data folder as the desktop app, so if you start here and install the app later, your wiki carries over. If the app is already running, the MCP auto-bridges to it (so they never fight over the same data).
 
 ---
 
