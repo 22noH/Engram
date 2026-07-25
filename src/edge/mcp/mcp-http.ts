@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { disableElicitation } from './mcp-elicit';
 
 // 루프백(같은 PC)인지 판정(설계 §3.2 — 루프백 전용 강제). 순수 함수.
 // req.socket.remoteAddress에서 나올 수 있는 IPv4/IPv6/IPv4-mapped-IPv6 표기를 모두 허용.
@@ -28,6 +29,11 @@ export async function handleMcpRequest(server: Server, req: IncomingMessage, res
       res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
       return;
     }
+    // ★elicitation 차단(2026-07-25): stateless 모드엔 서버→클라이언트 요청을 실을 standalone SSE
+    // 스트림이 없다(GET은 위 주석대로 405). SDK는 그 경우 메시지를 조용히 버리므로 elicitation을
+    // 걸면 응답이 영원히 오지 않는다(타임아웃까지 도구 호출이 멈춘다) — 이 경로는 아예 끄고
+    // 기존 경로(제안 생성 후 앱에서 승인)로 간다. stdio 경로(mcp-headless·mcp-bridge)만 물어본다.
+    disableElicitation(server);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     try {
       await server.connect(transport);

@@ -1,6 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { McpProposalsDeps } from './mcp-proposals';
+import { confirmWikiSave, declinedText } from './mcp-elicit';
 
 // 주입 의존성(§3.1) — main이 실 WikiEngine/ProposalStore/BrainDelegator를 배선, 테스트는 가짜 주입.
 export interface McpDeps {
@@ -175,12 +176,16 @@ async function callWikiList(deps: McpDeps): Promise<CallToolResult> {
   return ok(pages.map((p) => `${p.slug} — ${p.title}${p.category ? ` [${p.category}]` : ''}`).join('\n'));
 }
 
-async function callWikiPropose(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+async function callWikiPropose(server: Server, deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
   const title = typeof args.title === 'string' ? args.title : '';
   const content = typeof args.content === 'string' ? args.content : '';
   const input: { slug?: string; title: string; content: string; reason?: string } = { title, content };
   if (typeof args.slug === 'string') input.slug = args.slug;
   if (typeof args.reason === 'string') input.reason = args.reason;
+  // ★저장 확정 전 사람 승인(elicitation) — 미지원·실패·타임아웃이면 unavailable로 떨어져
+  // 아래 기존 경로가 그대로 돈다(mcp-elicit.ts 주석 참조).
+  const confirm = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+  if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'propose' }));
   const id = await deps.propose(input);
   return ok(`proposal ${id} created — a human will review it in the Engram app`);
 }
@@ -206,12 +211,15 @@ async function callRejectProposal(deps: McpDeps, args: Record<string, unknown>):
   return ok(summary);
 }
 
-async function callWikiWrite(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+async function callWikiWrite(server: Server, deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
   if (!deps.write) return fail('wiki_write is not available (write mode is not enabled)');
   const title = typeof args.title === 'string' ? args.title : '';
   const content = typeof args.content === 'string' ? args.content : '';
   const input: { slug?: string; title: string; content: string } = { title, content };
   if (typeof args.slug === 'string') input.slug = args.slug;
+  // 즉시 게시 경로 — 승인 게이트가 더 절실하다(제안 대기열조차 없다).
+  const confirm = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'write' });
+  if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'write' }));
   const result = await deps.write(input);
   return ok(result);
 }
@@ -312,7 +320,7 @@ export function buildMcpServer(deps: McpDeps): Server {
         case 'wiki_list':
           return await callWikiList(deps);
         case 'wiki_propose':
-          return await callWikiPropose(deps, args);
+          return await callWikiPropose(server, deps, args);
         case 'ask_brain':
           return await callAskBrain(deps, args);
         case 'list_proposals':
@@ -322,7 +330,7 @@ export function buildMcpServer(deps: McpDeps): Server {
         case 'reject_proposal':
           return await callRejectProposal(deps, args);
         case 'wiki_write':
-          return await callWikiWrite(deps, args);
+          return await callWikiWrite(server, deps, args);
         default:
           return fail(`unknown tool: ${name}`);
       }

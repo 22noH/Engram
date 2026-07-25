@@ -1,6 +1,8 @@
 import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { handleMcpRequest } from './edge/mcp/mcp-http';
 import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
@@ -115,5 +117,89 @@ describe('makeBridgeServer', () => {
     const out = await s.callTool(T('wiki_search'), { query: 'x' });
     expect(out.toLowerCase()).toMatch(/error/);
     await s.close();
+  });
+});
+
+// ★브리지 elicitation(2026-07-25): 상주 /mcp는 stateless HTTP라 서버→클라이언트 요청을 실을 수
+// 없다(mcp-http.ts에서 disableElicitation) — 그래서 승인 대화상자는 stdio를 쥔 브리지가 직접 띄운다.
+describe('makeBridgeServer — elicitation 승인 게이트', () => {
+  type ElicitHandler = (params: Record<string, unknown>) => unknown;
+
+  async function elicitingBridgeClient(url: string, handler: ElicitHandler): Promise<Client> {
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await makeBridgeServer(url).connect(serverT);
+    const c = new Client({ name: 'elicit-test', version: '1.0.0' }, { capabilities: { elicitation: {} } });
+    c.setRequestHandler(ElicitRequestSchema, async (req) => handler(req.params as Record<string, unknown>) as never);
+    await c.connect(clientT);
+    return c;
+  }
+
+  async function callText(c: Client, name: string, args: Record<string, unknown>): Promise<string> {
+    const r = (await c.callTool({ name, arguments: args })) as { content: Array<{ text?: string }> };
+    return r.content.map((x) => x.text ?? '').join('\n');
+  }
+
+  it('승인 → 상류로 그대로 전달(대화상자는 브리지에서 1회만)', async () => {
+    const propose = jest.fn().mockResolvedValue('p-bridge');
+    const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    try {
+      const seen: Array<Record<string, unknown>> = [];
+      const c = await elicitingBridgeClient(upstream.url, (p) => {
+        seen.push(p);
+        return { action: 'accept', content: { decision: 'save' } };
+      });
+      const out = await callText(c, 'wiki_propose', { title: 'Deploy Steps', content: 'body', slug: 'ops' });
+      expect(seen).toHaveLength(1); // 상류에서 중복으로 묻지 않는다
+      expect(String(seen[0].message)).toContain('Deploy Steps');
+      expect(propose).toHaveBeenCalledWith({ title: 'Deploy Steps', content: 'body', slug: 'ops' });
+      expect(out).toContain('p-bridge');
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('거부 → 상류를 아예 호출하지 않고 명확한 결과 텍스트', async () => {
+    const propose = jest.fn().mockResolvedValue('never');
+    const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    try {
+      const c = await elicitingBridgeClient(upstream.url, () => ({ action: 'decline' }));
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(propose).not.toHaveBeenCalled();
+      expect(out.toLowerCase()).toContain('declined');
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('미지원 클라이언트 → 기존 패스스루 그대로(회귀 0)', async () => {
+    const propose = jest.fn().mockResolvedValue('p-plain');
+    const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    try {
+      const s = await connectedBridgeSession(upstream.url);
+      const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+      expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+      expect(out).toBe('proposal p-plain created — a human will review it in the Engram app');
+      await s.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('읽기 도구는 묻지 않는다', async () => {
+    const upstream = await startUpstream(makeUpstreamDeps());
+    try {
+      const seen: unknown[] = [];
+      const c = await elicitingBridgeClient(upstream.url, (p) => {
+        seen.push(p);
+        return { action: 'accept' };
+      });
+      await callText(c, 'wiki_search', { query: 'x' });
+      expect(seen).toHaveLength(0);
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
   });
 });

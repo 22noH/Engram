@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
 import { ENGRAM_MCP_INSTRUCTIONS } from './edge/mcp/engram-mcp';
+import { confirmWikiSave, declinedText, WikiSaveRequest } from './edge/mcp/mcp-elicit';
 
 // 독립 stdio↔HTTP 브리지 엔트리(설계 §3.3). 구형(stdio 전용) MCP 클라이언트가 상주의
 // /mcp(HTTP, Task 1·2)에 접속할 수 있게 해준다: `node dist/src/mcp-bridge.js [--port N]`.
@@ -43,6 +44,18 @@ async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>, 
   }
 }
 
+// 저장(=사람 승인이 필요한) 도구인지 판정. 그 외 도구는 그대로 패스스루.
+function wikiSaveRequest(name: string, args: Record<string, unknown>): WikiSaveRequest | null {
+  if (name !== 'wiki_propose' && name !== 'wiki_write') return null;
+  const slug = typeof args.slug === 'string' ? args.slug : undefined;
+  return {
+    title: typeof args.title === 'string' ? args.title : '',
+    content: typeof args.content === 'string' ? args.content : '',
+    ...(slug ? { slug } : {}),
+    op: name === 'wiki_write' ? 'write' : 'propose',
+  };
+}
+
 // 엔트리에서 분리한 순수 조립부(브리프 §요건) — stdio 서버를 만들고 ListTools/CallTool
 // 핸들러가 그때그때 상주 /mcp에 연결해 그대로 패스스루. never-throw: 실패해도 stdio 프로토콜은
 // 죽지 않는다(CallTool→isError 텍스트, ListTools→빈 목록+stderr 로그, 절대 stdout 아님).
@@ -64,6 +77,15 @@ export function makeBridgeServer(url: string): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (req): Promise<CallToolResult> => {
     try {
+      // ★저장 승인 대화상자는 여기서 띄운다(2026-07-25). 상주 /mcp는 stateless HTTP라
+      // 서버→클라이언트 요청 경로가 없어 elicitation을 걸 수 없다(mcp-http.ts에서 차단) — stdio를
+      // 쥔 브리지가 대신 묻고, 승인된 것만 상류로 넘긴다. 상류로 가는 Client는 elicitation을
+      // 선언하지 않으므로 중복 질문도 없다. 미지원 클라이언트면 confirm이 'unavailable'이라
+      // 아래 패스스루가 그대로 돈다(회귀 0).
+      const save = wikiSaveRequest(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>);
+      if (save && (await confirmWikiSave(server, save)) === 'decline') {
+        return { content: [{ type: 'text', text: declinedText(save) }] };
+      }
       return (await withUpstream(url, (client) =>
         client.callTool({ name: req.params.name, arguments: req.params.arguments ?? {} }),
       )) as CallToolResult;

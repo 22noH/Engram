@@ -1,7 +1,9 @@
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
 import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS } from './engram-mcp';
+import { disableElicitation, ELICIT_OFF_ENV, ELICIT_TIMEOUT_ENV } from './mcp-elicit';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}test__${bare}`;
 
@@ -348,6 +350,192 @@ describe('buildMcpServer', () => {
     const writeDef = defs.find((d) => d.name === T('wiki_write'));
     expect(writeDef?.description?.toLowerCase()).toMatch(/no.*approval|no human approval|without approval/);
     await s.close();
+  });
+});
+
+// MCP elicitation 승인 게이트(2026-07-25) — wiki_propose/wiki_write는 저장 확정 전에 클라이언트에
+// 사용자 확인 대화상자를 요청한다. 미지원 클라이언트에선 기존 동작 그대로(회귀 0).
+describe('elicitation 승인 게이트', () => {
+  type ElicitHandler = (params: Record<string, unknown>) => unknown;
+
+  // elicitation을 선언하고 요청을 handler로 처리하는 가짜 클라이언트.
+  async function elicitingClient(deps: McpDeps, handler: ElicitHandler): Promise<Client> {
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: 'elicit-test', version: '1.0.0' }, { capabilities: { elicitation: {} } });
+    c.setRequestHandler(ElicitRequestSchema, async (req) => handler(req.params as Record<string, unknown>) as never);
+    await c.connect(clientT);
+    return c;
+  }
+
+  async function callText(c: Client, name: string, args: Record<string, unknown>): Promise<string> {
+    const r = (await c.callTool({ name, arguments: args })) as { content: Array<{ text?: string }> };
+    return r.content.map((x) => x.text ?? '').join('\n');
+  }
+
+  const accept: ElicitHandler = () => ({ action: 'accept', content: { decision: 'save' } });
+
+  it('미지원 클라이언트(elicitation 미선언) → 물어보지 않고 기존 동작 그대로(회귀 0)', async () => {
+    const propose = jest.fn().mockResolvedValue('proposal-42');
+    const s = await connectedSession(makeDeps({ propose }));
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    expect(out).toBe('proposal proposal-42 created — a human will review it in the Engram app');
+    await s.close();
+  });
+
+  it('지원 클라이언트 + 승인 → 그때 비로소 deps.propose 호출', async () => {
+    const propose = jest.fn().mockResolvedValue('p-ok');
+    const c = await elicitingClient(makeDeps({ propose }), accept);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    expect(out).toContain('p-ok');
+    await c.close();
+  });
+
+  it('요청 내용에 제목·대상 슬러그·내용 앞부분·저장/취소 선택지', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const c = await elicitingClient(makeDeps(), (p) => {
+      seen.push(p);
+      return { action: 'accept', content: { decision: 'save' } };
+    });
+    await callText(c, 'wiki_propose', { title: 'Deploy Steps', content: 'the body text', slug: 'ops' });
+    const msg = String(seen[0].message);
+    expect(msg).toContain('Deploy Steps');
+    expect(msg).toContain('ops');
+    expect(msg).toContain('the body text');
+    const schema = seen[0].requestedSchema as { properties: { decision: { enum: string[] } } };
+    expect(schema.properties.decision.enum).toEqual(['save', 'cancel']);
+    await c.close();
+  });
+
+  it('사용자 거부 → 제안 자체를 만들지 않고 명확한 결과 텍스트', async () => {
+    const propose = jest.fn().mockResolvedValue('never');
+    const c = await elicitingClient(makeDeps({ propose }), () => ({ action: 'decline' }));
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(propose).not.toHaveBeenCalled();
+    expect(out.toLowerCase()).toContain('declined');
+    expect(out).toContain('T');
+    await c.close();
+  });
+
+  it('대화상자 취소(action:cancel)도 저장하지 않는다', async () => {
+    const propose = jest.fn();
+    const c = await elicitingClient(makeDeps({ propose }), () => ({ action: 'cancel' }));
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(propose).not.toHaveBeenCalled();
+    expect(out.toLowerCase()).toContain('declined');
+    await c.close();
+  });
+
+  it('응답 지연(타임아웃) → 멈추지 않고 기존 경로로 폴백해 제안 생성', async () => {
+    const prev = process.env[ELICIT_TIMEOUT_ENV];
+    process.env[ELICIT_TIMEOUT_ENV] = '30';
+    try {
+      const propose = jest.fn().mockResolvedValue('p-fallback');
+      const c = await elicitingClient(
+        makeDeps({ propose }),
+        () => new Promise((r) => setTimeout(() => r({ action: 'accept', content: { decision: 'save' } }), 300)),
+      );
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(propose).toHaveBeenCalled();
+      expect(out).toContain('p-fallback');
+      await c.close();
+    } finally {
+      if (prev === undefined) delete process.env[ELICIT_TIMEOUT_ENV];
+      else process.env[ELICIT_TIMEOUT_ENV] = prev;
+    }
+  });
+
+  it('클라이언트가 elicitation 요청에서 에러 → 폴백(기존 경로)', async () => {
+    const propose = jest.fn().mockResolvedValue('p-err');
+    const c = await elicitingClient(makeDeps({ propose }), () => {
+      throw new Error('no ui');
+    });
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(propose).toHaveBeenCalled();
+    expect(out).toContain('p-err');
+    await c.close();
+  });
+
+  it('wiki_write도 같은 게이트 — 거부 시 쓰지 않음, 승인 시 씀', async () => {
+    const write = jest.fn().mockResolvedValue('page written');
+    const declined = await elicitingClient(makeDeps({ write }), () => ({ action: 'decline' }));
+    const out = await callText(declined, 'wiki_write', { title: 'T', content: 'C' });
+    expect(write).not.toHaveBeenCalled();
+    expect(out.toLowerCase()).toContain('declined');
+    await declined.close();
+
+    const okc = await elicitingClient(makeDeps({ write }), accept);
+    expect(await callText(okc, 'wiki_write', { title: 'T', content: 'C' })).toContain('page written');
+    expect(write).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    await okc.close();
+  });
+
+  it('approve_proposal/reject_proposal은 이미 사람 승인 게이트 — 중복으로 묻지 않는다', async () => {
+    const calls: unknown[] = [];
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('approved'),
+      reject: jest.fn().mockResolvedValue('rejected'),
+    };
+    const c = await elicitingClient(makeDeps({ proposals }), (p) => {
+      calls.push(p);
+      return { action: 'accept', content: { decision: 'save' } };
+    });
+    expect(await callText(c, 'approve_proposal', { id: 'p1' })).toContain('approved');
+    expect(await callText(c, 'reject_proposal', { id: 'p1' })).toContain('rejected');
+    expect(calls).toHaveLength(0);
+    await c.close();
+  });
+
+  it('읽기 도구(wiki_search/read/list)는 묻지 않는다', async () => {
+    const calls: unknown[] = [];
+    const c = await elicitingClient(makeDeps(), (p) => {
+      calls.push(p);
+      return { action: 'accept' };
+    });
+    await callText(c, 'wiki_search', { query: 'x' });
+    await callText(c, 'wiki_list', {});
+    expect(calls).toHaveLength(0);
+    await c.close();
+  });
+
+  it(`${ELICIT_OFF_ENV}=1(사람 없는 자동 실행) → 묻지 않고 기존 경로`, async () => {
+    process.env[ELICIT_OFF_ENV] = '1';
+    try {
+      const calls: unknown[] = [];
+      const propose = jest.fn().mockResolvedValue('p-auto');
+      const c = await elicitingClient(makeDeps({ propose }), (p) => {
+        calls.push(p);
+        return { action: 'accept' };
+      });
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(calls).toHaveLength(0);
+      expect(out).toContain('p-auto');
+      await c.close();
+    } finally {
+      delete process.env[ELICIT_OFF_ENV];
+    }
+  });
+
+  it('stateless HTTP 서버(disableElicitation) → 묻지 않고 기존 경로(무한대기 회피)', async () => {
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const propose = jest.fn().mockResolvedValue('p-http');
+    const server = buildMcpServer(makeDeps({ propose }));
+    disableElicitation(server);
+    await server.connect(serverT);
+    const calls: unknown[] = [];
+    const c = new Client({ name: 'elicit-test', version: '1.0.0' }, { capabilities: { elicitation: {} } });
+    c.setRequestHandler(ElicitRequestSchema, async (req) => {
+      calls.push(req.params);
+      return { action: 'accept' } as never;
+    });
+    await c.connect(clientT);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(calls).toHaveLength(0);
+    expect(out).toContain('p-http');
+    await c.close();
   });
 });
 
