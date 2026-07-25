@@ -31,6 +31,33 @@ contextBridge.exposeInMainWorld('engramDesktop', {
   gitDiffStatus: (repoPath: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-status', repoPath),
   gitDiffFile: (repoPath: string, file: string): Promise<unknown> => ipcRenderer.invoke('engram:git-diff-file', repoPath, file),
 
+  // 코드 채널 상단 줄(`⑂ main  +1,741  −16  [PR 생성]`).
+  // gitBranchStatus: 읽기 전용 — { ok:true, branch, detached, added, removed, files } | { ok:false, reason }
+  gitBranchStatus: (repoPath: string): Promise<unknown> => ipcRenderer.invoke('engram:git-branch-status', repoPath),
+  // ⚠️ gitCreatePr는 push + PR 생성(되돌리기 어려운 외부 동작)을 "즉시 실행"한다. 확인 다이얼로그는
+  // 이 API를 부르는 렌더러 책임이다 — 메인엔 확인 절차가 없다.
+  // → { ok:true, url, alreadyExisted } | { ok:false, reason, message }
+  //   reason: 'not-repo'|'detached'|'on-default-branch'|'no-remote'|'gh-missing'|'gh-unauthenticated'|'push-failed'|'pr-failed'|'error'
+  gitCreatePr: (repoPath: string): Promise<unknown> => ipcRenderer.invoke('engram:git-create-pr', repoPath),
+
+  // 음성 입력(로컬 Whisper). 녹음·마이크 권한은 렌더러 담당, 전사는 메인.
+  // 오디오는 16kHz 모노 Float32 PCM의 ArrayBuffer로 보내는 것을 권장한다(Web Audio로 디코드+리샘플:
+  // decodeAudioData → OfflineAudioContext(1, len, 16000) → getChannelData(0).buffer). WAV 바이트도 받는다.
+  // MediaRecorder의 webm/opus 원본을 그대로 보내면 안 된다(메인엔 그걸 풀 디코더가 없다).
+  // sttAvailable: { model, ready, loading } — ready=false면 sttEnsureModel로 먼저 받아야 한다.
+  sttAvailable: (): Promise<{ model: string; ready: boolean; loading: boolean }> =>
+    ipcRenderer.invoke('engram:stt-available'),
+  // sttEnsureModel: { ok:true, model } | { error } — 진행률은 onSttProgress로 흐른다.
+  sttEnsureModel: (): Promise<unknown> => ipcRenderer.invoke('engram:stt-ensure-model'),
+  // sttTranscribe: { ok:true, text, ms } | { error }. language 미지정 시 앱 로케일, 'auto'면 자동감지.
+  sttTranscribe: (audio: ArrayBuffer, opts?: { sampleRate?: number; language?: string }): Promise<unknown> =>
+    ipcRenderer.invoke('engram:stt-transcribe', audio, opts),
+  onSttProgress: (cb: (s: { percent: number; loadedBytes: number; totalBytes: number; file: string }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, s: { percent: number; loadedBytes: number; totalBytes: number; file: string }): void => cb(s);
+    ipcRenderer.on('engram:stt-progress', listener);
+    return () => ipcRenderer.removeListener('engram:stt-progress', listener);
+  },
+
   // 자동 업데이트 상태(사용자 요청 2026-07-24): 현재 버전 표시 + 다운로드된 새 버전 배너/버튼.
   updateState: (): Promise<{ current: string; pending: string | null }> => ipcRenderer.invoke('engram:update-state'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('engram:install-update'),

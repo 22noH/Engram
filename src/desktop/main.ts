@@ -27,7 +27,9 @@ import { loadLocalBrains, addLocalBrain } from './local-brains';
 import { readSetupCode } from '../edge/auth/setup-code';
 import { focusOrRestore } from './window-focus';
 import { PtyManager } from './pty-manager';
-import { diffStatus, diffFile } from './git-diff';
+import { diffStatus, diffFile, branchStatus } from './git-diff';
+import { createPullRequest } from './git-pr';
+import { SttEngine, SttDownloadState } from './stt';
 import { classifyHealth } from './health-identity';
 import { killOrphanEngramOnPort } from './orphan-cleanup';
 import * as nodeHttp from 'http';
@@ -78,6 +80,15 @@ ptyManager.onData((sid, data) => {
 ptyManager.onExit((sid, code) => {
   chatWin?.webContents.send('engram:pty-exit', { sid, code });
 });
+
+// ---- 음성 입력(로컬 Whisper — stt.ts) ----
+// 모델은 앱에 번들하지 않고 첫 사용 시 받아 userData/models에 캐시한다(임베딩 모델과 같은 폴더 —
+// childEnv.ENGRAM_MODEL_CACHE_DIR과 동일 경로라 백엔드/두뇌와 캐시를 공유한다).
+// 녹음은 렌더러(MediaRecorder+Web Audio, 마이크 권한)가 하고 여기로는 PCM만 넘어온다.
+const sttEngine = new SttEngine(path.join(dataDir, 'models'));
+const sttProgress = (s: SttDownloadState): void => {
+  chatWin?.webContents.send('engram:stt-progress', s);
+};
 
 // UI 언어: 영어 기본, 시스템 로케일이 한국어면 한국어(렌더러는 navigator.language로 동일 판정).
 const ko = (): boolean => app.getLocale().toLowerCase().startsWith('ko');
@@ -522,6 +533,17 @@ function registerIpc(): void {
   // 코드 패널 diff 뷰: 읽기 전용(git-diff.ts, never-throw 결과형).
   ipcMain.handle('engram:git-diff-status', (_e, repoPath: string) => diffStatus(repoPath));
   ipcMain.handle('engram:git-diff-file', (_e, repoPath: string, file: string) => diffFile(repoPath, file));
+  // 코드 채널 상단 줄(`⑂ main +1,741 −16`): 브랜치명 + 변경량. 읽기 전용.
+  ipcMain.handle('engram:git-branch-status', (_e, repoPath: string) => branchStatus(repoPath));
+  // [PR 생성]: push + gh pr create. ⚠️ 되돌리기 어려운 외부 동작이라 여기엔 확인 절차가 없다 —
+  // "정말 만들까요?" 확인 UI는 렌더러 담당이고, 이 핸들러는 사용자가 이미 확인했다는 전제로 실행만 한다.
+  ipcMain.handle('engram:git-create-pr', (_e, repoPath: string) => createPullRequest(repoPath));
+  // 음성 입력: 상태 조회 / 모델 준비(진행률은 engram:stt-progress 이벤트) / 전사. 전부 never-throw.
+  ipcMain.handle('engram:stt-available', () => sttEngine.status());
+  ipcMain.handle('engram:stt-ensure-model', () => sttEngine.ensure(sttProgress));
+  // language 미지정이면 앱 로케일(한국어 사용자가 기본)로 힌트를 준다. 렌더러가 'auto'를 넘기면 자동감지.
+  ipcMain.handle('engram:stt-transcribe', (_e, audio: ArrayBuffer, opts?: { sampleRate?: number; language?: string }) =>
+    sttEngine.transcribe(audio, { sampleRate: opts?.sampleRate, language: opts?.language ?? app.getLocale() }, sttProgress));
 }
 
 // ---- 부팅 ----

@@ -13,6 +13,12 @@ export type DiffStatusResult =
 
 export type DiffFileResult = { ok: true; diff: string } | { ok: false; reason: string };
 
+// 입력바 위 한 줄 요약(승인된 B안: `⑂ main  +1,741  −16  [PR 생성]`)에 필요한 최소 정보.
+// detached HEAD면 branch='HEAD', detached=true — UI가 PR 버튼을 숨길 근거로 쓴다.
+export type BranchStatusResult =
+  | { ok: true; branch: string; detached: boolean; added: number; removed: number; files: number }
+  | { ok: false; reason: 'not-repo' | 'git-missing' | 'error' };
+
 // git 바이너리 자체가 없을 때(ENOENT on the 'git' executable)와, cwd 문제 등 다른 ENOENT를 최대한 구분한다.
 // 참고: Node의 spawn ENOENT는 "명령을 못 찾음"과 "cwd가 없음"을 항상 명확히 구분해 주지는 않는다(플랫폼 의존).
 // 여기서는 오차를 'error'쪽으로 두어(과소분류) 오분류로 인한 오해를 줄인다 — git-missing은 확실할 때만.
@@ -113,6 +119,91 @@ export async function diffFile(repoPath: string, file: string): Promise<DiffFile
     if (entry && mapStatus(entry) === '?') return untrackedDiff(repoPath, file);
     const diff = await git.raw(['diff', 'HEAD', '--', file]);
     return { ok: true, diff };
+  } catch {
+    return { ok: false, reason: 'error' };
+  }
+}
+
+// ---- 브랜치 + 변경량 요약(코드 채널 상단 줄) ----
+
+// `git diff --numstat`의 각 줄은 `<추가>\t<삭제>\t<경로>`. 바이너리 파일은 숫자 대신 "-"가 와서
+// (예: `-\t-\timage.png`) Number()가 NaN이 되므로 명시적으로 건너뛴다 — 줄 수 개념이 없는 파일이다.
+export function parseNumstat(text: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t/);
+    if (!m || m[1] === '-' || m[2] === '-') continue;
+    added += Number(m[1]);
+    removed += Number(m[2]);
+  }
+  return { added, removed };
+}
+
+// 미추적 파일은 numstat에 전혀 안 잡히므로(트래킹된 것만 비교) 내용을 직접 세어 '추가'에 더한다.
+// 바이너리(앞부분에 NUL 바이트)는 0으로 — 줄 수를 세는 게 의미 없고 숫자만 부풀린다.
+export function countAddedLines(buf: Buffer): number {
+  const head = buf.subarray(0, 8000);
+  if (head.includes(0)) return 0;
+  if (buf.length === 0) return 0;
+  let lines = 0;
+  for (const b of buf) if (b === 0x0a) lines++;
+  // 마지막 줄이 개행으로 끝나지 않으면 그 줄도 한 줄로 센다(git의 계산과 동일한 감각).
+  if (buf[buf.length - 1] !== 0x0a) lines++;
+  return lines;
+}
+
+// 미추적 파일 하나의 추가 줄 수. 읽기 실패(권한·경합 삭제 등)는 0으로 흡수 — 요약 숫자 하나 때문에
+// 전체 조회가 실패하면 안 된다. 지나치게 큰 파일은 세지 않는다(요약용 숫자에 수십 MB를 읽는 건 과함).
+const UNTRACKED_MAX_BYTES = 4 * 1024 * 1024;
+async function untrackedAddedLines(repoPath: string, file: string): Promise<number> {
+  try {
+    const full = path.join(repoPath, file);
+    const st = await fs.stat(full);
+    if (!st.isFile() || st.size > UNTRACKED_MAX_BYTES) return 0;
+    return countAddedLines(await fs.readFile(full));
+  } catch {
+    return 0;
+  }
+}
+
+// branchStatus: diffStatus와 같은 단 한 번의 status() 호출로 브랜치명·파일 목록(미추적 포함)을 얻고,
+// 줄 수만 `git diff --numstat HEAD`로 한 번 더 받는다 — diffStatus가 하는 일을 다시 하지 않고
+// 같은 매핑(mapStatus)을 재사용한다. 읽기 전용 유지(브랜치 전환·체크아웃 없음).
+export async function branchStatus(repoPath: string): Promise<BranchStatusResult> {
+  if (typeof repoPath !== 'string' || repoPath.length === 0) return { ok: false, reason: 'error' };
+  try {
+    const git = simpleGit(repoPath);
+    let isRepo: boolean;
+    try {
+      isRepo = await git.checkIsRepo();
+    } catch (e) {
+      return { ok: false, reason: isGitMissingError(e) ? 'git-missing' : 'error' };
+    }
+    if (!isRepo) return { ok: false, reason: 'not-repo' };
+    const status = await git.status();
+    // 커밋이 하나도 없는 새 레포는 HEAD가 없어 `diff HEAD`가 실패한다 — 그 경우 트래킹 변경은 0으로
+    // 두고 미추적 파일만 세면 된다(빈 레포에서도 요약 줄이 그려지게).
+    let counts = { added: 0, removed: 0 };
+    try {
+      counts = parseNumstat(await git.raw(['diff', '--numstat', 'HEAD']));
+    } catch {
+      counts = { added: 0, removed: 0 };
+    }
+    let added = counts.added;
+    for (const f of status.files) {
+      if (mapStatus(f) === '?') added += await untrackedAddedLines(repoPath, f.path);
+    }
+    // simple-git은 detached HEAD에서 current를 'HEAD'로 주거나(구현·git 버전 의존) null로 준다.
+    const current = status.current ?? 'HEAD';
+    return {
+      ok: true,
+      branch: current,
+      detached: current === 'HEAD',
+      added,
+      removed: counts.removed,
+      files: status.files.length,
+    };
   } catch {
     return { ok: false, reason: 'error' };
   }

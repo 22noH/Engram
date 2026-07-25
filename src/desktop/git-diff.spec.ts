@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
-import { diffFile, diffStatus } from './git-diff';
+import { branchStatus, countAddedLines, diffFile, diffStatus, parseNumstat } from './git-diff';
 
 const tmpDirs: string[] = [];
 
@@ -117,6 +117,76 @@ describe('diffFile', () => {
     expect(await diffFile(dir, undefined)).toEqual({ ok: false, reason: 'error' });
     // @ts-expect-error 의도적으로 잘못된 타입 전달
     expect(await diffFile(undefined, 'a.txt')).toEqual({ ok: false, reason: 'error' });
+  });
+});
+
+describe('parseNumstat', () => {
+  it('추가/삭제 줄 수를 합산한다', () => {
+    expect(parseNumstat('3\t1\ta.txt\n10\t0\tsrc/b.ts\n')).toEqual({ added: 13, removed: 1 });
+  });
+
+  it('바이너리 파일(-\\t-)은 건너뛴다(NaN 방지)', () => {
+    expect(parseNumstat('-\t-\timage.png\n5\t2\ta.txt\n')).toEqual({ added: 5, removed: 2 });
+  });
+
+  it('빈 출력은 0/0', () => {
+    expect(parseNumstat('')).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('countAddedLines', () => {
+  it('개행 기준으로 줄 수를 센다', () => {
+    expect(countAddedLines(Buffer.from('a\nb\nc\n'))).toBe(3);
+  });
+
+  it('마지막 줄이 개행으로 안 끝나도 한 줄로 센다', () => {
+    expect(countAddedLines(Buffer.from('a\nb'))).toBe(2);
+  });
+
+  it('빈 파일은 0', () => {
+    expect(countAddedLines(Buffer.alloc(0))).toBe(0);
+  });
+
+  it('바이너리(NUL 포함)는 0으로 — 숫자 부풀림 방지', () => {
+    expect(countAddedLines(Buffer.from([0x89, 0x50, 0x00, 0x0a, 0x0a, 0x0a]))).toBe(0);
+  });
+});
+
+describe('branchStatus', () => {
+  it('브랜치명과 추가/삭제 줄 수(미추적 파일 포함)를 돌려준다', async () => {
+    const dir = await makeRepo();
+    await simpleGit(dir).checkoutLocalBranch('feat/voice');
+    await fs.writeFile(path.join(dir, 'a.txt'), 'line1\nline2\nline3\nline4\n'); // +2
+    await fs.rm(path.join(dir, 'b.txt')); // -1
+    await fs.writeFile(path.join(dir, 'new.txt'), 'x\ny\n'); // untracked +2
+
+    const r = await branchStatus(dir);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.branch).toBe('feat/voice');
+    expect(r.detached).toBe(false);
+    expect(r.added).toBe(4); // a.txt +2, new.txt +2
+    expect(r.removed).toBe(1); // b.txt
+    expect(r.files).toBe(3);
+  });
+
+  it('변경이 없으면 0/0', async () => {
+    const dir = await makeRepo();
+    const r = await branchStatus(dir);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect({ added: r.added, removed: r.removed, files: r.files }).toEqual({ added: 0, removed: 0, files: 0 });
+  });
+
+  it('git 저장소가 아니면 not-repo', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-branch-norepo-'));
+    tmpDirs.push(dir);
+    expect(await branchStatus(dir)).toEqual({ ok: false, reason: 'not-repo' });
+  });
+
+  it('인자가 없으면 error(never-throw)', async () => {
+    // @ts-expect-error 의도적으로 잘못된 타입 전달
+    expect(await branchStatus(undefined)).toEqual({ ok: false, reason: 'error' });
   });
 });
 
