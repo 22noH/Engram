@@ -424,4 +424,52 @@ describe('ClaudeCliBrain', () => {
       expect(r.isError).toBe(false);
     });
   });
+
+  // 실사고 대비(2026-07-25): --effort는 최신 claude CLI에만 있다. 구버전은 "unknown option"으로
+  // 즉시 죽는데, 이 어댑터는 stderr를 안 읽어 빈 텍스트를 "성공"으로 돌려줬다(사용자에겐 무성의한
+  // 빈 답). 원인 표시 + 미지원 감지 시 --effort 빼고 1회 재시도로 자동 복구한다.
+  describe('구버전 CLI 호환(--effort 미지원)', () => {
+    it('unknown option --effort면 effort 빼고 자동 재시도해서 답을 돌려준다', async () => {
+      const first = fakeChild();
+      const second = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValueOnce(first).mockReturnValueOnce(second);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q', undefined, { effort: 'high' });
+      first.stderr.emit('data', Buffer.from("error: unknown option '--effort'\n"));
+      first.emit('close', 1);
+      await Promise.resolve();
+      second.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답', total_cost_usd: 0 }) + '\n');
+      second.emit('close', 0);
+      const r = await p;
+      expect(r.text).toBe('답');
+      expect(r.isError).toBe(false);
+      const retryArgs = (spawn as unknown as jest.Mock).mock.calls[1][1] as string[];
+      expect(retryArgs).not.toContain('--effort');
+    });
+
+    it('CLI가 결과 없이 stderr만 남기고 죽으면 그 사유를 isError+raw로 표면화한다(빈 성공 금지)', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stderr.emit('data', Buffer.from('error: something exploded\n'));
+      child.emit('close', 1);
+      const r = await p;
+      expect(r.isError).toBe(true);
+      expect(String(r.raw)).toContain('something exploded');
+    });
+
+    it('정상 결과가 있으면 stderr(경고)가 있어도 성공 그대로다', async () => {
+      const child = fakeChild();
+      (spawn as unknown as jest.Mock).mockReturnValue(child);
+      const brain = new ClaudeCliBrain(PROFILE);
+      const p = brain.complete('q');
+      child.stderr.emit('data', Buffer.from('warning: deprecated\n'));
+      child.stdout.emit('data', JSON.stringify({ type: 'result', is_error: false, result: '답', total_cost_usd: 0 }) + '\n');
+      child.emit('close', 0);
+      const r = await p;
+      expect(r.isError).toBe(false);
+      expect(r.text).toBe('답');
+    });
+  });
 });
