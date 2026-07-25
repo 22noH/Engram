@@ -1,6 +1,6 @@
 # Engram
 
-**English** | [한국어](README.ko.md)
+**English** | [한국어](https://github.com/22noH/Engram/blob/main/README.ko.md)
 
 Engram is a self-hosted AI assistant built around a **living knowledge wiki**. You (and your AI) chat, write code, and build up a shared wiki of what you've learned — and the assistant reads from and adds to that wiki over time, so it remembers.
 

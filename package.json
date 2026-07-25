@@ -134,5 +134,13 @@
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/22noH/Engram.git"
+  },
+  "homepage": "https://github.com/22noH/Engram#readme",
+  "bugs": {
+    "url": "https://github.com/22noH/Engram/issues"
   }
 }

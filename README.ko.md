@@ -1,6 +1,6 @@
 # Engram
 
-[English](README.md) | **한국어**
+[English](https://github.com/22noH/Engram/blob/main/README.md) | **한국어**
 
 Engram은 **살아있는 지식 위키**를 중심으로 돌아가는, 내 컴퓨터에서 도는 AI 비서입니다. 나(그리고 내 AI)가 대화하고, 코드를 짜고, 배운 것을 공유 위키에 쌓아가면 — 비서가 그 위키를 읽고 또 스스로 채워 넣으며 **기억**합니다.
 
