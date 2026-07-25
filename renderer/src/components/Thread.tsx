@@ -77,6 +77,9 @@ export function Thread(props: {
   activeProgressId?: string;
   // 이미 쓴 버튼 숨기기 — 그 메시지의 액션이 이미 소비됐는지(App이 저장된 기록으로 판정).
   isActionsConsumed?: (id: string) => boolean;
+  // 완료 보고서 액션 줄 — 코드 채널(데스크톱)에서만 내려온다. 다른 소품과 같은 결로 그대로 흘려보낸다.
+  onShowDiff?: () => void;
+  reportRepoPath?: string;
 }) {
   const { anchor, replies } = props;
   const threaded = props.threaded ?? true;
@@ -86,7 +89,8 @@ export function Thread(props: {
       answeredText={props.getAnsweredText?.(m.id)} onAnswer={props.onAnswer}
       attachmentCtx={props.getAttachmentCtx?.(m.id)} onExpandHtml={props.onExpandHtml}
       activeProgressId={props.activeProgressId}
-      actionsConsumed={props.isActionsConsumed?.(m.id)} />
+      actionsConsumed={props.isActionsConsumed?.(m.id)}
+      onShowDiff={props.onShowDiff} reportRepoPath={props.reportRepoPath} />
   );
 
   if (replies.length === 0) return msg(anchor);

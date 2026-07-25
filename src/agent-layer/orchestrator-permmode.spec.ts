@@ -114,7 +114,7 @@ describe('codeRun — 코딩 실행부까지 턴의 모드가 흘러간다', () 
     } as any;
     const fence = { assertWritable: assertSpy } as any;
     const gate = { run: async () => ({ pass: false, output: '' }) } as any;
-    const git = { ensureBranch: async () => {}, commitAll: async () => {} } as any;
+    const git = { ensureBranch: async () => {}, commitAll: async () => {}, head: async () => 'sha0', diffStat: async () => [] } as any;
     const coder = { work: workSpy } as any;
     const reviewer = { review: async () => ({ approved: true, extraTickets: [] }) } as any;
     const sem = { run: (fn: () => Promise<void>) => fn() } as any;

@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ServerFrame, Action, Message, EffortLevel, PermMode } from '../../../shared/protocol';
+import type { ServerFrame, Action, Message, EffortLevel, PermMode, ProgressRun } from '../../../shared/protocol';
 import type { BrowserOp } from '../../../shared/browser-ops';
 import { MessengerPort, MentionEvent, ReplyTarget } from './messenger.port';
 import { ChatStore, isEffortLevel, isPermMode } from './chat-store';
@@ -854,7 +854,10 @@ export class SelfMessenger implements MessengerPort {
     }
   }
 
-  async reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean): Promise<void> {
+  async reply(
+    target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'],
+    toolsUsed?: string[], progress?: boolean | ProgressRun, completionReport?: boolean,
+  ): Promise<void> {
     const t = target as SelfTarget;
     const msg = this.store.appendMessage(t.channelId, {
       authorId: 'engram',
@@ -865,6 +868,10 @@ export class SelfMessenger implements MessengerPort {
       ...(toolsUsed && toolsUsed.length ? { toolsUsed } : {}),
       // 진행 중 표시: 참일 때만(미전달=필드 자체 없음 — toolsUsed와 동일 관례).
       ...(progress ? { progress: true } : {}),
+      // 진행 카드: 객체를 실어보냈으면 "그 실행의 한 단계"라는 뜻 — 기록에 같이 남겨 재시작 후에도
+      // 렌더러가 같은 카드로 다시 묶는다(휘발 상태로 묶으면 껐다 켤 때 카드가 풀린다).
+      ...(typeof progress === 'object' ? { progressRun: progress } : {}),
+      ...(completionReport ? { completionReport: true } : {}),
     });
     if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }

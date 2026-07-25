@@ -33,7 +33,7 @@ import { loadChannelPolicy, allows, ChannelPolicy } from './channel-policy';
 import { SchedulerPort, ScheduleEntry } from './schedule-store';
 import { computeResume } from './resume-policy';
 import { RagStore } from '../knowledge-core/rag/rag-store';
-import type { Action } from '../../shared/protocol';
+import type { Action, ProgressRun } from '../../shared/protocol';
 import { outputDirective, configuredLang } from './language';
 import { t } from './i18n';
 import { ChannelBrainResolver } from './channel-brain-resolver';
@@ -47,7 +47,46 @@ import { brainErrorHint } from './brain-error-hints';
 // toolsUsed(brain-activity Task 1): additive 4번째 — 같은 이유로 미전달 호출부는 무영향.
 // progress(진행 중 표시): additive 5번째 — 다단계 작업(협업·코딩 루프)의 "중간 보고"에만 true를 실어
 // 게시한다. 렌더러가 진행 메시지를 식별하는 유일한 근거(텍스트 패턴 매칭 금지 — i18n에서 깨진다).
-type PostFn = (text: string, actions?: Action[], question?: AskUserPayload, toolsUsed?: string[], progress?: boolean) => Promise<void>;
+// progress에 ProgressRun 객체를 실으면 "그 실행(카드)의 한 단계"라는 뜻이다(진행 카드 2026-07-25).
+// completionReport(additive 6번째): 코딩이 끝나고 두뇌가 쓴 구조화 보고 메시지 표식.
+type PostFn = (
+  text: string, actions?: Action[], question?: AskUserPayload, toolsUsed?: string[],
+  progress?: boolean | ProgressRun, completionReport?: boolean,
+) => Promise<void>;
+
+// 진행 단계의 성격(카드 마커) — producer만 안다. 렌더러가 텍스트를 뜯어보지 않게 여기서 말해준다.
+type StepKind = ProgressRun['kind'];
+
+// 한 실행(카드 하나)의 id. 시각+난수라 동시에 도는 두 실행이 절대 같은 카드로 섞이지 않고,
+// 재시작 뒤에도 기록에 그대로 남아 있어 카드가 그대로 복원된다.
+function newRunId(): string {
+  return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// 한 코딩 실행이 남긴 "실제 재료". 완료 보고서를 두뇌에게 쓰게 할 때 이 값만 넘긴다
+// (템플릿 채우기가 아니라 실제 결과를 보고 쓰게 하는 게 목적 — 스펙 §2).
+export interface CodeRunLog {
+  baseSha: string | null;                                       // 실행 시작 시점 HEAD(변경 파일 계산 기준)
+  landed: Array<{ area: string; summary: string }>;             // 착지한 티켓과 코더가 남긴 요약
+  retries: Array<{ area: string; attempt: number; reason: string }>; // 실패·재시도 이력(화면에 이미 보인 것과 같은 사실)
+  rounds: number;                                               // 돈 라운드 수
+}
+
+// prompts/completion-report.md 없을 때의 내장 기본값(파일이 없어도 동작한다).
+// "남은 것·판단 필요" 절을 절대 빼먹지 못하게 지시가 명시적이다 — 완료만 던지면 한계를 모르고 넘어간다.
+export const COMPLETION_REPORT_DEFAULT = [
+  'You are writing a completion report for a coding run that just finished, addressed to the person who asked for it.',
+  'Use only the materials below — never invent files, tests, or results that are not there.',
+  'Write it as Markdown with exactly these sections, in this order:',
+  '1. A one-line title, then one lead line naming the target and branch.',
+  '2. `**What was done**` — plain-language results (bullets).',
+  '3. `**How it was implemented**` — the key decisions and why (bullets). Skip if the materials say nothing about it.',
+  '4. `**Files changed**` — paths with `+n −m`. Skip the section if no files changed.',
+  '5. `**Verification**` — which gate commands ran and passed (tests / build / typecheck).',
+  '6. `**Left to do / needs a decision**` — limits, what was NOT verified, follow-up decisions for the human.',
+  '   This section is mandatory. If there is genuinely nothing, write "None".',
+  'Be concrete and short. No preamble, no closing pleasantries, no headings other than the ones above.',
+].join('\n');
 
 // 예외 → 화면에 보여줄 한 줄 사유. 스택트레이스가 채팅을 덮지 않게 첫 줄만·200자까지 자른다
 // (전문은 항상 로그에 남는다). 사유를 못 뽑으면 빈 문자열이 아니라 원문 문자열화 결과를 쓴다.
@@ -177,8 +216,14 @@ export class Orchestrator {
   // 코딩 루프 onProgress)이 모두 이 한 곳을 거치게 해서 "무엇이 진행 메시지인가"의 정의가 코드에
   // 한 번만 적히게 한다. 최종 결과·질문·에러는 이 래퍼를 안 쓰므로 표식이 없고, 렌더러는 그 차이로
   // 애니메이션을 멈춘다.
-  private progressPost(post: PostFn): (text: string) => Promise<void> {
-    return (text) => post(text, undefined, undefined, undefined, true);
+  // run을 주면(진행 카드) 그 실행 id·제목·단계 성격을 함께 실어 보낸다 — 렌더러가 이 표식만으로
+  // 연속된 보고를 카드 하나로 묶고, 기록에 남으니 재시작 후에도 그대로 복원된다. run 없이 쓰면
+  // 예전처럼 boolean 표식만 붙는다(카드 없이 한 줄 — 회귀 0).
+  private progressPost(post: PostFn, run?: { id: string; title: string }): (text: string, kind?: StepKind) => Promise<void> {
+    return (text, kind) => post(
+      text, undefined, undefined, undefined,
+      run ? { id: run.id, title: run.title, ...(kind ? { kind } : {}) } : true,
+    );
   }
 
   // ask_user 도구 경로(Task 4): 도구 호출 중간에 곧바로 카드를 게시하는 클로저 — postReply의 펜스텍스트
@@ -597,7 +642,9 @@ export class Orchestrator {
       try {
         // 진행 중 표시: 협업의 중간 보고(팀 구성·의견 도착·종합 중)는 진행 메시지로 게시한다 —
         // 아래 최종 결과 post는 표식 없이 나가 렌더러 애니메이션이 그 시점에 멈춘다.
-        const result = await this.collaborate(question, team, userId, { onProgress: this.progressPost(post) });
+        // 진행 카드: 이 협업 한 번이 카드 하나다(실행 id로 묶여 코딩 카드와 절대 안 섞인다).
+        const run = { id: newRunId(), title: t('runCollabTitle') };
+        const result = await this.collaborate(question, team, userId, { onProgress: this.progressPost(post, run) });
         // ask-user(실사고 2026-07-25): 여기도 미배선이라 합성 결과에 펜스가 섞이면 JSON이 날것으로
         // 노출됐다. 합성 결과라도 사용자에게 물을 게 있으면 카드가 맞다(답은 새 멘션으로 재진입).
         const { text: resultText, question: resultQuestion } = extractAskUser(result);
@@ -765,15 +812,25 @@ export class Orchestrator {
       try {
         // 진행 중 표시: 시작 안내부터 루프의 각 단계까지 전부 진행 메시지 — 마지막 하나만 렌더러에서
         // 애니메이션이 돌고 앞의 것들은 완료 점으로 남는다. 결과/실패 메시지는 표식 없이 나간다.
-        const report = this.progressPost(post);
+        // 진행 카드: 이 코딩 실행 한 번이 카드 하나다. 같은 채널에서 협업이 동시에 돌아도 실행 id가
+        // 달라 섞이지 않고, 표식이 기록에 남아 재시작 후에도 같은 카드로 복원된다.
+        const run = { id: newRunId(), title: t('runCodingTitle') };
+        const report = this.progressPost(post, run);
         await report(t('codingStarted'));
-        const r = await this.codeRun(projectId, { channelId: threadKey, onProgress: (m) => { void report(`· ${m}`); }, brain, ...(permMode ? { permMode } : {}) });
+        const r = await this.codeRun(projectId, {
+          channelId: threadKey,
+          onProgress: (m, kind) => { void report(`· ${m}`, kind); },
+          brain, ...(permMode ? { permMode } : {}),
+        });
         this.tracker.finish(threadKey, tracked.id, r.status === 'SUCCESS' ? 'done' : 'failed');
         // 자가 재개(6b-3-2): STUCK/BUDGET만, 상한 2회. STOPPED=사용자 의지, SUCCESS=끝.
         if (r.status === 'STUCK' || r.status === 'BUDGET') {
           if (attempt >= 2) { await post(t('resumeGaveUp', r.sessionId)); return; }
           if (await this.scheduleCodingResume(projectId, r.status, threadKey, attempt, post)) return;
         }
+        // 완료 보고서(2026-07-25): 성공했으면 실제 재료(착지 티켓·재시도 이력·변경 파일·게이트)를
+        // 두뇌에게 주고 쓰게 한다. 실패하면 절대 침묵하지 않고 기존 한 줄로 되돌아간다.
+        if (r.status === 'SUCCESS' && await this.postCompletionReport(projectId, r.log, post, brain)) return;
         await post(this.codingResultMessage(r, targetPath));
       } catch (err) {
         this.tracker.finish(threadKey, tracked.id, 'failed');
@@ -871,6 +928,56 @@ export class Orchestrator {
     if (!e) return false;
     await post(t('collabRetryScheduled', human, e.id, attempt));
     return true;
+  }
+
+  // 완료 보고서 게시(2026-07-25). 성공했으면 "무엇을·어떻게·무엇이 바뀌었고·검증은 됐고·뭐가
+  // 남았는지"까지 두뇌가 실제 재료를 보고 쓴다. 게시했으면 true — 호출부는 기존 한 줄을 생략한다.
+  // ⚠️ 여기서 무슨 일이 나도 false를 돌려줄 뿐 절대 던지지 않는다: 보고서 실패가 "완료했다"는
+  //   사실 자체를 삼켜 화면이 침묵하면 그게 제일 나쁜 결과다(호출부가 기존 한 줄로 폴백).
+  private async postCompletionReport(
+    projectId: string, log: CodeRunLog, post: PostFn, brain?: BrainProvider,
+  ): Promise<boolean> {
+    try {
+      const text = await this.buildCompletionReport(projectId, log, brain);
+      if (!text) return false;
+      await post(text, undefined, undefined, undefined, undefined, true);
+      return true;
+    } catch (err) {
+      this.logger.warn(`완료 보고서 생성 실패(기존 한 줄로 폴백): ${String(err)}`, 'Orchestrator');
+      return false;
+    }
+  }
+
+  // 재료 → 두뇌 → 보고서 본문. 재료는 전부 이번 실행이 실제로 남긴 것(착지 티켓·재시도 이력·
+  // git 변경 통계·게이트 명령)뿐이다 — 지어내지 말라고 프롬프트에도 못 박는다.
+  // 못 쓰면 null(협력자 미주입·두뇌 오류·빈 응답) → 호출부가 기존 한 줄로 폴백.
+  async buildCompletionReport(projectId: string, log: CodeRunLog, brain?: BrainProvider): Promise<string | null> {
+    const useBrain = brain ?? this.codeBrain;
+    const project = await this.projects?.get(projectId);
+    if (!useBrain || !project) return null;
+    const files = log.baseSha && this.codingGit
+      ? await this.codingGit.diffStat(project.targetPath, log.baseSha)
+      : [];
+    const materials = [
+      `\n# Target\n${project.targetPath} (branch ${project.branch})`,
+      `\n# Acceptance criteria\n${project.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n') || '(none)'}`,
+      `\n# What landed\n${log.landed.map((l) => `- [${l.area}] ${l.summary}`).join('\n') || '(nothing recorded)'}`,
+      `\n# Failures and retries during the run\n${
+        log.retries.map((r) => `- [${r.area}] attempt ${r.attempt}: ${r.reason}`).join('\n') || '(none)'}`,
+      `\n# Files changed (git, this run)\n${
+        files.map((f) => `- ${f.path} +${f.added} −${f.removed}`).join('\n') || '(none detected)'}`,
+      `\n# Verification gate (all of these passed before each commit)\ntest: ${project.gate.test}\nbuild: ${project.gate.build}\ntypecheck: ${project.gate.typecheck}`,
+      `\n# Rounds\n${log.rounds}`,
+    ].join('\n');
+    const prompt = [
+      loadPrompt('completion-report', COMPLETION_REPORT_DEFAULT),
+      materials,
+      `\n${outputDirective('autonomous')}`,
+    ].join('\n');
+    const r = await useBrain.complete(prompt);
+    if (r.isError) return null;
+    const text = r.text.trim();
+    return text || null;
   }
 
   private codingResultMessage(r: { status: string; sessionId: string }, targetPath: string): string {
@@ -1091,13 +1198,25 @@ export class Orchestrator {
   //   게이트(codeGuard/cmdGuard)까지 그대로 흘린다. 미지정=전역 설정 폴백(회귀 0).
   async codeRun(
     projectId: string,
-    opts: { maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void; onProgress?: (m: string) => void; channelId?: string; brain?: BrainProvider; permMode?: PermMode } = {},
-  ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string }> {
+    opts: {
+      maxRounds?: number; stuckK?: number; onChunk?: (t: string) => void;
+      // kind: 이 단계의 성격(재시도·실패) — 진행 카드의 마커가 여기서만 결정된다(렌더러 텍스트 매칭 금지).
+      onProgress?: (m: string, kind?: StepKind) => void;
+      channelId?: string; brain?: BrainProvider; permMode?: PermMode;
+    } = {},
+  ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string; log: CodeRunLog }> {
     if (!this.projects || !this.gate || !this.codingGit || !this.coder || !this.reviewer || !this.sem || !this.codeBrain || !this.fence) {
       throw new Error('코딩 협력자가 주입되지 않음(Orchestrator.codeRun)');
     }
     // 진행 narrate(블랙박스 방지). CLI가 stdout으로 흘린다.
     const report = opts.onProgress ?? ((): void => {});
+    // 완료 보고서 재료(2026-07-25) — 화면에 이미 보인 사실만 모은다(새 관측 없음).
+    const log: CodeRunLog = { baseSha: null, landed: [], retries: [], rounds: 0 };
+    const finish = async (
+      session: { id: string },
+      status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET',
+    ): Promise<{ status: 'SUCCESS' | 'STUCK' | 'STOPPED' | 'BUDGET'; sessionId: string; log: CodeRunLog }> =>
+      ({ ...(await this.exit(session, status)), log });
     const project = await this.projects.get(projectId);
     if (!project) throw new Error(`프로젝트 없음: ${projectId}`);
     if (!project.approved) throw new Error(`완성조건 미승인 — engram code 승인 먼저: ${projectId}`);
@@ -1107,6 +1226,9 @@ export class Orchestrator {
     this.fence.assertWritable(project.targetPath, opts.permMode);
 
     await this.codingGit.ensureBranch(project.targetPath, project.branch);
+    // 변경 파일 계산 기준점 — 이 실행이 커밋하기 전의 HEAD. 못 구해도(레포 이상) 그냥 null로 두고
+    // 진행한다(보고서에서 "바뀐 파일" 절이 빠질 뿐 — 코딩을 멈출 이유가 아니다).
+    log.baseSha = await this.codingGit.head(project.targetPath);
     const session = await this.tasks!.createCoding({
       question: project.acceptanceCriteria.join(' / '), projectRef: projectId,
       criteriaTotal: project.acceptanceCriteria.length,
@@ -1124,7 +1246,8 @@ export class Orchestrator {
     let budgetSpent = 0;
 
     for (let round = 0; round < maxRounds; round++) {
-      if (this.runState !== 'running') return this.exit(session, 'STOPPED');
+      if (this.runState !== 'running') return finish(session, 'STOPPED');
+      log.rounds = round + 1;
 
       const fresh = await this.tasks!.get(session.id);
       const open = (fresh?.tickets ?? []).filter((t) => t.status !== 'SUCCESS');
@@ -1144,17 +1267,23 @@ export class Orchestrator {
             await this.codingGit!.commitAll(project.targetPath, `engram: ${ticket.id} ${ticket.area}`);
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'SUCCESS', gate: { pass: true, output: summary } });
             await this.tasks!.contribute(session.id, ticket.id, summary);
+            log.landed.push({ area: ticket.area, summary });
             report(t('ticketLanded', ticket.area));
           } else {
             await this.tasks!.updateTicket(session.id, ticket.id, { status: 'PENDING', gate: { pass: false, output: result.output } });
-            report(t('gateFailed', ticket.area, result.failed ?? t('failureFallback')));
+            const why = result.failed ?? t('failureFallback');
+            log.retries.push({ area: ticket.area, attempt: ticket.attempts + 1, reason: why });
+            // 게이트 빨강 = 이번 시도 실패(카드 마커 ✗). 다음 라운드에서 다시 시도한다.
+            report(t('gateFailed', ticket.area, why), 'fail');
           }
         } catch (err) {
           this.logger.warn(`코딩 티켓 실패(재시도 대기) ${ticket.id}: ${String(err)}`, 'Orchestrator');
           // 실사고(2026-07-25): 여기가 로그로만 끝나 화면은 몇 분간 아무 말이 없었다("갑자기 완료된 것처럼
           // 나온다"). 실패·재시도도 진행 보고로 올린다 — 사유는 한 줄로 잘라 채팅이 스택트레이스로
           // 덮이지 않게 한다(전문은 여전히 로그에 있다).
-          report(t('ticketFailedRetry', ticket.area, ticket.attempts + 1, shortReason(err)));
+          // 카드 마커 ↻(재시도) — 무엇이 왜 다시 도는지는 이 표식 하나로 정해진다.
+          log.retries.push({ area: ticket.area, attempt: ticket.attempts + 1, reason: shortReason(err) });
+          report(t('ticketFailedRetry', ticket.area, ticket.attempts + 1, shortReason(err)), 'retry');
           await this.tasks!.updateTicket(session.id, ticket.id, { status: 'PENDING' });
         }
       })));
@@ -1171,16 +1300,16 @@ export class Orchestrator {
         // SUCCESS는 리뷰어 승인 경유만 — 오픈 티켓 0이어도 여기서 판정(우회 차단).
         report(t('reviewingCriteria'));
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));
-        if (review.approved) { report(t('criteriaMet')); return this.exit(session, 'SUCCESS'); }
+        if (review.approved) { report(t('criteriaMet')); return finish(session, 'SUCCESS'); }
         report(t('reviewerExtraTickets', review.extraTickets.length));
         await this.tasks!.addTickets(session.id, review.extraTickets.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
       }
 
-      if (project.budget.tokens !== null && budgetSpent >= project.budget.tokens) { this.runState = 'paused'; return this.exit(session, 'BUDGET'); }
+      if (project.budget.tokens !== null && budgetSpent >= project.budget.tokens) { this.runState = 'paused'; return finish(session, 'BUDGET'); }
       // 방금 기록한 진전 값으로 stuck 관측(재조회 불필요). progressKey = landed:criteriaMet.
-      if (stuck.observe(`${landed}:${criteriaMet}`)) { this.runState = 'paused'; return this.exit(session, 'STUCK'); }
+      if (stuck.observe(`${landed}:${criteriaMet}`)) { this.runState = 'paused'; return finish(session, 'STUCK'); }
     }
-    return this.exit(session, 'STUCK');
+    return finish(session, 'STUCK');
   }
 
   // djb2 해시(결정적, 외부 의존 없음). 서로 다른 경로의 id 충돌 방지.

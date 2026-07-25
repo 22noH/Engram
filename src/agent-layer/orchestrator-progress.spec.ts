@@ -1,13 +1,16 @@
-import { Orchestrator } from './orchestrator';
+﻿import { Orchestrator } from './orchestrator';
+import type { ProgressRun } from '../../shared/protocol';
 
 // 진행 중 표시(progress) — 다단계 작업(협업·코딩 루프)이 올리는 "중간 보고" 메시지에만 서버가
 // additive 필드를 스탬프한다. 렌더러는 이 필드로만 진행 메시지를 식별한다(텍스트 패턴 매칭 금지 —
 // i18n에서 깨지고 오탐한다). PostFn 5번째 인자(progress)가 그 통로다.
 const logger = { warn() {}, error() {}, log() {}, info() {} } as any;
 
-type Posted = { text: string; progress?: boolean };
+// 진행 카드(2026-07-25)부터 progress는 boolean 또는 ProgressRun 객체다 — 이 스펙은 "표식이 붙는가"만
+// 보므로 객체가 와도 truthy 판정이 그대로 유효하다(카드 묶기 자체는 orchestrator-progress-card.spec).
+type Posted = { text: string; progress?: boolean | ProgressRun };
 function collect(posts: Posted[]) {
-  return async (text: string, _a?: unknown, _q?: unknown, _t?: unknown, progress?: boolean): Promise<void> => {
+  return async (text: string, _a?: unknown, _q?: unknown, _t?: unknown, progress?: boolean | ProgressRun): Promise<void> => {
     posts.push({ text, progress });
   };
 }
@@ -38,7 +41,7 @@ describe('진행 보고 표시(progress 필드)', () => {
     await (o as any).drainForTest();
 
     expect(posts[0].progress).toBeFalsy();                                       // 팀 구성 ack = 일반 메시지
-    expect(posts.find((p) => p.text === '✔ Brand 의견 도착')?.progress).toBe(true);
+    expect(posts.find((p) => p.text === '✔ Brand 의견 도착')?.progress).toBeTruthy(); // 진행 표식(카드 이후엔 실행 표식 객체)
     expect(posts.find((p) => p.text === '최종 결과')?.progress).toBeFalsy();      // 답이 오면 진행 표시 없음
   });
 
@@ -55,8 +58,9 @@ describe('진행 보고 표시(progress 필드)', () => {
     await (o as any).drainForTest();
 
     expect(posts.length).toBe(3);
-    expect(posts[0].progress).toBe(true);                       // 코딩 시작 안내
-    expect(posts[1]).toEqual({ text: '· Breakdown complete — 2 task(s)', progress: true });
+    expect(posts[0].progress).toBeTruthy();                     // 코딩 시작 안내
+    expect(posts[1].text).toBe('· Breakdown complete — 2 task(s)');
+    expect(posts[1].progress).toBeTruthy();
     expect(posts[2].progress).toBeFalsy();                      // 완료 메시지 = 일반 메시지(애니메이션 정지)
   });
 });
@@ -75,7 +79,7 @@ describe('코딩 티켓 실패·재시도 노출', () => {
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any,
       { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       { work } as any,
       { review: async () => ({ approved: false, extraTickets: [] }) } as any,
       fakeBrain('{"tickets":[{"area":"backend","instruction":"i"}]}') as any,

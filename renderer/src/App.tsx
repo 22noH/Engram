@@ -11,6 +11,8 @@ import { Thread } from './components/Thread';
 import type { AttachmentCtx } from './components/Message';
 import { Palette, filterCommands, MANAGE_ENGRAMS_INSERT, CLEAR_INSERT, COMPACT_INSERT } from './components/Palette';
 import { FolderEmpty } from './components/FolderEmpty';
+import { ProgressCard } from './components/ProgressCard';
+import { groupProgressRuns } from './progress-run';
 import { DockIcons, DockPanel } from './components/dock/DockPanel';
 import {
   addTab, defaultLayout, type DockLayout, type DockTool, findPaneByTool, focusedPane, focusPane,
@@ -1048,7 +1050,14 @@ export default function App() {
                       if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
                     }
                   }
-                  return mergedMsgs.filter((m) => !m.threadId).map((m) => (
+                  // 진행 카드(2026-07-25) — 한 실행의 진행 보고들을 카드 하나로 묶는다. 묶는 근거는
+                  // 기록에 남은 표식(m.progressRun)뿐이라 재시작 후에도 같은 카드가 복원된다.
+                  // 답글이 달린 진행 메시지는 접지 않는다(접으면 그 답글이 화면에서 사라진다).
+                  return groupProgressRuns(mergedMsgs.filter((m) => !m.threadId), (m) => byAnchor.has(m.id)).map((item) => (
+                    item.kind === 'run' ? (
+                      <ProgressCard key={item.id} run={item}
+                        running={item.steps.some((s) => s.id === activeProgressId)} />
+                    ) : (() => { const m = item.m; return (
                     <Thread key={m.id} anchor={m} replies={byAnchor.get(m.id) ?? []}
                       draft={drafts.get(m.id) ?? ''}
                       collapsed={collapsed.has(m.id)}
@@ -1068,8 +1077,12 @@ export default function App() {
                       getAnsweredText={(id) => answeredById.get(id)}
                       onAnswer={(text, answersId) => sendText(text, undefined, answersId)}
                       getAttachmentCtx={attachmentCtxFor}
+                      // 완료 보고서 액션 — 코드 채널(데스크톱 패널 가능)에서만. 변경점은 독 Diff 칸을
+                      // 열고, PR은 기존 [PR 생성] 경로(확인 대화 포함)를 그대로 탄다.
+                      onShowDiff={codePanelGate ? () => openDockTool('diff') : undefined}
+                      reportRepoPath={defaultChan?.repoPath}
                       onExpandHtml={codePanelGate ? expandHtml : undefined} />
-                  ));
+                  ); })()));
                 })()}
                 {currentName && awaiting.has(currentName) && (() => {
                   // Task 2(brain-activity) — activity 프레임이 오면 그 라벨로 실시간 치환("생각 중" → "웹

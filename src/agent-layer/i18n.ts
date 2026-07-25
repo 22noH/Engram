@@ -125,6 +125,9 @@ const MESSAGES: Record<string, Entry> = {
   humanMinutesLater: { en: (min, hhmm) => `in ${min} min (${hhmm})`, ko: (min, hhmm) => `${min}분 뒤(${hhmm})` },
   // 두뇌 활동 표시(Task 1): 같은 응답 안에서 도구를 2개 이상 쓸 때 활동 라벨 끝에 붙이는 순번 표기.
   toolOrdinal: { en: (n) => `tool #${n}`, ko: (n) => `도구 ${n}번째` },
+  // 진행 카드 제목(2026-07-25) — 한 실행을 접힌 한 줄로 보여줄 때의 작업명.
+  runCodingTitle: { en: () => 'Autonomous coding', ko: () => '자율 코딩' },
+  runCollabTitle: { en: () => 'Team work', ko: () => '협업' },
 };
 
 export function t(key: string, ...args: any[]): string {

@@ -235,7 +235,43 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
      더 짧게 쓰면(예: .msg.progress.running .body) 오히려 shimmer 규칙에 져서 애니메이션이 그대로 돈다. */
   .msg.progress.running .progressRow .body { animation:none; background-image:none;
                                              color:var(--text); -webkit-text-fill-color:var(--text); }
+  /* 진행 카드 제목도 같은 규칙 — 선택자를 아래 shimmer 규칙과 글자 그대로 맞춰야 이긴다. */
+  .msg.progressCard.running .pcHead .pcTitle { animation:none; background-image:none;
+                                               color:var(--text); -webkit-text-fill-color:var(--text); }
 }
+/* 진행 카드(목업 승인, 2026-07-25) — 한 실행 = 접힌 한 줄. 자율 코딩 한 번에 진행 메시지가 열 개
+   넘게 쌓여 대화를 밀어내던 걸 카드 하나로 접는다. 색은 전부 Quiet Library 토큰. */
+.msg.progressCard .pcCard { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.msg.progressCard .pcHead { display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer; user-select:none; }
+.msg.progressCard .pcIcon { flex:none; font-size:12px; color:var(--dim); }
+.msg.progressCard .pcTitle { flex:1; min-width:0; font-size:13px;
+                             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.msg.progressCard .pcMeta { flex:none; font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums; }
+.msg.progressCard .pcChev { flex:none; font-size:11px; color:var(--dim); }
+.msg.progressCard.done .pcIcon { color:var(--ok); }
+/* 진행 중인 카드의 제목은 글자가 흐른다(진행 보고 한 줄과 같은 언어). */
+.msg.progressCard.running .pcHead .pcTitle { color:transparent; -webkit-text-fill-color:transparent;
+  background-image:linear-gradient(90deg, var(--dim) 0%, var(--text) 45%, var(--dim) 90%);
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+  animation:progressShimmer 1.8s linear infinite; }
+.msg.progressCard .pcSteps { border-top:1px solid var(--line); padding:6px 12px 9px; }
+.msg.progressCard .pcStep { display:flex; align-items:flex-start; gap:9px; font-size:12px; padding:3px 0; color:var(--dim); }
+.msg.progressCard .pcMk { flex:none; width:13px; text-align:center; color:var(--ok); }
+.msg.progressCard .pcStep.now .pcMk { color:var(--dim); }
+.msg.progressCard .pcStep.fail .pcMk, .msg.progressCard .pcStep.retry .pcMk { color:var(--danger); }
+.msg.progressCard .pcStep.now .pcTx { color:var(--text); }
+.msg.progressCard .pcTx { flex:1; min-width:0; word-break:break-word; }
+.msg.progressCard .pcTm { flex:none; font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums; }
+/* 완료 보고서 — 본문 아래 액션 줄([변경점 보기] [PR 생성]). 버튼 톤은 상단 브랜치 줄과 같다. */
+.msg.report .reportActions { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:8px; }
+.msg.report .reportActions button { height:28px; padding:0 12px; font-size:12px; }
+.msg.report .reportActions .prBtn { background:transparent; border:1px solid var(--accent); color:var(--accent); }
+.msg.report .reportActions .prBtn:hover:not(:disabled) { background:var(--accent); color:var(--accent-text); }
+.msg.report .reportActions .prBtn:disabled { opacity:.55; cursor:default; }
+.msg.report .reportActions .gitPrError { font-size:11.5px; color:var(--danger); }
+.msg.report .reportActions .gitPrResult { display:flex; align-items:center; gap:8px; font-size:11.5px; }
+.msg.report .reportActions .gitPrResult a { color:var(--accent); font-weight:600; }
+.msg.report .reportActions .gitNotice { color:var(--dim); }
 /* 스레드(Team 전용, 목업 승인) — <details> 기본 스타일을 버리고 직접 그린다: 헤더 한 줄(참여자
    아바타 겹침 · 답글 수 · 마지막 시각 · 접기 셰브론)과 세로 연결선 안의 답글들. 접히면 헤더만 남는다. */
 .thread { margin:-2px 0 10px 6px; padding-left:14px; border-left:2px solid var(--accent-line); }

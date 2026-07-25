@@ -9,7 +9,8 @@ import { T } from '../i18n';
 // 갱신은 이벤트 기반(마운트·refreshKey 변화=메시지 도착·창 포커스 복귀) — 과한 폴링을 하지 않는다.
 
 // 실패 reason → 안내 문구(백엔드 git-pr.ts의 raw message는 영어 고정이라 로케일 문구로 갈아끼운다).
-function prErrorText(reason: string): string {
+// 완료 보고서의 [PR 생성] 버튼도 같은 문구를 쓴다(안내가 자리마다 달라지지 않게 한 곳에서만 정의).
+export function prErrorText(reason: string): string {
   switch (reason) {
     case 'gh-missing': return T.prErrGhMissing;
     case 'gh-unauthenticated': return T.prErrGhAuth;

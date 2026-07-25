@@ -1,7 +1,7 @@
 // 앞단 중립 메신저 포트(설계 §9 / Phase 6a). 어댑터(Discord 등)가 구현하고,
 // 코어는 채널 ID·답신 핸들 등 메신저 특유의 것을 모른다(CoreMessage 중립성 연장).
 
-import type { Action, AttachmentMeta, Message, EffortLevel, PermMode } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, Message, EffortLevel, PermMode, ProgressRun } from '../../../shared/protocol';
 
 // 답신 경로 — 어댑터별 불투명 핸들. 코어를 통과하지 않고 어댑터↔bridge만 주고받는다.
 export type ReplyTarget = unknown;
@@ -39,7 +39,12 @@ export interface MessengerPort {
   // Task 2(ask-user): question은 additive 옵션 4번째 인자 — 3인자 구현체(다른 어댑터)는 구조적 호환 유지.
   // Task 1(brain-activity): toolsUsed는 additive 5번째 인자 — 4인자 이하 구현체도 구조적 호환 유지.
   // 진행 중 표시: progress는 additive 6번째 인자(다단계 작업의 중간 보고 표식) — 같은 이유로 무영향.
-  reply(target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'], toolsUsed?: string[], progress?: boolean): Promise<void>;
+  // 진행 카드(2026-07-25): progress에 객체(ProgressRun)를 실으면 "그 실행의 한 단계"라는 뜻이다
+  // (true는 옛 표식 그대로 — 카드 없이 한 줄). completionReport는 additive 7번째 — 미구현 어댑터 무영향.
+  reply(
+    target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'],
+    toolsUsed?: string[], progress?: boolean | ProgressRun, completionReport?: boolean,
+  ): Promise<void>;
   postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
   // Task 1(brain-activity): 옵셔널 — 실시간 활동 라벨(예: "웹 검색 중 · web_search")을 그 채널에만
   // 브로드캐스트. 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0).

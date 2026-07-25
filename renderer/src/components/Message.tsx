@@ -5,6 +5,7 @@ import { ko } from '../config';
 import { ActionButtons } from './ActionButtons';
 import { HtmlPreview } from './HtmlPreview';
 import { QuestionCard } from './QuestionCard';
+import { ReportActions } from './ReportActions';
 import { fetchAttachmentBlobUrl } from '../auth-api';
 import { T } from '../i18n';
 
@@ -140,13 +141,17 @@ function MdChunk({ text }: { text: string }) {
 // actionsConsumed(이미 쓴 버튼 숨기기): 이 메시지의 버튼이 요구한 답이 실제로 왔는지 — App이 저장된
 // 기록만으로 판정해 내려준다(그래서 새로고침·재접속 후에도 숨김이 유지된다). true면 버튼 줄을 아예
 // 안 그린다(사용자 확정: 흔적도 남기지 않음).
-export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx, onExpandHtml, activeProgressId, actionsConsumed }: {
+// 완료 보고서(m.completionReport): 본문 아래에 [변경점 보기]·[PR 생성] 줄을 붙인다. 둘 다 앱 기능
+// 호출이라 App이 핸들러(onShowDiff)와 대상 폴더(reportRepoPath)를 내려줄 때만 그려진다.
+export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentCtx, onExpandHtml, activeProgressId, actionsConsumed, onShowDiff, reportRepoPath }: {
   m: Msg; onSend?: (text: string, answersId?: string) => void; myName?: string;
   answeredText?: string; onAnswer?: (text: string, answersId: string) => void;
   attachmentCtx?: AttachmentCtx;
   onExpandHtml?: (html: string) => void;
   activeProgressId?: string;
   actionsConsumed?: boolean;
+  onShowDiff?: () => void;
+  reportRepoPath?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   // ```html 블록이 하나라도 있을 때만 세그먼트 렌더로 갈라진다 — 없으면(대다수 메시지) 아래
@@ -166,7 +171,9 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
   }, [m.text]);
   return (
     <div
-      className={'msg' + (isEngram ? '' : isMe ? ' me' : ' other') + (isProgress ? (progressRunning ? ' progress running' : ' progress done') : '')}
+      className={'msg' + (isEngram ? '' : isMe ? ' me' : ' other')
+        + (isProgress ? (progressRunning ? ' progress running' : ' progress done') : '')
+        + (m.completionReport ? ' report' : '')}
       aria-busy={progressRunning || undefined}
     >
       <div className="who">{who + ' · ' + new Date(m.ts).toLocaleTimeString()}</div>
@@ -209,6 +216,8 @@ export function Message({ m, onSend, myName, answeredText, onAnswer, attachmentC
       {!m.question && !actionsConsumed && m.actions && m.actions.length > 0 && onSend && (
         <ActionButtons actions={m.actions} onSend={(text) => onSend(text, m.id)} />
       )}
+      {/* 완료 보고서 액션 줄 — 표식이 붙은 메시지에만. 기존 메시지엔 필드가 없어 렌더 자체를 안 한다(회귀 0). */}
+      {m.completionReport && <ReportActions onShowDiff={onShowDiff} repoPath={reportRepoPath} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Orchestrator } from './orchestrator';
+﻿import { Orchestrator } from './orchestrator';
 
 function fakeBrain(text: string) { return { complete: () => Promise.resolve({ text, costUsd: 0, isError: false }) }; }
 const logger = { warn() {}, log() {} } as any;
@@ -19,7 +19,7 @@ describe('Orchestrator.codeRun', () => {
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any,
       { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       { work: async () => '코딩함' } as any,
       { review: async () => ({ approved: true, extraTickets: [] }) } as any,
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
@@ -44,7 +44,7 @@ describe('Orchestrator.codeRun', () => {
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any,
       { run: async () => ({ pass: false, failed: 'test', output: 'red' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       { work: async () => 'x' } as any,
       { review: async () => ({ approved: false, extraTickets: [] }) } as any,
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
@@ -65,7 +65,7 @@ describe('Orchestrator.codeRun', () => {
     const o = new Orchestrator({} as any, {} as any, logger, {} as any,
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any, { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       { work: async () => 'x' } as any,
       { review: async () => ({ approved: false, extraTickets: [] }) } as any,  // 영원히 미승인
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
@@ -93,7 +93,7 @@ describe('Orchestrator.codeRun', () => {
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any,
       { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       coder as any,
       { review: async () => ({ approved: true, extraTickets: [] }) } as any,
       defaultBrain as any,
@@ -115,7 +115,7 @@ describe('Orchestrator.codeRun', () => {
     const o = new Orchestrator({} as any, {} as any, logger, {} as any,
       tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
       { get: async () => project } as any, { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
-      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
       { work: async () => 'x' } as any, { review: async () => ({ approved: false, extraTickets: [] }) } as any,
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
       { assertWritable: () => {}, codingFlags: () => [] } as any);

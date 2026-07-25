@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { Action, AttachmentMeta, QuestionItem, EffortLevel, PermMode } from '../../../shared/protocol';
+import type { Action, AttachmentMeta, QuestionItem, EffortLevel, PermMode, ProgressRun } from '../../../shared/protocol';
 import type { AttachmentStore } from './attachment-store';
 
 // 채팅 기록 영속(스펙 §4.2). 메시지=state/chat/{channelId}.jsonl append 전용,
@@ -20,6 +20,8 @@ export interface ChatMessage {
   attachments?: AttachmentMeta[];            // Task 1(chat-attachments): 첨부(메시지와 운명 공유)
   toolsUsed?: string[];                      // Task 1(brain-activity): 이 응답 생성 중 쓴 도구 이름들(순서대로). 비어있으면 필드 생략.
   progress?: boolean;                        // 진행 중 표시: 다단계 작업의 중간 보고 메시지(렌더러 애니메이션·완료 점 판정). 미첨부/false는 필드 생략.
+  progressRun?: ProgressRun;                 // 진행 카드: 이 보고가 속한 실행 + 단계 성격(재시작 후 카드 복원의 유일한 근거 — jsonl에 남는다).
+  completionReport?: boolean;                // 완료 보고서 표식(렌더러가 [변경점 보기]·[PR 생성] 줄을 붙인다).
   ts: string; // ISO
 }
 
@@ -336,6 +338,8 @@ export class ChatStore {
       attachments?: AttachmentMeta[];
       toolsUsed?: string[];
       progress?: boolean;
+      progressRun?: ProgressRun;
+      completionReport?: boolean;
     },
   ): ChatMessage | null {
     if (!this.has(channelId)) return null;
@@ -353,6 +357,9 @@ export class ChatStore {
       ...(input.toolsUsed && input.toolsUsed.length ? { toolsUsed: input.toolsUsed } : {}),
       // 진행 중 표시: 참일 때만 싣는다(false/미첨부는 필드 자체 없음 — toolsUsed와 동일 관례, 회귀 0).
       ...(input.progress ? { progress: true } : {}),
+      // 진행 카드 묶기 표식 — 있을 때만(옛 진행 메시지는 이 필드가 없고, 렌더러가 연속 폴백으로 묶는다).
+      ...(input.progressRun ? { progressRun: input.progressRun } : {}),
+      ...(input.completionReport ? { completionReport: true } : {}),
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(this.chatDir, { recursive: true });

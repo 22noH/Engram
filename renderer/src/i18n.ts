@@ -261,6 +261,19 @@ export const T = {
     const s = sec % 60;
     return ko ? `${m}분 ${s}초` : `${m}m ${s}s`;
   },
+  // ─── 진행 카드(2026-07-25) — 한 실행을 접힌 한 줄로 ────────────────────────────
+  // 진행 중 머리글의 뒷부분: "지금 하는 단계". 제목과 대시로 잇는다.
+  progressCardTitle: (title: string, step: string) => `${title} — ${step}`,
+  // 접힌 줄 오른쪽: 경과 시간 + 몇 단계까지 왔는지. 총 단계는 "지금까지 나온 단계 수"다 —
+  // 앞으로 몇 단계가 더 나올지는 아무도 모르므로 지어내지 않는다.
+  progressCardSteps: (done: number, total: number) => (ko ? `${done}/${total}단계` : `${done}/${total} steps`),
+  // 끝났을 때의 머리글·요약. 여기서부터 카드는 자동으로 접힌다.
+  progressCardDone: (title: string) => (ko ? `${title} 완료` : `${title} complete`),
+  progressCardDoneMeta: (n: number, dur: string) => (ko ? `${n}단계 · ${dur}` : `${n} steps · ${dur}`),
+  progressCardExpand: ko ? '단계 펼치기' : 'Show steps',
+  progressCardCollapse: ko ? '단계 접기' : 'Hide steps',
+  // ─── 완료 보고서 액션 줄 ──────────────────────────────────────────────────────
+  reportViewDiff: ko ? '변경점 보기' : 'View changes',
   toolsUsedLabel: (n: number, list: string) => (ko
     ? `🔧 도구 ${n}개 사용 — ${list}`
     : `🔧 ${n} tool${n === 1 ? '' : 's'} used — ${list}`),
