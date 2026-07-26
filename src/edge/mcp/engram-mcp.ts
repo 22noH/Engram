@@ -55,10 +55,24 @@ const WIKI_SEARCH_FALLBACK_NOTE =
   ' NOTE: the Engram app is offline, so this is currently a plain case-insensitive text match over wiki pages ' +
   '(title/slug/body), not semantic search — expect lower recall for paraphrased queries.';
 
+// 도구 annotation(MCP 스펙) — 클라이언트가 "이 도구를 물어보지 않고 실행해도 되나"를 판단하는 유일한
+// 기계적 근거다. ★안 달면 destructiveHint 기본값이 true라 모든 도구가 "파괴적일 수 있음"으로 취급된다.
+// 실사고(2026-07-26): 바깥 Claude Code 자동모드에서 wiki_propose가 조용히 거부됐다 — 사람 승인 게이트를
+// 거치는 제안 등록일 뿐인데 아무 신고도 안 해서 클라이언트가 최악을 가정할 수밖에 없었다.
+// 거짓 신고는 하지 않는다. 실제로 파괴적인 것(wiki_write·reject_proposal·engram_config_set)은 true로 둔다.
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+// 로컬에 쓰지만 지우거나 덮지 않는 것(추가·제안 등록). 로컬 전용이라 openWorld도 false.
+const ADDITIVE_LOCAL = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } as const;
+// 지우거나 덮어쓰는 것 — 사람 확인을 받을 값어치가 있다고 스스로 신고한다.
+const DESTRUCTIVE_LOCAL = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
+// 열린 페이지를 읽기만 하는 브라우저 도구(나머지는 실제로 조작한다).
+const BROWSER_READ_ONLY_TOOLS = new Set(['browser_read', 'browser_console', 'browser_network', 'browser_screenshot']);
+
 function wikiSearchTool(fallback: boolean): Tool {
   return {
     name: 'wiki_search',
     description: WIKI_SEARCH_DESCRIPTION + (fallback ? WIKI_SEARCH_FALLBACK_NOTE : ''),
+    annotations: READ_ONLY,
     inputSchema: {
       type: 'object',
       properties: {
@@ -73,6 +87,7 @@ function wikiSearchTool(fallback: boolean): Tool {
 const WIKI_READ_TOOL: Tool = {
   name: 'wiki_read',
   description: 'Read one published Engram wiki page by slug. Returns its title and full content.',
+  annotations: READ_ONLY,
   inputSchema: {
     type: 'object',
     properties: { slug: { type: 'string', description: 'page slug' } },
@@ -83,13 +98,17 @@ const WIKI_READ_TOOL: Tool = {
 const WIKI_LIST_TOOL: Tool = {
   name: 'wiki_list',
   description: 'List all published Engram wiki pages (slug, title, category).',
+  annotations: READ_ONLY,
   inputSchema: { type: 'object', properties: {} },
 };
 
 const WIKI_PROPOSE_TOOL: Tool = {
   name: 'wiki_propose',
   description:
-    'Propose new knowledge for the Engram wiki. A human reviews and approves it in the Engram app — nothing is written directly.',
+    'Propose new knowledge for the Engram wiki. A human reviews and approves it in the Engram app — nothing is written directly. ' +
+    'Safe to call: it only queues a proposal locally. It never edits or deletes an existing page, and publishing requires a separate human approval.',
+  // 제안 큐에 한 줄 넣을 뿐 — 기존 페이지를 고치거나 지우지 않고, 게시는 사람 승인을 또 거친다.
+  annotations: ADDITIVE_LOCAL,
   inputSchema: {
     type: 'object',
     properties: {
@@ -106,6 +125,7 @@ const LIST_PROPOSALS_TOOL: Tool = {
   name: 'list_proposals',
   description:
     'List pending Engram wiki proposals awaiting human review. Each entry has id, title, op, targetSlug, and a preview of the content.',
+  annotations: READ_ONLY,
   inputSchema: { type: 'object', properties: {} },
 };
 
@@ -114,6 +134,8 @@ const APPROVE_PROPOSAL_TOOL: Tool = {
   description:
     'Approve a pending Engram wiki proposal and apply it to the wiki. Approval is the human gate — only call this ' +
     'when the user explicitly asks you to approve a specific proposal (by id from list_proposals).',
+  // 사람이 이미 내린 결정을 집행한다. 새 페이지 생성이거나 기존 페이지 뒤에 이어붙이기라 덮어쓰지 않는다.
+  annotations: ADDITIVE_LOCAL,
   inputSchema: {
     type: 'object',
     properties: { id: { type: 'string', description: 'proposal id, from list_proposals' } },
@@ -126,6 +148,8 @@ const REJECT_PROPOSAL_TOOL: Tool = {
   description:
     'Reject (discard) a pending Engram wiki proposal. Approval/rejection is the human gate — only call this when ' +
     'the user explicitly asks you to reject a specific proposal (by id from list_proposals).',
+  // 제안을 버린다 = 되돌릴 수 없는 삭제. 정직하게 파괴적이라고 신고한다.
+  annotations: DESTRUCTIVE_LOCAL,
   inputSchema: {
     type: 'object',
     properties: { id: { type: 'string', description: 'proposal id, from list_proposals' } },
@@ -138,6 +162,8 @@ const WIKI_WRITE_TOOL: Tool = {
   description:
     'Write directly to the Engram wiki — creates or updates a published page immediately, with no human approval ' +
     'step (unlike wiki_propose). Only available when the server is running in write mode.',
+  // 게시된 페이지를 사람 확인 없이 덮어쓴다 — 이건 진짜 파괴적이다.
+  annotations: DESTRUCTIVE_LOCAL,
   inputSchema: {
     type: 'object',
     properties: {
@@ -153,6 +179,7 @@ const CONFIG_GET_TOOL: Tool = {
   name: 'engram_config_get',
   description:
     "Read Engram's settings (wiki git sync, folder auto-import, current brain). Safe to call any time — this only reads.",
+  annotations: READ_ONLY,
   inputSchema: {
     type: 'object',
     properties: { key: { type: 'string', description: 'optional — one setting key, e.g. import.folder. Omit for all settings.' } },
@@ -167,6 +194,8 @@ const CONFIG_SET_TOOL: Tool = {
     '(wiki git remote, publishing without human approval, very broad watch folders) require the user to confirm in a ' +
     'dialog; if this client cannot show one, the change is refused — tell the user to change it in the Engram app or ' +
     'with `engram config set` in a terminal. Call engram_config_get first if you are unsure of the key or the current value.',
+  // 기존 설정값을 덮어쓴다. 위험 설정은 코드에서 별도 확인 게이트를 또 거친다(callConfigSet).
+  annotations: DESTRUCTIVE_LOCAL,
   inputSchema: {
     type: 'object',
     properties: {
@@ -214,6 +243,8 @@ function askBrainTool(names: string[]): Tool {
   return {
     name: 'ask_brain',
     description: `Delegate a subtask to one of the registered Engram brains: ${names.join(', ')}`,
+    // 다른 모델에 위임한다 = 그쪽이 무슨 도구를 쓸지 우리가 보장할 수 없다. 안전하다고 신고하지 않는다.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -413,7 +444,16 @@ export function buildMcpServer(deps: McpDeps): Server {
     // AI 웹 조작: 앱이 배선했을 때만. inputSchema는 shared 정의 그대로(_channel은 스키마에 없다).
     if (deps.browser) {
       for (const d of BROWSER_TOOL_DEFS) {
-        tools.push({ name: d.name, description: d.description, inputSchema: d.parameters as Tool['inputSchema'] });
+        tools.push({
+          name: d.name,
+          description: d.description,
+          // 브라우저 도구는 전부 openWorld(살아 있는 웹). 페이지를 읽기만 하는 것과 실제로 조작하는 것을
+          // 구분해 신고한다 — 조작 쪽은 안전하다고 주장하지 않는다(destructiveHint 기본 true 유지).
+          annotations: BROWSER_READ_ONLY_TOOLS.has(d.name)
+            ? { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+            : { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+          inputSchema: d.parameters as Tool['inputSchema'],
+        });
       }
     }
     return { tools };

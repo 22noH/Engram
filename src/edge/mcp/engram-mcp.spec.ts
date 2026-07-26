@@ -256,6 +256,42 @@ describe('buildMcpServer', () => {
     await s.close();
   });
 
+  // 실사고(2026-07-26): annotations를 하나도 안 달아 자동모드 클라이언트가 wiki_propose를 조용히 거부했다.
+  // MCP 스펙상 destructiveHint 기본값이 true라, 신고하지 않으면 전부 "파괴적일 수 있음"이 된다.
+  // 이 테스트는 두 방향을 다 고정한다 — 안전한 도구가 신고를 빠뜨리는 것도, 위험한 도구가 안전하다고
+  // 거짓 신고하는 것도 회귀로 잡는다.
+  it('tools/list: 모든 도구가 annotations를 신고하고, 파괴 여부를 정직하게 표시한다', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('ok'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    // McpSession.listToolDefs는 API 브레인용 형태로 변환하며 annotations를 떨군다 — 원본 클라이언트로 본다.
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(makeDeps({ proposals, write: jest.fn().mockResolvedValue('written') })).connect(serverT);
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    await client.connect(clientT);
+    const defs = (await client.listTools()).tools;
+    const by = (n: string) => defs.find((d) => d.name === n);
+
+    // 신고 누락이 없어야 한다(누락 = destructiveHint 기본 true = 자동모드에서 막힘).
+    for (const d of defs) expect(d.annotations).toBeDefined();
+
+    // 읽기 전용
+    for (const n of ['wiki_search', 'wiki_read', 'wiki_list', 'list_proposals']) {
+      expect(by(n)?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    }
+    // 로컬에 쓰지만 지우거나 덮지 않음 — 자동모드가 통과시켜야 하는 쪽
+    for (const n of ['wiki_propose', 'approve_proposal']) {
+      expect(by(n)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, openWorldHint: false });
+    }
+    // 실제로 지우거나 덮는 것 — 안전하다고 주장하지 않는다
+    for (const n of ['reject_proposal', 'wiki_write']) {
+      expect(by(n)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    }
+    await client.close();
+  });
+
   it('list_proposals: 결과 텍스트에 id/title/op/targetSlug/preview 포함', async () => {
     const proposals = {
       list: jest.fn().mockResolvedValue([
