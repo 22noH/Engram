@@ -178,6 +178,22 @@ describe('RagStore', () => {
     expect(slugs).toEqual(expect.arrayContaining(['p1', 'p2']));
   });
 
+  // 부팅 진행 표시(2026-07-26): 이 구간이 부팅에서 제일 오래 걸려(첫 페이지에서 임베딩 모델 로드)
+  // 페이지마다 진행이 올라와야 화면이 "멈춘 것"과 안 헷갈린다.
+  it('reindexAll은 페이지마다 진행(완료수/전체)을 알린다', async () => {
+    const seen: Array<[number, number]> = [];
+    await store.reindexAll([page('r1', '하나'), page('r2', '둘'), page('r3', '셋')], (done, total) => seen.push([done, total]));
+    expect(seen).toEqual([[1, 3], [2, 3], [3, 3]]);
+  });
+
+  it('진행 콜백이 던져도 재색인은 계속된다(계측이 본 작업을 못 막게)', async () => {
+    await expect(
+      store.reindexAll([page('t1', '하나'), page('t2', '둘')], () => { throw new Error('계측 폭발'); }),
+    ).resolves.toBeUndefined();
+    const slugs = (await store.search('둘', 50)).map((r) => r.slug);
+    expect(slugs).toContain('t2');
+  });
+
   // 리뷰 후속(잔여 크래시 경로 봉쇄): 정상 부팅 경로(ok-path)의 reindexAll에서 한 페이지가
   // throw해도 onModuleInit을 뚫고 나가지 않고, 나머지 페이지는 계속 색인되며 요약 로그가 남아야 한다.
   it('reindexAll은 한 페이지가 실패해도 나머지는 색인하고 성공/실패 건수를 요약 로그로 남긴다(③)', async () => {

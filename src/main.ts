@@ -57,6 +57,7 @@ import { ImportWatcher } from './knowledge-core/import/import-watcher';
 import { importLedgerPath } from './knowledge-core/import/import.config';
 import { makeImporterPorts } from './knowledge-core/import/import-wiring';
 import { makeAudioText, pdfText } from './knowledge-core/import/extract-ports';
+import { markBootStage } from './pal/boot-progress';
 
 // 위키 본문 병합 프롬프트 내장 기본값(prompts/wiki-merge.md와 동일 — 파일 없을 때 폴백).
 // prompts/*.md는 영어만 허용(prompt-md-english.spec.ts) — 두뇌에 보내는 지시문은 영어로 통일.
@@ -169,8 +170,15 @@ function startFolderImport(
 // Phase 6a: messenger.json provider가 있으면 메신저 어댑터를 띄워 @Engram 멘션을 받는다.
 async function bootstrap(): Promise<void> {
   process.env.ENGRAM_RESIDENT = '1'; // 상주 표식 — HeartbeatEmitter가 기동 즉시 1회 발화
+  // 부팅 단계 보고(실사고 2026-07-26 — 네 번째 '무한 시작 중'). 리슨(헬스 200) 전까지 셸은
+  // "아직 연결 안 됨"밖에 몰라서, 정상 기동과 영영 안 끝나는 부팅이 화면에서 똑같아 보였다.
+  // DI 이전이라 PathResolver를 직접 만든다(같은 규칙: ENGRAM_DATA_DIR > cwd/runtime).
+  const dataDir = new PathResolver().getDataDir();
+  markBootStage(dataDir, 'start');
   const app = await NestFactory.createApplicationContext(AppModule);
   await app.init();
+  // 여기까지 왔다 = KnowledgeCore(위키 git·RAG·색인)가 끝났다는 뜻. 남은 건 서비스 배선.
+  markBootStage(dataDir, 'wiring');
 
   const paths = app.get(PathResolver);
   const logger = app.get(PinoLogger);
@@ -401,6 +409,7 @@ async function bootstrap(): Promise<void> {
   }
   const active = [self ? `self(:${chatCfg.port})` : null, discord ? cfg.provider : null].filter(Boolean);
   logger.log(`메신저 가동: ${active.join(', ')}`, 'Messenger');
+  markBootStage(dataDir, 'ready'); // 헬스가 열렸다 — 셸의 마지막 확인은 여전히 실제 프로브다
 }
 
 void bootstrap();

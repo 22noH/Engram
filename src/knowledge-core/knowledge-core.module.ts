@@ -20,6 +20,7 @@ import { ProjectStore } from './project-store';
 import { CodingGit } from './coding-git';
 import { InsightStore } from './insight/insight-store';
 import { InsightContext } from './insight/insight-context';
+import { BootStage, markBootStage } from '../pal/boot-progress';
 
 // 부트 재시도 튜닝값 — 테스트가 overrideProvider로 attempts/baseDelayMs/maxDelayMs를 작게 줄여
 // 실시간 대기 없이 재시도 경로를 검증할 수 있게 DI 토큰으로 분리(knowledge-core.module.spec.ts).
@@ -94,10 +95,19 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
     private readonly logger: PinoLogger,
     @Inject(BOOT_RETRY_OPTIONS) private readonly bootRetryOptions: BootRetryTuning,
     @Inject(REINDEX_DELAY_MS) private readonly reindexDelayMs: number,
+    // 부팅 단계 보고(2026-07-26)를 쓸 데이터 폴더. 리슨 전에는 셸에 정보를 실어 보낼 통로가
+    // 상태 파일뿐이다 — pal/boot-progress.ts 주석 참고.
+    private readonly paths: PathResolver,
   ) {}
+
+  // 단계 기록은 계측일 뿐이라 절대 부팅을 방해하면 안 된다(markBootStage 자체가 never-throw).
+  private stage(stage: BootStage, extra?: { done?: number; total?: number }): void {
+    markBootStage(this.paths.getDataDir(), stage, extra);
+  }
 
   async onModuleInit(): Promise<void> {
     try {
+      this.stage('wiki');
       await this.git.ensureRepo();
 
       // ★근본픽스(2026-07-20): RAG 초기화 실패는 더 이상 이 메서드를 throw로 죽이지 않는다.
@@ -105,13 +115,20 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
       // (부트 자체가 의미 없는 상태라 판단 — 이번 근본픽스는 실사고 2건 모두의 진앙인 RAG(Lance)
       // 경로에 한정한다). ragState: 'ok'=정상 오픈, 'healed'=격리+재생성 성공(코퍼스 빔),
       // 'degraded'=격리도 실패(검색·색인 비활성, 프로세스는 계속 실행).
+      this.stage('rag');
       const ragState = await this.bootRag();
 
       if (ragState === 'ok') {
         // 시작 시 published 페이지 전체 재색인(모듈이 조율 → RagStore가 WikiEngine을 역의존하지 않음).
         // 현재 단일사용자 = DEFAULT_USER. reindexAll은 watcher.start() 전이라 동시 쓰기원이 없다(락 불필요).
         const pages = await this.wiki.listPages({ status: 'published' }, DEFAULT_USER);
-        await this.rag.reindexAll(pages.map((p) => this.toIndexable(p)));
+        // 여기가 부팅에서 가장 오래 걸리는 구간이다(첫 페이지에서 임베딩 모델 ~2.1GB가 로드된다).
+        // 페이지마다 진행을 남겨야 "몇 분째 같은 화면"과 "느리지만 전진 중"이 화면에서 갈린다.
+        this.stage('index', { done: 0, total: pages.length });
+        await this.rag.reindexAll(
+          pages.map((p) => this.toIndexable(p)),
+          (done, total) => this.stage('index', { done, total }),
+        );
       } else if (ragState === 'healed') {
         // 격리 직후 코퍼스가 비어 있다 — 부팅을 지연시키지 않게 백그라운드로 전체 재색인을 예약한다.
         this.scheduleBackgroundReindex();

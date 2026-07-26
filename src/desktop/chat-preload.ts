@@ -5,6 +5,10 @@ import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron
 contextBridge.exposeInMainWorld('engramDesktop', {
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('engram:pick-folder'),
   setupCode: (): Promise<string | null> => ipcRenderer.invoke('engram:setup-code'),
+  // 부팅 정체 안내 화면(2026-07-26)의 '백엔드 재시작' 버튼. 그 화면은 렌더러가 아니라 메인이
+  // 띄우는 대기 페이지지만 preload는 이 창의 모든 페이지에 걸리므로 같은 통로를 쓴다.
+  // 트레이의 '재시작'과 완전히 같은 동작(engram:restart → restartChild).
+  restartBackend: (): Promise<void> => ipcRenderer.invoke('engram:restart'),
   addLocalBrain: (name: string): Promise<{ endpoint: string; name: string } | null> =>
     ipcRenderer.invoke('engram:add-local-brain', name),
 

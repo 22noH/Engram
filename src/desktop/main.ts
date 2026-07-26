@@ -39,6 +39,9 @@ import { diffStatus, diffFile, branchStatus } from './git-diff';
 import { createPullRequest } from './git-pr';
 import { SttEngine, SttDownloadState } from './stt';
 import { classifyHealth } from './health-identity';
+import {
+  BOOT_STEPS, BootProgress, bootSplashText, bootStageLabel, bootStageStep, isBootStalled, isFreshBootProgress, readBootProgress,
+} from '../pal/boot-progress';
 import { killOrphanEngramOnPort } from './orphan-cleanup';
 import { attachNavGate } from './nav-gate';
 import * as nodeHttp from 'http';
@@ -166,6 +169,9 @@ function shellLog(msg: string): void {
     fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`);
   } catch { /* 로그 실패가 부팅을 못 막게 */ }
 }
+// 부팅 정체로 보는 시간(단계가 이만큼 안 바뀌면 안내 화면). 첫 부팅의 임베딩 모델 내려받기(2.1GB —
+// 수 분)를 정체로 오판하지 않게 넉넉히 잡는다. 실기 검증용으로만 env로 줄일 수 있다(운영 미설정).
+const BOOT_STALL_MS = Number(process.env.ENGRAM_BOOT_STALL_MS) || 5 * 60_000;
 // 스플래시 중 크래시 루프 감지: 헬스 'ok' 전에 자식이 반복 사망하면 무한 '시작 중' 대신 안내한다.
 let childExitsBeforeReady = 0;
 let onChildCrashLoop: (() => void) | null = null; // 창 생성부에서 주입(로그 경로 안내 화면)
@@ -429,8 +435,80 @@ function openChat(): void {
     '<style>body{background:#f5f6f4;color:#6b7268;font-family:system-ui;display:flex;' +
     'align-items:center;justify-content:center;height:100vh;margin:0}' +
     '@media(prefers-color-scheme:dark){body{background:#191b19;color:#9aa096}}</style>' +
-    `<div>${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div>`,
+    // id는 메인이 1초마다 단계·경과 시간을 밀어 넣는 자리다(아래 tickSplash).
+    `<div id="engram-splash">${ko() ? 'Engram 시작 중…' : 'Starting Engram…'}</div>`,
   );
+  // ---- 부팅 진행 표시(실사고 2026-07-26: 네 번째 '무한 시작 중') ----
+  // 이번 사고의 본질은 "백엔드가 리슨에 도달하지 못했는데 화면은 정상 기동과 구분이 안 됐다"였다.
+  // 사용자는 회색 '시작 중'을 8시간 넘게 봤다. 그래서 두 가지를 붙인다:
+  //   ① 백엔드가 남기는 단계(state/boot-progress.json)를 읽어 "무엇을 하는 중인지 + 경과 시간"을 표시.
+  //   ② 단계가 BOOT_STALL_MS 동안 안 바뀌면 '시작 중'을 유지하지 않고 원인 후보·로그 경로·재시작
+  //      버튼이 있는 안내로 전환(크래시 루프 안내 화면 onChildCrashLoop과 같은 관례).
+  // 판정이 서도 폴링은 계속한다 — 늦게라도 올라오면 그대로 채팅으로 들어간다(포기가 아니라 안내다).
+  let splashTimer: NodeJS.Timeout | null = null;
+  let stalledForChildStart = 0; // 0=안내 미표시. 그 외=안내를 띄운 시점의 childStartedAt(재시작 감지용)
+  const stopSplashTicker = (): void => {
+    if (splashTimer) clearInterval(splashTimer);
+    splashTimer = null;
+  };
+  const showBootStalledPage = (p: BootProgress | null): void => {
+    if (!chatWin) return;
+    const kor = ko();
+    const stage = isFreshBootProgress(p, childStartedAt)
+      ? `${bootStageLabel(p.stage, kor)} (${bootStageStep(p.stage)}/${BOOT_STEPS})`
+      : (kor ? '첫 단계에 도달하지 못했습니다' : 'never reached the first stage');
+    const logP = childLogPath(); // 여긴 HTML 텍스트 자리 — 역슬래시를 이스케이프하면 C:\\Users로 잘못 보인다
+    const page = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+      '<style>body{background:#f5f6f4;color:#24292e;font-family:system-ui;display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;height:100vh;margin:0;gap:10px;text-align:center;padding:0 32px}' +
+      'code{background:#eef0ec;border-radius:6px;padding:2px 8px;font-size:12px;word-break:break-all}' +
+      'p{margin:0;color:#6b7268;font-size:13px;line-height:1.6}h1{font-size:17px;font-weight:600;margin:0}' +
+      'button{margin-top:6px;padding:7px 16px;border-radius:8px;border:1px solid #d3d6cf;background:#fff;' +
+      'color:#24292e;font:inherit;font-size:13px;cursor:pointer}button:hover{background:#f0f1ee}' +
+      '@media(prefers-color-scheme:dark){body{background:#191b19;color:#e6e5df}p{color:#9aa096}' +
+      'code{background:rgba(255,255,255,.07)}button{background:#242724;border-color:#3a3e39;color:#e6e5df}' +
+      'button:hover{background:#2e322e}}</style>' +
+      (kor
+        ? `<h1>시작이 예상보다 오래 걸리고 있어요</h1><p>마지막 단계: <b>${stage}</b> — 여기서 더 진행되지 않았어요.<br>` +
+          '검색 색인이 손상됐거나 AI 모델을 처음 내려받는 중일 수 있어요.<br>' +
+          '아래 파일에 자세한 기록이 있습니다.</p>' +
+          `<code>${logP}</code>` +
+          '<button id="engram-restart">백엔드 재시작</button>' +
+          '<p>버튼이 안 되면 트레이 아이콘 → 재시작을 눌러주세요.<br>준비가 끝나면 이 화면은 자동으로 채팅으로 바뀝니다.</p>'
+        : `<h1>Startup is taking longer than expected</h1><p>Last stage: <b>${stage}</b> — no progress since then.<br>` +
+          'The search index may be damaged, or the AI model may be downloading for the first time.<br>' +
+          'Details are recorded in this file.</p>' +
+          `<code>${logP}</code>` +
+          '<button id="engram-restart">Restart backend</button>' +
+          '<p>If the button does nothing, use the tray icon → Restart.<br>This screen switches to chat automatically once startup finishes.</p>') +
+      '<script>document.getElementById("engram-restart").onclick=function(){' +
+      'this.disabled=true;(window.engramDesktop&&window.engramDesktop.restartBackend||function(){})();};</script>',
+    );
+    void chatWin.loadURL(page);
+  };
+  const tickSplash = (): void => {
+    if (!chatWin) { stopSplashTicker(); return; }
+    const now = Date.now();
+    const p = readBootProgress(dataDir);
+    if (stalledForChildStart) {
+      // 안내 화면 표시 중. 자식이 다시 시작됐으면(재시작 버튼·트레이) 대기 화면으로 되돌린다.
+      if (childStartedAt !== stalledForChildStart) {
+        stalledForChildStart = 0;
+        void chatWin.loadURL(waiting);
+      }
+      return;
+    }
+    if (isBootStalled(p, childStartedAt, now, BOOT_STALL_MS)) {
+      stalledForChildStart = childStartedAt;
+      shellLog(`BOOT STALL: ${BOOT_STALL_MS}ms 동안 단계 무변화(stage=${p?.stage ?? 'none'}) — 안내 화면으로 전환`);
+      showBootStalledPage(p);
+      return;
+    }
+    const text = bootSplashText(p, childStartedAt, now, ko());
+    void chatWin.webContents
+      .executeJavaScript(`(()=>{const e=document.getElementById('engram-splash');if(e)e.textContent=${JSON.stringify(text)};})()`)
+      .catch(() => { /* 페이지 전환 중 등 — 다음 틱에 다시 */ });
+  };
   // 배포 프리셋(configDir/preset.json — `{name,endpoint}`): 있으면 렌더러 URL에 주입해
   // connections.ts seed()가 그 서버를 기본 연결로 시드하게 한다. 없으면 기존 local-only 그대로.
   // 읽기+기본이름 채움 로직은 preset-file.ts로 추출됨(서버 콘솔 S3 Task 2 — admin-http의
@@ -509,7 +587,8 @@ function openChat(): void {
         if (status === 'foreign') { onForeignInstance(); return; }
         if (status === 'pending') { retryOnce('stalled'); return; } // 200인데 헬스 형식이 아님 = 점유자 의심
         childExitsBeforeReady = 0; // 준비 완료 — 이후의 자식 사망은 기존 백오프 감독이 처리(크래시 화면은 부팅 실패 전용)
-        shellLog('probe ok — loading renderer');
+        stopSplashTicker(); // 진행 표시 종료 — 여기서부터는 렌더러가 화면 주인이다
+        shellLog(`probe ok — loading renderer (부팅 ${Date.now() - childStartedAt}ms)`);
         const lang = resolveLanguage(cfg.language, app.getLocale());
         void chatWin.loadFile(rendererIndex, { search: `port=${cfg.port}&lang=${lang}${preset}` }); // 헬스 ok → 클라 로드(포트·언어·프리셋 주입)
       });
@@ -529,16 +608,19 @@ function openChat(): void {
     // 실사고(2026-07-24): CI 깡통 설치본에서 이 실패가 무한 반복됐는데 이유가 어디에도 안 남았다.
     shellLog(`renderer load FAILED code=${code} desc=${desc} url=${url}`);
     void chatWin.loadURL(waiting);
+    if (!splashTimer) splashTimer = setInterval(tickSplash, 1000); // 대기 화면으로 돌아왔으면 진행 표시도 되살린다
     setTimeout(probe, 2000);
   });
   chatWin.on('closed', () => {
     nativeTheme.removeListener('updated', onTheme);
+    stopSplashTicker();
     chatWin = null;
   });
   // 크래시 루프(부팅 전 자식 3회 사망) → 무한 '시작 중' 대신 원인 파일 경로를 안내(실사고 2026-07-24).
   onChildCrashLoop = () => {
     if (!chatWin) return;
-    const logP = childLogPath().replace(/\\/g, '\\\\');
+    // HTML 텍스트로 들어가는 자리라 이스케이프하면 안 된다(실기 확인 2026-07-26: C:\\Users\\…로 보였다).
+    const logP = childLogPath();
     const kor = ko();
     const page = 'data:text/html;charset=utf-8,' + encodeURIComponent(
       '<style>body{background:#f5f6f4;color:#24292e;font-family:system-ui;display:flex;flex-direction:column;' +
@@ -553,6 +635,7 @@ function openChat(): void {
     void chatWin.loadURL(page);
   };
   void chatWin.loadURL(waiting);
+  splashTimer = setInterval(tickSplash, 1000);
   probe();
 }
 

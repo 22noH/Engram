@@ -352,12 +352,16 @@ export class RagStore implements PageIndexer {
   // throw하면 그대로 onModuleInit의 'ok' 분기를 뚫고 나가 크래시루프 증상이 다른 원인으로 재발한다.
   // KnowledgeCoreModule.runFullReindex(격리 후 백그라운드 경로)가 이미 쓰는 것과 동일한 보호를
   // 여기(정상 경로)에도 적용 — warn+skip, 성공/실패 건수를 요약 로그로 남긴다.
-  async reindexAll(pages: IndexablePage[]): Promise<void> {
+  // onProgress: 부팅 진행 표시용(2026-07-26). 페이지 하나가 끝날 때마다 (완료수, 전체)를 알린다 —
+  // 실패해서 건너뛴 페이지도 "지나간 건" 진행이므로 함께 센다(화면이 멈춰 보이면 안 된다).
+  // 미지정이면 기존과 완전히 동일(회귀 0).
+  async reindexAll(pages: IndexablePage[], onProgress?: (done: number, total: number) => void): Promise<void> {
     if (!this.ready) {
       this.logger?.warn(`RAG 디그레이드 상태 — 전체 재색인 스킵(${pages.length}건)`, 'RagStore');
       return;
     }
     let ok = 0;
+    let seen = 0;
     for (const p of pages) {
       try {
         await this.indexPage(p);
@@ -368,6 +372,8 @@ export class RagStore implements PageIndexer {
           'RagStore',
         );
       }
+      seen++;
+      try { onProgress?.(seen, pages.length); } catch { /* 계측이 재색인을 막지 않게 */ }
     }
     // 세션당 최소 1회 통합: 대량 쓰기 끝에서 한 번만 강제 정비한다(쓰기마다 부르지 않는 대신).
     // 실패해도 maintainIndex가 흡수하므로 여기서 재색인이 실패로 뒤집히지 않는다.
