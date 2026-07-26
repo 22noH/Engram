@@ -145,11 +145,13 @@ function exitOnStdinClosed(cleanup: () => Promise<void>): void {
   process.on('SIGINT', finish);
 }
 
-async function runBridge(port: number): Promise<void> {
+async function runBridge(port: number, dataDir: string): Promise<void> {
   process.stderr.write(
     "[mcp-headless] Engram app is running — bridging to its /mcp (approval tools follow the app; write mode follows the app's setting)\n",
   );
-  const server = makeBridgeServer(`http://127.0.0.1:${port}/mcp`);
+  // 브리지도 wiki.autosave를 읽어야 한다 — 상류에만 검사가 있으면 브리지 선택창이 먼저 떠서
+  // 설정이 무시된다. Nest 없이 경로만 필요하므로 PathResolver를 직접 만든다(앱과 같은 파일).
+  const server = makeBridgeServer(`http://127.0.0.1:${port}/mcp`, new PathResolver(dataDir).getConfigDir());
   server.onerror = (e) => console.error('[mcp-headless] bridge server error:', e);
   const transport = new StdioServerTransport();
   // 브리지 모드도 동일한 종료 보장 — 정리할 Nest 앱이 없으므로 cleanup은 no-op.
@@ -234,7 +236,7 @@ async function main(): Promise<void> {
   const { dataDir, writeMode, port } = parseHeadlessArgs(process.argv, process.env);
   const mode = await chooseMode(port);
   if (mode === 'bridge') {
-    await runBridge(port);
+    await runBridge(port, dataDir);
     return;
   }
   await runCore(dataDir, writeMode, mode);

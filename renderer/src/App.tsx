@@ -31,11 +31,12 @@ import { GitBranchBar } from './components/GitBranchBar';
 import { ManageEngrams } from './components/ManageEngrams';
 import { MentionAutocomplete, mentionCandidates } from './components/MentionAutocomplete';
 import { WikiArea } from './components/WikiArea';
+import { WikiSaveCard } from './components/WikiSaveCard';
 import { AdminArea } from './components/AdminArea';
 import { LoginGate } from './components/LoginGate';
 import { CliAuthBanner } from './components/CliAuthBanner';
 import { allow } from './permissions';
-import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit, AdminUserDto, AdminSettings } from '../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit, AdminUserDto, AdminSettings, WikiSaveAsk } from '../../shared/protocol';
 import { T } from './i18n';
 
 // 다중 연결 키 규약: `${connId}::${channelId}` (원시 메시지), `${connId}::${mode}::${name}` (채널id 매핑
@@ -128,6 +129,9 @@ export default function App() {
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]); pendingAttachmentsRef.current = pendingAttachments;
   const [wikiPages, setWikiPages] = useState<WikiPageMeta[]>([]);
   const [wikiOpen, setWikiOpen] = useState<WikiPageDto | null>(null);
+  // 위키 저장 확인 카드(2026-07-26) — 서버가 wikiSaveAsk로 띄우고 wikiSaveDone으로 거둔다.
+  // 한 번에 하나만 띄운다(저장 요청이 겹치는 건 실사용에서 없고, 겹치면 나중 것이 앞선 것을 대체).
+  const [saveAsk, setSaveAsk] = useState<WikiSaveAsk | null>(null);
   const [proposals, setProposals] = useState<ProposalDto[]>([]);
   const [wikiResults, setWikiResults] = useState<WikiSearchHit[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserDto[]>([]);
@@ -282,6 +286,9 @@ export default function App() {
         if (open) send(connState.defaultConnId, { t: 'wikiGet', slug: open.slug });
       }
       else if (f.t === 'proposalsChanged') send(connState.defaultConnId, { t: 'proposalsList' });
+      else if (f.t === 'wikiSaveAsk') setSaveAsk(f.ask);
+      // 답했거나 타임아웃 — 서버가 거두라고 알린다. 다른 카드가 이미 떠 있으면 건드리지 않는다.
+      else if (f.t === 'wikiSaveDone') setSaveAsk((cur) => (cur && cur.id === f.id ? null : cur));
       else if (f.t === 'adminUsers') setAdminUsers(f.list);
       else if (f.t === 'adminSettings') setAdminSettings(f.settings);
       else if (f.t === 'roster') setRoster(f.list);
@@ -1140,6 +1147,14 @@ export default function App() {
                   refreshKey=메시지 수: 두뇌가 답(=커밋/수정)을 낼 때마다 다시 읽는다(폴링 없음). */}
               {mode === 'code' && defaultChan?.repoPath && window.engramDesktop?.gitBranchStatus && (
                 <GitBranchBar repoPath={defaultChan.repoPath} refreshKey={mergedMsgs.length} />
+              )}
+              {/* 위키 저장 확인(목업 B 승인) — 입력바 바로 위. 채널과 무관한 요청(/mcp 직접 접속)도
+                  있어 채널 스코프가 아니라 앱 전역으로 띄운다. 서버가 wikiSaveDone으로 거둔다. */}
+              {saveAsk && (
+                <WikiSaveCard
+                  ask={saveAsk}
+                  onAnswer={(id, decision) => send(connState.defaultConnId, { t: 'wikiSaveAnswer', id, decision })}
+                />
               )}
               <div id="inputbar" style={currentName ? undefined : { display: 'none' }}
                 onDragOver={(e) => { e.preventDefault(); }}

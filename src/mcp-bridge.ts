@@ -4,8 +4,9 @@ import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListTool
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
-import { ENGRAM_MCP_INSTRUCTIONS } from './edge/mcp/engram-mcp';
+import { ENGRAM_MCP_INSTRUCTIONS, BRIDGE_APPROVED_CLIENT } from './edge/mcp/engram-mcp';
 import { confirmWikiSave, declinedText, WikiSaveRequest } from './edge/mcp/mcp-elicit';
+import { loadWikiSaveMode } from './knowledge-core/wiki/wiki-save.config';
 import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
 
 // 독립 stdio↔HTTP 브리지 엔트리(설계 §3.3). 구형(stdio 전용) MCP 클라이언트가 상주의
@@ -18,8 +19,15 @@ import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
 
 const UPSTREAM_TIMEOUT_MS = 60_000;
 
-async function withUpstream<T>(url: string, fn: (client: Client) => Promise<T>, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<T> {
-  const client = new Client({ name: 'engram-bridge', version: '1.0.0' });
+async function withUpstream<T>(
+  url: string,
+  fn: (client: Client) => Promise<T>,
+  timeoutMs = UPSTREAM_TIMEOUT_MS,
+  // 사람이 이 브리지의 선택창에서 저장을 눌렀을 때만 승인 이름으로 붙는다 — 상류는 이 이름을 보고
+  // 앱 저장 카드를 띄우지 않고(중복 질문 금지) 그 자리에서 게시까지 끝낸다.
+  clientName = 'engram-bridge',
+): Promise<T> {
+  const client = new Client({ name: clientName, version: '1.0.0' });
   // ★8b-2 교훈: 언핸들드 'error'는 호스트 크래시 — 구독 필수(mcp-client.ts와 동일 패턴).
   client.onerror = (e) => console.error('[mcp-bridge] client error:', e);
   const transport = new StreamableHTTPClientTransport(new URL(url));
@@ -82,7 +90,8 @@ function wikiSaveRequest(name: string, args: Record<string, unknown>): WikiSaveR
 // 엔트리에서 분리한 순수 조립부(브리프 §요건) — stdio 서버를 만들고 ListTools/CallTool
 // 핸들러가 그때그때 상주 /mcp에 연결해 그대로 패스스루. never-throw: 실패해도 stdio 프로토콜은
 // 죽지 않는다(CallTool→isError 텍스트, ListTools→빈 목록+stderr 로그, 절대 stdout 아님).
-export function makeBridgeServer(url: string): Server {
+// configDir: wiki.autosave를 읽을 설정 폴더(모르면 생략 — 그때는 늘 묻는다, 안전한 쪽).
+export function makeBridgeServer(url: string, configDir?: string): Server {
   // 브리지는 도구만 패스스루라 상주의 instructions가 전달되지 않는다 — 같은 안내문을 직접 싣는다.
   const server = new Server(
     { name: 'engram-bridge', version: '1.0.0' },
@@ -106,13 +115,22 @@ export function makeBridgeServer(url: string): Server {
       // 선언하지 않으므로 중복 질문도 없다. 미지원 클라이언트면 confirm이 'unavailable'이라
       // 아래 패스스루가 그대로 돈다(회귀 0).
       const save = wikiSaveRequest(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>);
-      if (save && (await confirmWikiSave(server, save)) === 'decline') {
-        return { content: [{ type: 'text', text: declinedText(save) }] };
+      // wiki.autosave=direct면 여기서도 묻지 않는다 — 상류에만 검사가 있으면 브리지가 먼저 물어버려
+      // 설정이 무시된다(2026-07-26). 상류와 같은 파일을 읽는다(설정 단일 출처).
+      const autosave = save && configDir ? loadWikiSaveMode(configDir) === 'direct' : false;
+      let approvedHere = false;
+      if (save && !autosave) {
+        const confirm = await confirmWikiSave(server, save);
+        if (confirm === 'decline') return { content: [{ type: 'text', text: declinedText(save) }] };
+        approvedHere = confirm === 'accept'; // 사람이 눌렀다 — 상류가 또 묻지 않게 이름으로 알린다
       }
       // ★채널 정체성 주입(AI 웹 조작) — browser_* 호출에만 붙는다(다른 도구는 인자 바이트 동일).
       const args = withChannelIdentity(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, process.env);
-      return (await withUpstream(url, (client) =>
-        client.callTool({ name: req.params.name, arguments: args }),
+      return (await withUpstream(
+        url,
+        (client) => client.callTool({ name: req.params.name, arguments: args }),
+        undefined,
+        approvedHere ? BRIDGE_APPROVED_CLIENT : undefined,
       )) as CallToolResult;
     } catch (e) {
       return {

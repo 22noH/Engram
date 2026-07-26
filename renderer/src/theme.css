@@ -393,6 +393,25 @@ body { display:flex; flex-direction:column; height:100vh; background:var(--bg); 
 .attachChip.file:hover { background:var(--hover); }
 .attachChip.file .meta { color:var(--dim); font-size:11px; }
 .attachChip.loading { opacity:.6; cursor:default; }
+/* 위키 저장 확인 카드(목업 B 승인 2026-07-26) — 입력바 바로 위. 제목만 세리프(지식 시그니처),
+   본문 미리보기는 접고 아래쪽을 페이드로 흘린다(전문이 아니라 "뭘 저장하는지"만 판단하면 되므로). */
+#wikiSaveCard { margin:0 16px 4px; padding:12px 14px; background:var(--panel);
+                border:1px solid var(--accent-line); border-radius:10px; }
+#wikiSaveCard .wsHead { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+#wikiSaveCard .wsBadge { font-size:10.5px; color:var(--accent); background:var(--accent-soft);
+                         border:1px solid var(--accent-line); border-radius:4px; padding:1px 7px; }
+#wikiSaveCard .wsTitle { font-family:var(--font-serif); font-size:16px; color:var(--text); margin-bottom:3px; }
+#wikiSaveCard .wsMeta { font-size:12px; color:var(--dim); margin-bottom:10px; }
+#wikiSaveCard .wsPreview { position:relative; max-height:78px; overflow:hidden; margin-bottom:12px;
+                           padding:10px 12px; background:var(--bg); border:1px solid var(--line); border-radius:6px;
+                           font-family:var(--font-serif); font-size:13px; line-height:1.65; color:var(--dim);
+                           white-space:pre-wrap; word-break:break-word; }
+#wikiSaveCard .wsPreview::after { content:''; position:absolute; left:0; right:0; bottom:0; height:26px;
+                                  background:linear-gradient(transparent,var(--bg)); }
+#wikiSaveCard .wsActions { display:flex; gap:8px; }
+#wikiSaveCard .wsActions button { padding:7px 16px; font-size:12.5px; border-radius:6px; cursor:pointer;
+                                  background:transparent; color:var(--dim); border:1px solid var(--line); }
+#wikiSaveCard .wsActions .wsSave { background:var(--accent); color:var(--accent-text); border-color:var(--accent); }
 /* 입력바 2줄 개편(목업 승인 2026-07-25) — 1행 입력(+↵ 힌트) / 2행 도구 줄. 색은 전부 QL 토큰만. */
 #inputbar { display:flex; flex-direction:column; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
 #inputbar .composerRow { display:flex; align-items:flex-end; gap:8px; }

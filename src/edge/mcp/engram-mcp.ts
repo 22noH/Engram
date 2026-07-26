@@ -30,6 +30,10 @@ export interface McpDeps {
   // 설정 조회·변경(2026-07-25). 주입되면 engram_config_get/engram_config_set 2종을 노출한다 —
   // 앱 설정 화면이 없는 MCP 전용 사용자가 JSON을 손으로 고치지 않아도 되게. 미주입=도구 없음(회귀 0).
   settings?: McpSettingsPort | null;
+  // 앱이 자기 UI로 "저장할까요?"를 묻는 경로(2026-07-26). 앱이 떠 있을 때만 주입된다(self.adapter).
+  // MCP elicitation을 못 쓰는 두 경로 — 앱 두뇌(헤드리스 claude가 6ms에 cancel)와 stateless /mcp —
+  // 가 이걸로 묻는다. 'unavailable'(창 없음·타임아웃)이면 기존대로 승인함 폴백.
+  confirmSave?: ((req: { title: string; targetSlug?: string; body: string }) => Promise<'save' | 'cancel' | 'unavailable'>) | null;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -60,6 +64,13 @@ const WIKI_SEARCH_FALLBACK_NOTE =
 // 실사고(2026-07-26): 바깥 Claude Code 자동모드에서 wiki_propose가 조용히 거부됐다 — 사람 승인 게이트를
 // 거치는 제안 등록일 뿐인데 아무 신고도 안 해서 클라이언트가 최악을 가정할 수밖에 없었다.
 // 거짓 신고는 하지 않는다. 실제로 파괴적인 것(wiki_write·reject_proposal·engram_config_set)은 true로 둔다.
+// 브리지가 "사람에게 물어 승인받았다"고 알릴 때 쓰는 상류 접속 이름. 이 이름으로 오면 다시 묻지
+// 않는다 — 브리지 선택창과 앱 저장 카드가 겹쳐 두 번 묻는 것을 막는 유일한 신호.
+// ponytail: 로컬 프로세스는 이 이름을 사칭할 수 있다. 다만 /mcp는 루프백 전용이고, 사칭할 수 있는
+// 프로세스는 approve_proposal을 직접 부르면 그만이라 새로 열리는 문이 없다. 진짜 격리가 필요해지면
+// 그때 토큰 교환으로 바꾼다.
+export const BRIDGE_APPROVED_CLIENT = 'engram-bridge-approved';
+
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 // 로컬에 쓰지만 지우거나 덮지 않는 것(추가·제안 등록). 로컬 전용이라 openWorld도 false.
 const ADDITIVE_LOCAL = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } as const;
@@ -287,10 +298,25 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   if (typeof args.reason === 'string') input.reason = args.reason;
   // ★저장 확정 전 사람 승인(elicitation) — 미지원·실패·타임아웃이면 unavailable로 떨어져
   // 아래 기존 경로가 그대로 돈다(mcp-elicit.ts 주석 참조).
-  // wiki.autosave=direct면 아예 묻지 않는다(사용자가 위험 확인을 거쳐 켠 설정). 미설정·설정 어댑터
-  // 없음은 전부 'ask'로 떨어진다 — 자동 저장은 명시적으로 켠 경우에만.
+  // 누가 묻느냐를 여기서 한 번에 정한다 — 경로가 달라도 사용자가 겪는 흐름은 같아야 한다.
+  //  ① wiki.autosave=direct  → 아무도 안 묻는다(사용자가 위험 확인을 거쳐 켠 설정)
+  //  ② 브리지가 이미 물어 승인받음 → 다시 묻지 않는다(중복 질문 금지). 브리지가 클라이언트 이름으로 알린다.
+  //  ③ 앱이 떠 있음(confirmSave 주입) → 앱 저장 카드가 묻는다. 'unavailable'이면 아래 elicitation로 이어감
+  //     (창이 없었을 뿐 클라이언트는 물을 수 있을지 모른다 — 물어볼 기회를 버리지 않는다)
+  //  ④ 그 외 → MCP 선택창(elicitation)
   const autosave = deps.settings?.read('wiki.autosave') === 'direct';
-  const confirm = autosave ? 'accept' : await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+  const askedByBridge = server.getClientVersion()?.name === BRIDGE_APPROVED_CLIENT;
+  let confirm: 'accept' | 'decline' | 'unavailable';
+  if (autosave || askedByBridge) {
+    confirm = 'accept';
+  } else {
+    const viaApp = deps.confirmSave
+      ? await deps.confirmSave({ title, ...(input.slug ? { targetSlug: input.slug } : {}), body: content })
+      : 'unavailable';
+    confirm = viaApp === 'save' ? 'accept'
+      : viaApp === 'cancel' ? 'decline'
+      : await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+  }
   if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'propose' }));
   const id = await deps.propose(input);
   // ★한 번 승인 = 저장 완료(2026-07-26 사용자 확정 시나리오). 승인창에서 '저장'을 누른 건 사람 승인

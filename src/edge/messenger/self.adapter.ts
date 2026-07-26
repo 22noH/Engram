@@ -11,7 +11,7 @@ import type { WikiEngine } from '../../knowledge-core/wiki/wiki-engine';
 import type { WikiPage } from '../../knowledge-core/wiki/page.types';
 import type { ProposalStore, Proposal } from '../../knowledge-core/proposal-store';
 import type { ProposalApplier } from '../proposal-applier';
-import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings, AttachmentMeta } from '../../../shared/protocol';
+import type { WikiPageMeta, WikiPageDto, ProposalDto, AdminUserDto, AdminSettings, AttachmentMeta, WikiSaveAsk } from '../../../shared/protocol';
 import type { AccountStore, Account } from '../auth/account-store';
 import type { SessionStore } from '../auth/session-store';
 import type { AuthHttp } from '../auth/auth-http';
@@ -94,6 +94,14 @@ export function hasEngramMention(text: string, name = 'Engram'): boolean {
 export function stripEngramMention(text: string, name = 'Engram'): string {
   return text.replace(new RegExp('@' + name, 'gi'), '').trim();
 }
+
+// 저장 확인 카드의 결과. 'unavailable' = 물어보지 못했다(창 없음·타임아웃) → 호출자는 승인함으로.
+export type SaveAnswer = 'save' | 'cancel' | 'unavailable';
+// 카드에 싣는 본문 미리보기 길이(MCP 대화상자와 같은 값 — 두 경로가 같은 분량을 보여준다).
+const SAVE_PREVIEW_CHARS = 400;
+// 답을 기다리는 상한. MCP 도구 호출 타임아웃(클로드 코드 기본 60초)보다 짧아야 유령 카드가 안 생긴다
+// — mcp-elicit.ts의 45초와 같은 근거·같은 값.
+const SAVE_ASK_TIMEOUT_MS = 45_000;
 
 export class SelfMessenger implements MessengerPort {
   private server?: http.Server;
@@ -212,6 +220,9 @@ export class SelfMessenger implements MessengerPort {
         const deps: McpDeps = this.wikiDeps
           ? {
               ...this.mcpDeps,
+              // 앱이 떠 있으니 저장은 앱 카드가 묻는다(2026-07-26). /mcp는 stateless라 서버가
+              // 클라이언트에게 물을 통로가 없어서, 창을 쥐고 있는 이쪽이 대신 묻는다.
+              confirmSave: (req) => this.askWikiSave(req),
               proposals: makeMcpProposals(this.wikiDeps.proposals, this.wikiDeps.applier, {
                 approving: this.approving,
                 onChanged: () => {
@@ -300,6 +311,42 @@ export class SelfMessenger implements MessengerPort {
       if (ch && !this.canAccessChannel(c, ch)) continue;
       try { c.send(data); } catch { /* 격리 */ }
     }
+  }
+
+  // ── 위키 저장 확인 카드(2026-07-26) ─────────────────────────────────────────
+  // 앱이 떠 있는 동안의 저장은 전부 이 카드로 묻는다. MCP elicitation을 쓸 수 없는 경로(앱 두뇌는
+  // 헤드리스 claude라 6ms에 cancel로 답하고, /mcp는 stateless라 서버→클라 요청 통로가 없다)를
+  // 앱 자신이 대신 물어 시나리오를 통일한다.
+  //
+  // ★무한 대기 금지 — 열린 창이 하나도 없으면 즉시 'unavailable', 답이 없으면 타임아웃 후
+  // 'unavailable'. 호출자(engram-mcp)는 그때 승인함으로 돌린다("스킵했을 때만 승인함").
+  private pendingSaves = new Map<string, (d: SaveAnswer) => void>();
+  private saveAskSeq = 0;
+
+  async askWikiSave(req: { title: string; targetSlug?: string; body: string }): Promise<SaveAnswer> {
+    const open = [...(this.wss?.clients ?? [])].filter((c) => c.readyState === WebSocket.OPEN && this.isConnected(c));
+    if (open.length === 0) return 'unavailable'; // 볼 사람이 없는 카드는 띄우지 않는다
+    const id = `save-${++this.saveAskSeq}`;
+    const body = req.body ?? '';
+    const ask: WikiSaveAsk = {
+      id,
+      title: req.title,
+      ...(req.targetSlug ? { targetSlug: req.targetSlug } : {}),
+      preview: body.length > SAVE_PREVIEW_CHARS ? `${body.slice(0, SAVE_PREVIEW_CHARS)}…` : body,
+      bytes: Buffer.byteLength(body, 'utf8'),
+    };
+    return new Promise<SaveAnswer>((resolve) => {
+      const finish = (d: SaveAnswer): void => {
+        if (!this.pendingSaves.delete(id)) return; // 이미 끝남(두 창에서 동시 클릭 등)
+        clearTimeout(timer);
+        this.broadcast({ t: 'wikiSaveDone', id }); // 다른 창의 카드도 거둔다
+        resolve(d);
+      };
+      const timer = setTimeout(() => finish('unavailable'), SAVE_ASK_TIMEOUT_MS);
+      timer.unref?.(); // 이 타이머 하나가 프로세스 종료를 붙잡지 않게
+      this.pendingSaves.set(id, finish);
+      this.broadcast({ t: 'wikiSaveAsk', ask });
+    });
   }
 
   // AI 웹 조작(2단계): 조작 1건을 그 채널을 볼 수 있는 소켓들에 보낸다. broadcastToChannel과 같은
@@ -632,6 +679,14 @@ export class SelfMessenger implements MessengerPort {
           if (!this.allowed(ws, 'wiki.delete')) return;
           await this.wikiDeps.wiki.deletePage(f.slug);
           this.broadcast({ t: 'wikiChanged' });
+          return;
+        }
+        // 저장 확인 카드의 답. 권한 게이트를 걸지 않는다 — 이건 "저장할까요?"에 대한 대답이지
+        // 위키를 고치는 행위가 아니고, 애초에 이 카드를 받은 소켓만 id를 안다(isConnected는 통과분).
+        // 모르는/이미 끝난 id는 조용히 무시(중복 클릭·늦은 답).
+        case 'wikiSaveAnswer': {
+          if (typeof f.id !== 'string' || (f.decision !== 'save' && f.decision !== 'cancel')) return;
+          this.pendingSaves.get(f.id)?.(f.decision);
           return;
         }
         case 'proposalsList': {

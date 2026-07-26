@@ -2983,3 +2983,71 @@ describe('stopGeneration(여러 줄 입력+생성 중지 Task 4)', () => {
     expect(calls).toEqual([ch.id]);
   });
 });
+
+// 위키 저장 확인 카드(2026-07-26) — 앱이 떠 있는 동안의 저장은 전부 이 카드로 묻는다.
+// MCP elicitation을 못 쓰는 경로(앱 두뇌=헤드리스 claude, /mcp=stateless)를 앱이 대신 묻는 배선.
+describe('위키 저장 확인 카드(askWikiSave)', () => {
+  let dir: string;
+  let store: ChatStore;
+  let sm: SelfMessenger | undefined;
+  let client: WebSocket | undefined;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-savecard-'));
+    store = new ChatStore(dir);
+    store.listChannels();
+  });
+  afterEach(async () => {
+    client?.terminate();
+    if (sm) await sm.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('카드를 띄우고 저장 답을 받으면 save로 resolve된다', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    const answer = sm.askWikiSave({ title: 'T', targetSlug: 'ops', body: 'hello body' });
+    const f = await nextFrame(client);
+    expect(f.t).toBe('wikiSaveAsk');
+    expect(f.ask.title).toBe('T');
+    expect(f.ask.targetSlug).toBe('ops');
+    expect(f.ask.preview).toBe('hello body');
+    client.send(JSON.stringify({ t: 'wikiSaveAnswer', id: f.ask.id, decision: 'save' }));
+    await expect(answer).resolves.toBe('save');
+  });
+
+  it('취소 답이면 cancel로 resolve되고, 카드를 거두라는 done 프레임이 간다', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+
+    const answer = sm.askWikiSave({ title: 'T', body: 'b' });
+    const ask = await nextFrame(client);
+    client.send(JSON.stringify({ t: 'wikiSaveAnswer', id: ask.ask.id, decision: 'cancel' }));
+    await expect(answer).resolves.toBe('cancel');
+    const done = await nextFrame(client);
+    expect(done).toEqual({ t: 'wikiSaveDone', id: ask.ask.id });
+  });
+
+  // ★무한 대기 금지 — 볼 사람이 없으면 카드를 띄우지도 않고 즉시 폴백(호출자가 승인함으로 돌린다).
+  it('열린 창이 하나도 없으면 즉시 unavailable', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    await expect(sm.askWikiSave({ title: 'T', body: 'b' })).resolves.toBe('unavailable');
+  });
+
+  it('모르는 id의 답은 조용히 무시된다(늦은 답·중복 클릭)', async () => {
+    sm = new SelfMessenger({ enabled: true, port: 0, bind: '127.0.0.1', role: 'server' }, store, { logger: noLog });
+    await sm.start();
+    client = new WebSocket(`ws://127.0.0.1:${sm.addressPort()}`);
+    await once(client, 'open');
+    client.send(JSON.stringify({ t: 'wikiSaveAnswer', id: 'nope', decision: 'save' }));
+    client.send(JSON.stringify({ t: 'channels' })); // 살아 있는지 확인용 후속 프레임
+    const f = await nextFrame(client);
+    expect(f.t).toBe('channels');
+  });
+});

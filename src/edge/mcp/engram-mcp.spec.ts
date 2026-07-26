@@ -2,7 +2,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
-import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS } from './engram-mcp';
+import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS, BRIDGE_APPROVED_CLIENT } from './engram-mcp';
 import {
   disableElicitation,
   APP_CHANNEL_ENV,
@@ -504,6 +504,67 @@ describe('elicitation 승인 게이트', () => {
     const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
     await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
     expect(asked).toHaveLength(1);
+    await c.close();
+  });
+
+  // 앱 저장 카드(confirmSave 주입) — 앱이 떠 있으면 MCP 선택창 대신 앱이 묻는다.
+  const savingDeps = (confirmSave: McpDeps['confirmSave'], propose = jest.fn().mockResolvedValue('p-app')) => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('approved proposal p-app: slug (create)'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    return { deps: makeDeps({ propose, proposals, confirmSave }), proposals, propose };
+  };
+
+  it('앱 카드에서 저장 → MCP 선택창을 띄우지 않고 그 자리에서 게시', async () => {
+    const asked: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => 'save');
+    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(asked).toEqual([]); // 앱이 물었으니 MCP 선택창은 안 뜬다(중복 질문 금지)
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
+    await c.close();
+  });
+
+  it('앱 카드에서 취소 → 제안조차 만들지 않는다', async () => {
+    const { deps, proposals, propose } = savingDeps(async () => 'cancel');
+    const c = await elicitingClient(deps, accept);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(propose).not.toHaveBeenCalled();
+    expect(proposals.approve).not.toHaveBeenCalled();
+    expect(out.toLowerCase()).toContain('declined');
+    await c.close();
+  });
+
+  // 앱 창이 없어 못 물었으면 물어볼 기회를 버리지 않는다 — 클라이언트 선택창으로 이어간다.
+  it('앱 카드가 unavailable(창 없음) → MCP 선택창으로 이어간다', async () => {
+    const asked: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => 'unavailable');
+    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(asked).toHaveLength(1);
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
+    await c.close();
+  });
+
+  // 브리지가 이미 사람에게 물어 승인받았으면(접속 이름으로 알림) 앱도 클라도 다시 묻지 않는다.
+  it('브리지 승인 이름으로 접속 → 아무도 다시 묻지 않고 바로 저장', async () => {
+    const askedApp: unknown[] = [];
+    const askedMcp: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => { askedApp.push(1); return 'save'; });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: BRIDGE_APPROVED_CLIENT, version: '1.0.0' }, { capabilities: { elicitation: {} } });
+    c.setRequestHandler(ElicitRequestSchema, async (req) => { askedMcp.push(req); return { action: 'accept', content: { decision: 'save' } } as never; });
+    await c.connect(clientT);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(askedApp).toEqual([]);
+    expect(askedMcp).toEqual([]);
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
     await c.close();
   });
 

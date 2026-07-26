@@ -79,6 +79,10 @@ export interface ProgressRun { id: string; title: string; kind?: 'retry' | 'fail
 // 메타로만 보존(경로엔 서버 발급 uuid만 — traversal 원천 차단).
 export interface AttachmentMeta { id: string; name: string; mime: string; size: number }
 
+// 위키 저장 확인 카드에 필요한 것만(본문 전체를 보내지 않는다 — preview는 서버가 잘라서 준다).
+// targetSlug 있으면 그 페이지에 이어붙이기, 없으면 새 페이지. bytes는 원본 본문 크기(잘리기 전).
+export interface WikiSaveAsk { id: string; title: string; targetSlug?: string; preview: string; bytes: number }
+
 export interface QuestionOption { label: string; desc?: string; recommended?: boolean }
 export interface QuestionItem { q: string; header?: string; multiSelect?: boolean; options: QuestionOption[] }
 
@@ -132,6 +136,9 @@ export type ClientFrame =
   | { t: 'wikiUnpublish'; slug: string }
   | { t: 'wikiEdit'; slug: string; body: string }
   | { t: 'wikiDelete'; slug: string }
+  // 저장 확인 카드의 답(2026-07-26). 앱이 떠 있으면 위키 저장은 이 카드로 묻는다 —
+  // 헤드리스 두뇌는 MCP elicitation에 답할 사람이 없어서(6ms cancel 실측) 앱이 직접 물어야 한다.
+  | { t: 'wikiSaveAnswer'; id: string; decision: 'save' | 'cancel' }
   | { t: 'proposalsList' }
   | { t: 'proposalApprove'; id: string }
   | { t: 'proposalReject'; id: string }
@@ -174,6 +181,11 @@ export type ServerFrame =
   | { t: 'proposals'; list: ProposalDto[] }
   | { t: 'wikiChanged' }
   | { t: 'proposalsChanged' }
+  // 위키 저장 확인 카드(2026-07-26). 앱이 떠 있는 동안의 모든 저장 경로(앱 두뇌·/mcp 직접 접속)가
+  // 이걸로 묻는다. 답은 wikiSaveAnswer. 아무도 답하지 않으면 서버가 타임아웃 후 승인함으로 돌린다.
+  | { t: 'wikiSaveAsk'; ask: WikiSaveAsk }
+  // 답이 왔거나(다른 창에서 눌렀거나) 타임아웃돼 카드를 거둘 때. 카드가 유령으로 남지 않게 한다.
+  | { t: 'wikiSaveDone'; id: string }
   | { t: 'adminUsers'; list: AdminUserDto[] }
   | { t: 'adminSettings'; settings: AdminSettings }
   | { t: 'roster'; list: RosterEntry[] }
