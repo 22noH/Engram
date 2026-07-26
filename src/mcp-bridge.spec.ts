@@ -217,7 +217,7 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
       const s = await connectedBridgeSession(upstream.url);
       const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
       expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
-      expect(out).toBe('proposal p-plain created — a human will review it in the Engram app');
+      expect(out).toBe('proposal p-plain created — queued, a human still has to approve it');
       await s.close();
     } finally {
       await upstream.close();

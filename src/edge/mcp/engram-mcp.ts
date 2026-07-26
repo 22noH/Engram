@@ -290,7 +290,14 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   const confirm = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
   if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'propose' }));
   const id = await deps.propose(input);
-  return ok(`proposal ${id} created — a human will review it in the Engram app`);
+  // ★한 번 승인 = 저장 완료(2026-07-26 사용자 확정 시나리오). 승인창에서 '저장'을 누른 건 사람 승인
+  // 그 자체다 — 그걸 받고도 승인함에 남겨두면 같은 질문을 두 번 하는 셈이 된다. 여기서 끝낸다.
+  // 물어보지 못한 경우(unavailable=스킵)에만 승인함으로 간다 — 그때는 아직 아무도 승인하지 않았다.
+  if (confirm === 'accept' && deps.proposals) {
+    const applied = await deps.proposals.approve(id);
+    return ok(`saved to the Engram wiki — ${applied}`);
+  }
+  return ok(`proposal ${id} created — queued, a human still has to approve it`);
 }
 
 async function callListProposals(deps: McpDeps): Promise<CallToolResult> {
@@ -400,7 +407,7 @@ const PROMPTS: EngramPrompt[] = [
 export const ENGRAM_MCP_INSTRUCTIONS = [
   "Engram is the user's personal knowledge wiki. When a question may be covered by it, search first (wiki_search, then wiki_read) and answer from what the wiki actually says.",
   'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), call wiki_propose. Do NOT ask "save this?" in chat first — wiki_propose asks the user itself, in a dialog, and that dialog is the one and only place that question gets asked. Asking in chat as well just makes the user answer the same question twice. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page.',
-  'If the dialog cannot be shown (the client has no one to ask), wiki_propose still queues the proposal — nothing is published. Reviewing and approving what is queued happens in chat: use list_proposals to show the user what is pending, and call approve_proposal only for an item the user tells you to approve, in that message. Never approve a proposal you just created unless the user says so — creating and approving in one breath means nobody approved it.',
+  'When the user accepts that dialog the page is saved right then — wiki_propose finishes the job and tells you so. Do not call approve_proposal afterwards and do not ask the user anything else about it; one approval means saved. Only when the dialog could not be shown does wiki_propose leave the item queued, and it says so; those queued items are reviewed in chat with list_proposals and approved with approve_proposal for whichever one the user names.',
 ].join('\n\n');
 
 export function buildMcpServer(deps: McpDeps): Server {

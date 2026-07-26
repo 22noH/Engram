@@ -152,14 +152,15 @@ describe('buildMcpServer', () => {
     await s.close();
   });
 
-  it('wiki_propose: 입력을 deps.propose에 정확 전달·응답에 id와 review 문구', async () => {
+  it('wiki_propose: 입력을 deps.propose에 정확 전달·응답에 id와 승인 대기 문구', async () => {
     const propose = jest.fn().mockResolvedValue('proposal-42');
     const s = await connectedSession(makeDeps({ propose }));
     const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C', reason: 'R' });
     expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C', reason: 'R' });
     expect(out).toContain('proposal-42');
-    expect(out.toLowerCase()).toContain('review');
-    expect(out.toLowerCase()).toContain('engram');
+    // 물어보지 못한 경로 = 아직 승인 전. 모델이 "저장됐다"로 오인하지 않게 대기 상태를 명시한다.
+    expect(out.toLowerCase()).toContain('queued');
+    expect(out.toLowerCase()).toContain('approve');
     await s.close();
   });
 
@@ -439,7 +440,7 @@ describe('elicitation 승인 게이트', () => {
     const s = await connectedSession(makeDeps({ propose }));
     const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
     expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
-    expect(out).toBe('proposal proposal-42 created — a human will review it in the Engram app');
+    expect(out).toBe('proposal proposal-42 created — queued, a human still has to approve it');
     await s.close();
   });
 
@@ -450,6 +451,37 @@ describe('elicitation 승인 게이트', () => {
     expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
     expect(out).toContain('p-ok');
     await c.close();
+  });
+
+  // ★한 번 승인 = 저장 완료(2026-07-26 사용자 확정 시나리오). 승인창에서 '저장'을 누른 것이 곧 사람
+  // 승인이다 — 그러고도 승인함에 남겨 또 묻게 만들면 같은 질문을 두 번 하는 것이다.
+  it('승인창에서 저장 → 그 자리에서 게시까지 끝난다(승인함에 남기지 않는다)', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('approved proposal p-1: slug (create)'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    const propose = jest.fn().mockResolvedValue('p-1');
+    const c = await elicitingClient(makeDeps({ propose, proposals }), accept);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(proposals.approve).toHaveBeenCalledWith('p-1');
+    expect(out).toContain('saved to the Engram wiki');
+    await c.close();
+  });
+
+  // 반대편: 물어보지 못했으면(스킵) 아직 아무도 승인하지 않았으므로 승인함에 남는다.
+  it('물어보지 못한 경우(미지원) → 자동 승인하지 않고 승인함에 남는다', async () => {
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('should not happen'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    const propose = jest.fn().mockResolvedValue('p-2');
+    const s = await connectedSession(makeDeps({ propose, proposals })); // elicitation 미선언 클라이언트
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(proposals.approve).not.toHaveBeenCalled();
+    expect(out).toContain('queued');
+    await s.close();
   });
 
   it('요청 내용에 제목·대상 슬러그·내용 앞부분·저장/취소 선택지', async () => {
