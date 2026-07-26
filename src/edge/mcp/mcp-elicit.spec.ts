@@ -10,6 +10,7 @@ import {
   APP_CHANNEL_ENV,
   APP_RESIDENT_ENV,
   DEFAULT_ELICIT_TIMEOUT_MS,
+  ELICIT_HUMAN_MIN_MS_ENV,
   ELICIT_OFF_ENV,
   ELICIT_TIMEOUT_ENV,
   WikiSaveRequest,
@@ -74,9 +75,24 @@ describe('confirmWikiSave — 승인/거부', () => {
     await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('accept');
   });
 
-  it('action:decline → decline', async () => {
+  // 사람이 실제로 눌러서 온 decline은 반드시 존중한다(문턱 0 = 소요시간 판별 끔).
+  it('사람이 답한 decline → decline(거부는 그대로 존중)', async () => {
     const s = fakeServer(caps, jest.fn().mockResolvedValue({ action: 'decline' }));
-    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('decline');
+    await expect(confirmWikiSave(s, REQ, { [ELICIT_HUMAN_MIN_MS_ENV]: '0' })).resolves.toBe('decline');
+  });
+
+  // ★2026-07-26 실사고: 바깥 Claude Code(자동모드)는 사람에게 못 물을 때 cancel이 아니라
+  // **decline**으로 답한다. 승인창은 뜬 적도 없는데 "사용자가 거부"로 읽혀 3회 연속 저장 불가였다.
+  // 사람이 400자 미리보기를 읽고 누르는 데 1초 미만은 불가능하다 — 그보다 빠른 부정 응답은
+  // 거부 의사가 아니라 "물어볼 사람이 없었다"로 읽는다.
+  it('사람이 누를 수 없는 속도의 decline → propose는 unavailable(제안 큐로 폴백)', async () => {
+    const s = fakeServer(caps, jest.fn().mockResolvedValue({ action: 'decline' }));
+    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('unavailable');
+  });
+
+  it('즉답 decline + wiki_write(즉시 게시) → decline(애매하면 절대 게시 안 함)', async () => {
+    const s = fakeServer(caps, jest.fn().mockResolvedValue({ action: 'decline' }));
+    await expect(confirmWikiSave(s, { ...REQ, op: 'write' }, {})).resolves.toBe('decline');
   });
 
   // ★2026-07-25 실사고: 헤드리스 claude -p는 elicitation.form을 **선언은 하면서** 요청이 오면

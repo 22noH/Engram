@@ -7,7 +7,7 @@ import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { handleMcpRequest } from './edge/mcp/mcp-http';
 import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
 import { makeBridgeServer, parseBridgeArgs, withChannelIdentity } from './mcp-bridge';
-import { APP_CHANNEL_ENV, APP_RESIDENT_ENV } from './edge/mcp/mcp-elicit';
+import { APP_CHANNEL_ENV, APP_RESIDENT_ENV, ELICIT_HUMAN_MIN_MS_ENV } from './edge/mcp/mcp-elicit';
 import { CHANNEL_ARG } from '../shared/browser-ops';
 
 const T = (bare: string) => `${MCP_TOOL_PREFIX}bridge__${bare}`;
@@ -176,14 +176,34 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
     }
   });
 
-  it('거부 → 상류를 아예 호출하지 않고 명확한 결과 텍스트', async () => {
+  // 사람이 실제로 누른 거부만 존중한다. 목 클라이언트는 0ms에 답하므로 문턱을 꺼서(0) "사람이
+  // 답했다"로 만든다 — 끄지 않으면 아래 자동응답 폴백 케이스와 구분되지 않는다.
+  it('사람이 답한 거부 → 상류를 아예 호출하지 않고 명확한 결과 텍스트', async () => {
     const propose = jest.fn().mockResolvedValue('never');
     const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    process.env[ELICIT_HUMAN_MIN_MS_ENV] = '0';
     try {
       const c = await elicitingBridgeClient(upstream.url, () => ({ action: 'decline' }));
       const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
       expect(propose).not.toHaveBeenCalled();
       expect(out.toLowerCase()).toContain('declined');
+      await c.close();
+    } finally {
+      delete process.env[ELICIT_HUMAN_MIN_MS_ENV];
+      await upstream.close();
+    }
+  });
+
+  // ★2026-07-26 실사고(브리지 경로도 동일): 사람에게 못 묻는 클라이언트가 cancel이 아니라 decline으로
+  // 답하면 저장이 통째로 막혔다. 사람이 누를 수 없는 속도의 decline은 제안 큐로 폴백한다.
+  it('사람이 누를 수 없는 속도의 decline → 폴백해서 상류에 제안이 만들어진다', async () => {
+    const propose = jest.fn().mockResolvedValue('p-bridge-fallback');
+    const upstream = await startUpstream(makeUpstreamDeps({ propose }));
+    try {
+      const c = await elicitingBridgeClient(upstream.url, () => ({ action: 'decline' }));
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+      expect(out).toContain('p-bridge-fallback');
       await c.close();
     } finally {
       await upstream.close();

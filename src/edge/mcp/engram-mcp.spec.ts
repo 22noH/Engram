@@ -7,6 +7,7 @@ import {
   disableElicitation,
   APP_CHANNEL_ENV,
   APP_RESIDENT_ENV,
+  ELICIT_HUMAN_MIN_MS_ENV,
   ELICIT_OFF_ENV,
   ELICIT_TIMEOUT_ENV,
 } from './mcp-elicit';
@@ -467,13 +468,32 @@ describe('elicitation 승인 게이트', () => {
     await c.close();
   });
 
+  // 사람이 실제로 누른 거부는 그대로 존중한다. 문턱 0 = 소요시간 판별을 꺼서 "사람이 답했다"로 본다
+  // (목 클라이언트는 0ms에 답하므로 문턱을 끄지 않으면 아래 자동응답 케이스와 구분되지 않는다).
   it('사용자 거부 → 제안 자체를 만들지 않고 명확한 결과 텍스트', async () => {
     const propose = jest.fn().mockResolvedValue('never');
+    process.env[ELICIT_HUMAN_MIN_MS_ENV] = '0';
+    try {
+      const c = await elicitingClient(makeDeps({ propose }), () => ({ action: 'decline' }));
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(propose).not.toHaveBeenCalled();
+      expect(out.toLowerCase()).toContain('declined');
+      expect(out).toContain('T');
+      await c.close();
+    } finally {
+      delete process.env[ELICIT_HUMAN_MIN_MS_ENV];
+    }
+  });
+
+  // ★2026-07-26 실사고: 바깥 Claude Code(자동모드)는 사람에게 못 물을 때 cancel이 아니라 decline으로
+  // 답한다 — 승인창은 뜬 적도 없는데 3회 연속 "the user declined"로 저장이 막혔다. 사람이 누를 수
+  // 없는 속도의 decline은 거부 의사가 아니라 "물어볼 사람이 없었다"로 읽고 제안 큐로 폴백한다.
+  it('사람이 누를 수 없는 속도의 decline → 거부가 아니라 제안 큐로 폴백', async () => {
+    const propose = jest.fn().mockResolvedValue('p-fallback-decline');
     const c = await elicitingClient(makeDeps({ propose }), () => ({ action: 'decline' }));
     const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
-    expect(propose).not.toHaveBeenCalled();
-    expect(out.toLowerCase()).toContain('declined');
-    expect(out).toContain('T');
+    expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
+    expect(out).toContain('p-fallback-decline');
     await c.close();
   });
 

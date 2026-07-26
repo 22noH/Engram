@@ -28,6 +28,24 @@ export const ELICIT_TIMEOUT_ENV = 'ENGRAM_MCP_ELICIT_TIMEOUT_MS';
 // 탈출구 — 자동화/CI처럼 사람이 없는 게 확실한 맥락에서 대화상자를 아예 끄고 기존 경로로.
 export const ELICIT_OFF_ENV = 'ENGRAM_MCP_NO_ELICIT';
 
+// ★회귀 수정 2탄(2026-07-26) — "decline인데 사람이 답한 게 아닌 경우".
+//
+// 실사고: 바깥 Claude Code(자동모드)에서 wiki_propose가 3회 연속 "the user declined"로 돌아왔다.
+// 사람은 아무것도 누른 적이 없다 — 승인창 자체가 뜨지 않았다. 그 클라이언트는 사람에게 물어볼 수
+// 없을 때 `cancel`이 아니라 **`decline`으로 답한다**. 아래 cancel 분기는 "사람이 없어서 자동 응답한
+// 것일 수 있다"를 이미 처리하고 있었는데, decline으로 답하는 클라이언트는 그 처리를 못 받아
+// "사람이 거부했다"로 읽혔고 제안조차 만들어지지 않았다(= 그 클라이언트에선 위키 저장이 영영 불가).
+//
+// 판별: **사람이 답하기에 물리적으로 불가능한 속도**. 승인창엔 제목·대상·본문 400자 미리보기가 뜬다
+// — 그걸 읽고 누르는 데 1초 미만은 나올 수 없다. 앞선 실측에서 헤드리스 claude는 6ms에 답했다.
+// 이 문턱보다 빠른 부정 응답은 "사람이 거부"가 아니라 "물어볼 사람이 없었다"로 읽는다.
+//
+// ponytail: 지연시간 휴리스틱이다. 천장 — 사람이 진짜로 1초 안에 Cancel을 눌렀다면 그 거부를
+// 놓친다(그래도 제안 큐까지만 가고 게시는 앱 승인함이 또 막으므로 피해가 없다). 클라이언트가
+// "사람 없음"을 프로토콜로 알리는 표준이 생기면 이 휴리스틱을 그걸로 교체한다.
+export const ELICIT_HUMAN_MIN_MS_ENV = 'ENGRAM_MCP_ELICIT_HUMAN_MIN_MS';
+export const DEFAULT_ELICIT_HUMAN_MIN_MS = 1_000;
+
 // ★회귀 수정(2026-07-25) — "앱 내부 호출엔 대화상자를 걸지 않는다".
 //
 // 실사고: 앱 채팅에서 "저장해라"가 계속 "저장 취소됐습니다"로 돌아왔다. 원인은 엔그램 앱의 두뇌도
@@ -82,6 +100,12 @@ export function isElicitationDisabled(server: object): boolean {
 function elicitTimeoutMs(env: NodeJS.ProcessEnv): number {
   const raw = Number(env[ELICIT_TIMEOUT_ENV]);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_ELICIT_TIMEOUT_MS;
+}
+
+// 0도 유효한 설정값이다(문턱 끄기) — >0이 아니라 >=0으로 받는다.
+function humanMinMs(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env[ELICIT_HUMAN_MIN_MS_ENV]);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_ELICIT_HUMAN_MIN_MS;
 }
 
 function preview(content: string): string {
@@ -146,6 +170,7 @@ export async function confirmWikiSave(
   if (isEngramAppCall(env)) return 'unavailable';
   if (isElicitationDisabled(server)) return 'unavailable';
   if (!supportsFormElicitation(server)) return 'unavailable';
+  const startedAt = Date.now();
   try {
     const result = await server.elicitInput(saveConfirmParams(req), {
       timeout: elicitTimeoutMs(env),
@@ -158,7 +183,14 @@ export async function confirmWikiSave(
       return decision === 'cancel' ? 'decline' : 'accept';
     }
     // 'decline' = 사람이 명시적으로 거부(MCP 규약) → 저장하지 않는다.
-    if (result.action === 'decline') return 'decline';
+    // 단, 사람이 읽고 누를 수 없는 속도로 돌아온 decline은 "물어볼 사람이 없었다"로 읽는다
+    // (위 ELICIT_HUMAN_MIN_MS_ENV 주석 — 실측 6ms 자동 응답 사례). 그때는 아래 cancel과 같은 취급:
+    // 제안은 기존 경로로 폴백, 즉시 게시(write)는 애매함을 승인으로 바꾸지 않는다.
+    if (result.action === 'decline') {
+      const answeredByHuman = Date.now() - startedAt >= humanMinMs(env);
+      if (answeredByHuman) return 'decline';
+      return req.op === 'write' ? 'decline' : 'unavailable';
+    }
     // 'cancel' = **명시적 선택 없이 닫힘**. 사람이 ESC를 눌렀을 수도, 사람이 아예 없어서
     // 클라이언트가 자동으로 답했을 수도 있다(헤드리스 claude -p 실측이 바로 이 경우) — 거부 의사로
     // 읽으면 안 된다. 제안 경로는 기존 경로(제안 큐, 앱에서 사람이 승인)로 폴백하고, 즉시 게시
