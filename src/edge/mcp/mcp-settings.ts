@@ -12,6 +12,8 @@ export interface McpSettingsPort {
   view(): string;
   /** 한 항목 상세. 모르는 key면 null. */
   viewOne(key: string): string | null;
+  /** 원시 값(코드가 분기용으로 읽을 때). 모르는 key·미설정이면 빈 문자열. */
+  read(key: string): string;
   /** 검증·위험도 분류(파일 안 건드림). */
   plan(key: string, value: string): SettingPlan;
   /** 실제 저장(승인 판정 후 호출). */
@@ -25,6 +27,7 @@ export function makeMcpSettings(configDir: string, ctx: PlanContext = defaultPla
       const v = readSetting(configDir, key);
       return v ? formatSetting(v) : null;
     },
+    read: (key) => readSetting(configDir, key)?.value ?? '',
     plan: (key, value) => planSettingChange(configDir, key, value, ctx),
     apply: (plan) => applySettingChange(configDir, plan),
   };

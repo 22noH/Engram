@@ -287,7 +287,10 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   if (typeof args.reason === 'string') input.reason = args.reason;
   // ★저장 확정 전 사람 승인(elicitation) — 미지원·실패·타임아웃이면 unavailable로 떨어져
   // 아래 기존 경로가 그대로 돈다(mcp-elicit.ts 주석 참조).
-  const confirm = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+  // wiki.autosave=direct면 아예 묻지 않는다(사용자가 위험 확인을 거쳐 켠 설정). 미설정·설정 어댑터
+  // 없음은 전부 'ask'로 떨어진다 — 자동 저장은 명시적으로 켠 경우에만.
+  const autosave = deps.settings?.read('wiki.autosave') === 'direct';
+  const confirm = autosave ? 'accept' : await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
   if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'propose' }));
   const id = await deps.propose(input);
   // ★한 번 승인 = 저장 완료(2026-07-26 사용자 확정 시나리오). 승인창에서 '저장'을 누른 건 사람 승인

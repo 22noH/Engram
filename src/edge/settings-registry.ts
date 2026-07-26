@@ -5,6 +5,7 @@ import { isFilesystemRoot, isWithin, systemDirs } from '../pal/path-safety';
 import { findRepoRoot } from '../pal/repo-root';
 import { loadImportConfig, saveImportConfig } from '../knowledge-core/import/import.config';
 import { readWikiRemoteForm, saveWikiRemote } from '../knowledge-core/wiki/wiki-remote.config';
+import { loadWikiSaveMode, saveWikiSaveMode, type WikiSaveMode } from '../knowledge-core/wiki/wiki-save.config';
 import { defaultBrainName, listBrainNames } from '../brain/brain.config';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +159,21 @@ const DEFS: SettingDef[] = [
           ? `the entire wiki will be pushed to ${r.value} — pointing it at the wrong repository leaks all of it`
           : 'wiki git sync will be turned off',
       };
+    },
+  },
+  {
+    key: 'wiki.autosave',
+    description: 'What wiki_propose does: ask = show a Save dialog first (default), direct = save without asking.',
+    valueHint: 'ask | direct',
+    read: (c) => loadWikiSaveMode(c),
+    write: (c, v) => { saveWikiSaveMode(c, v as WikiSaveMode); },
+    parse: (raw) => {
+      const r = parseEnum(raw, ['ask', 'direct']);
+      if ('error' in r) return r;
+      // 켜는 순간부터 사람 확인 없이 위키가 바뀐다 — import.publish=direct와 같은 등급.
+      return r.value === 'direct'
+        ? { value: r.value, risk: 'danger', reason: 'the AI would save to your wiki without asking you first' }
+        : r;
     },
   },
   {

@@ -469,6 +469,44 @@ describe('elicitation 승인 게이트', () => {
     await c.close();
   });
 
+  // wiki.autosave=direct — 사용자가 위험 확인을 거쳐 켠 설정이면 선택창 자체를 띄우지 않는다.
+  it('wiki.autosave=direct → 묻지 않고 바로 저장한다', async () => {
+    const asked: unknown[] = [];
+    const proposals = {
+      list: jest.fn().mockResolvedValue([]),
+      approve: jest.fn().mockResolvedValue('approved proposal p-3: slug (create)'),
+      reject: jest.fn().mockResolvedValue('ok'),
+    };
+    const propose = jest.fn().mockResolvedValue('p-3');
+    const settings = {
+      view: () => '', viewOne: () => null, apply: () => '',
+      plan: () => ({ ok: false as const, error: 'not used' }),
+      read: (k: string) => (k === 'wiki.autosave' ? 'direct' : ''),
+    };
+    const deps = makeDeps({ propose, proposals, settings: settings as never });
+    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(asked).toEqual([]); // 선택창을 아예 띄우지 않았다
+    expect(proposals.approve).toHaveBeenCalledWith('p-3');
+    expect(out).toContain('saved to the Engram wiki');
+    await c.close();
+  });
+
+  // 기본값(미설정)에서는 반드시 묻는다 — 자동 저장은 명시적으로 켠 경우에만.
+  it('wiki.autosave 미설정 → 선택창을 띄운다(기본은 묻기)', async () => {
+    const asked: unknown[] = [];
+    const settings = {
+      view: () => '', viewOne: () => null, apply: () => '',
+      plan: () => ({ ok: false as const, error: 'not used' }),
+      read: () => '',
+    };
+    const deps = makeDeps({ propose: jest.fn().mockResolvedValue('p-4'), settings: settings as never });
+    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
+    await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(asked).toHaveLength(1);
+    await c.close();
+  });
+
   // 반대편: 물어보지 못했으면(스킵) 아직 아무도 승인하지 않았으므로 승인함에 남는다.
   it('물어보지 못한 경우(미지원) → 자동 승인하지 않고 승인함에 남는다', async () => {
     const proposals = {
