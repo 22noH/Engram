@@ -1,6 +1,6 @@
 # 다음 세션 인수인계 (2026-07-26 기준)
 
-현재: `main` = `3e08e97` · 앱/npm/플러그인 **v0.0.15** · 검증 통과(백엔드 2486 · 렌더러 574 · tsc clean · 미푸시 0)
+현재: `main` = `34081d2` · 앱/npm/플러그인 **v0.0.16**(2026-07-26 게시, `releases/latest`·npm 확인 완료)
 
 ## 릴리스하는 법 (한 줄)
 
@@ -11,7 +11,8 @@ git tag v0.0.16 && git push origin v0.0.16
 태그 숫자가 곧 버전이다. CI가 `package.json`·`plugin.json`에 적용 → 3-OS 빌드 → npm 게시(OIDC, 토큰 불필요) → main에 버전 되돌림 커밋까지 자동.
 게시만 재시도하려면: Actions → npm-publish → Run workflow → `version=0.0.16`.
 
-**게시 후 반드시 확인**(과거 사고): `releases/latest`가 새 태그인지 + `latest.yml`의 version. 드래프트가 2개 생기면 **자산 8개를 채워 합친 뒤** 게시(하나만 남기면 리눅스 자산이 빠질 수 있다).
+**게시는 이제 자동이다**(v0.0.16에서 고침). `desktop-release.yml`이 `draft`(릴리스 하나 선점) → `build`(3-OS가 그 드래프트에 자산만 올림) → `publish`(세 OS 매니페스트 확인 후 `make_latest`로 게시) 순으로 돈다. 사람이 드래프트를 손으로 합칠 일도, `make_latest`를 챙길 일도 없다.
+세 OS 중 하나라도 실패하면 `publish`가 아예 안 돌아 드래프트로 남는다(반쪽 릴리스 차단) — 실패한 OS만 재실행하면 이어서 게시된다.
 
 ---
 
@@ -31,9 +32,9 @@ git tag v0.0.16 && git push origin v0.0.16
 
 ## 2순위 — 구조 개선(오늘 사고의 근본)
 
-- **워크플로 2개가 빌드 체인을 복사해 두고 드리프트**했다(그래서 v0.0.15 npm 게시가 실패). root `workspaces` 또는 공용 composite action으로 통합.
-- **드래프트 경합을 근본에서 제거** — 매트릭스 3-OS 중 하나만 릴리스를 만들게. 지금은 매번 수동 병합이고, 잘못 판단하면 반쪽 릴리스가 나간다.
-- `Sync version files back to main`의 `continue-on-error`가 권한 403을 숨겼던 전례 — 다음 릴리스에서 실제로 커밋되는지 확인.
+- **워크플로 2개가 빌드 체인을 복사해 두고 드리프트**했다(그래서 v0.0.15 npm 게시가 실패). root `workspaces` 또는 공용 composite action으로 통합. ← **남음**
+- ~~드래프트 경합~~ **해결(v0.0.16)**. v0.0.16 게시 때 드래프트가 2개도 아니고 **3개**로 갈라졌다(자산 5/2/1개). 원인은 3-OS 잡이 동시에 `--publish always`를 돌려 셋 다 "이 태그 릴리스 없음"으로 판정하고 각자 만든 것. `electron-publish/out/gitHubPublisher.js`의 `getOrCreateRelease`는 태그가 같은 **드래프트가 있으면 그걸 재사용**하므로, 빌드 전에 드래프트를 하나 선점하는 `draft` 잡을 앞에 두어 근본 제거했다.
+- ~~`Sync version files back to main`의 403~~ **v0.0.16에서 정상 동작 확인**(`34081d2` 커밋됨). `continue-on-error`는 그대로 두되 다음에도 커밋 여부만 눈으로 확인.
 
 ## 3순위 — 남은 다듬기
 

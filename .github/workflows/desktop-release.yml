@@ -12,7 +12,27 @@ permissions:
   contents: write
 
 jobs:
+  # 빌드보다 먼저 드래프트를 "하나만" 만들어 둔다.
+  # 실사고(v0.0.16): 3-OS 잡이 동시에 --publish always를 돌리면 셋 다 "이 태그의 릴리스가 없네" 하고
+  # 각자 새로 만들어 드래프트가 3개로 갈라졌다(자산 5/2/1개로 흩어짐 → 사람이 600MB를 손으로 병합).
+  # 드래프트가 이미 있으면 electron-builder는 그걸 찾아 자산만 올리므로, 선점해 두면 경합이 사라진다.
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the one draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$TAG 릴리스가 이미 있다 — 그대로 재사용(재실행 경로)"
+            exit 0
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "Engram ${TAG#v}" --notes "Engram ${TAG#v}"
+
   build:
+    needs: draft
     strategy:
       fail-fast: false
       matrix:
@@ -44,8 +64,36 @@ jobs:
       - run: npm run console:build
       # 패키징 전 가드: 화면 파일이 실제로 존재해야 한다(없으면 여기서 실패 — 깡통 설치본 원천 차단).
       - run: node -e "const fs=require('fs');for(const p of ['renderer/dist/index.html','console/dist/index.html']){if(!fs.existsSync(p)){console.error('missing '+p);process.exit(1)}}"
+      # draft 잡이 만들어 둔 드래프트를 찾아 자산만 올린다(새로 만들지 않는다).
       - run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 무서명 배포(스펙 §6): mac 서명 자동탐색 끔.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+  # 3-OS가 전부 성공해야만(needs: build + fail-fast:false) 드래프트를 게시한다 — 반쪽 릴리스 차단.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # 세 OS의 자동 업데이트 매니페스트가 다 올라왔는지 확인한다. 자산 개수(8)는 구성이 바뀌면
+      # 깨지는 숫자라, 실제로 의미 있는 "OS별 잡이 자산을 올렸는가"를 이 셋으로 판정한다.
+      # make_latest 미지정으로 latest가 옛 버전에 머물러 자동 업데이트가 무반응이던 실사고(v0.0.11)도
+      # 여기서 함께 막는다 — gh api PATCH로 draft 해제와 latest 지정을 한 번에.
+      - name: Verify assets and publish as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          NAMES=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          echo "$NAMES"
+          # here-string으로 검사한다 — `echo | grep -q`는 grep이 먼저 닫아 SIGPIPE가 나고
+          # pipefail과 만나면 일치하는데도 실패로 잡힐 수 있다.
+          for f in latest.yml latest-mac.yml latest-linux.yml; do
+            grep -Fxq "$f" <<< "$NAMES" || { echo "::error::$f 누락 — 게시 중단(반쪽 릴리스)"; exit 1; }
+          done
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" \
+            -F draft=false -F make_latest=true >/dev/null
+          echo "게시 완료: $TAG (latest)"
