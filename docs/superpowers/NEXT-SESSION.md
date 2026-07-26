@@ -1,6 +1,6 @@
 # 다음 세션 인수인계 (2026-07-26 기준)
 
-현재: `main` = `34081d2` · 앱/npm/플러그인 **v0.0.16**(2026-07-26 게시, `releases/latest`·npm 확인 완료)
+현재: `main` = `2160a02` · 앱/npm/플러그인 **v0.0.17**(2026-07-26 게시, `releases/latest`·`latest.yml`·npm 확인 완료)
 
 ## 릴리스하는 법 (한 줄)
 
@@ -11,10 +11,27 @@ git tag v0.0.16 && git push origin v0.0.16
 태그 숫자가 곧 버전이다. CI가 `package.json`·`plugin.json`에 적용 → 3-OS 빌드 → npm 게시(OIDC, 토큰 불필요) → main에 버전 되돌림 커밋까지 자동.
 게시만 재시도하려면: Actions → npm-publish → Run workflow → `version=0.0.16`.
 
-**게시는 이제 자동이다**(v0.0.16에서 고침). `desktop-release.yml`이 `draft`(릴리스 하나 선점) → `build`(3-OS가 그 드래프트에 자산만 올림) → `publish`(세 OS 매니페스트 확인 후 `make_latest`로 게시) 순으로 돈다. 사람이 드래프트를 손으로 합칠 일도, `make_latest`를 챙길 일도 없다.
+**게시는 이제 자동이다**(v0.0.16에서 고치고 **v0.0.17에서 실전 확인** — 드래프트 1개·자산 8개·자동 게시·`latest` 지정까지 사람 개입 0). `desktop-release.yml`이 `draft`(릴리스 하나 선점) → `build`(3-OS가 그 드래프트에 자산만 올림) → `publish`(세 OS 매니페스트 확인 후 `make_latest`로 게시) 순으로 돈다. 사람이 드래프트를 손으로 합칠 일도, `make_latest`를 챙길 일도 없다.
 세 OS 중 하나라도 실패하면 `publish`가 아예 안 돌아 드래프트로 남는다(반쪽 릴리스 차단) — 실패한 OS만 재실행하면 이어서 게시된다.
 
 ---
+
+## 위키 저장 시나리오(2026-07-26 확정 — 바꾸기 전에 반드시 읽을 것)
+
+**묻는 건 한 번, 승인하면 그걸로 저장 끝.** 승인함으로 가는 건 **아무도 못 물었을 때뿐**이다.
+경로마다 다른 건 "무엇으로 묻느냐"뿐이고 사용자가 겪는 흐름은 넷 다 같다.
+
+| 경로 | 묻는 수단 |
+|---|---|
+| 앱 안 채팅 | 앱 저장 카드(`WikiSaveCard`) |
+| 바깥 클라 + 앱 켜짐(브리지) | 브리지 MCP 선택창 → 승인 시 상류에 `engram-bridge-approved` 이름으로 접속해 알림 |
+| 바깥 클라 + 앱 꺼짐(코어) | MCP 선택창 |
+| `/mcp` 직접 HTTP | 앱 저장 카드(stateless라 서버가 물을 통로가 없음) |
+
+- 판정은 `callWikiPropose` 한 곳: `wiki.autosave=direct` → 브리지가 이미 물음 → 앱 카드 → MCP 선택창 순.
+- `wiki.autosave`(`ask`|`direct`)는 설정 레지스트리 키다 — `engram_config_set`·`/engram:config-set`·`engram config set` 셋 다로 바꾼다. `direct`는 `risk: danger`.
+- ⚠️`isEngramAppCall` 건너뛰기를 **지우지 마라** — 앱 카드로 교체한 것이다. 지우면 07-25 회귀(앱 저장 전면 불가)가 재발한다.
+- ⚠️앱 UI를 MCP 설명에 섞지 마라 — 플러그인만 쓰는 사용자에겐 앱이 없다.
 
 ## 1순위 — 미제 버그
 
