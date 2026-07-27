@@ -152,20 +152,22 @@ export function saveConfirmParams(req: WikiSaveRequest): ElicitRequestFormParams
   };
 }
 
-// ★회귀 수정 3탄(2026-07-27) — "빈 elicitation 선언 = form 지원"이다.
+// form 지원 판정(2026-07-27).
 //
-// 실사고: 클로드 데스크톱(Claude Code)에서 wiki_propose를 부르면 승인창이 **엔그램 앱에** 떴다.
-// 사용자가 원한 건 부른 쪽(클로드) 화면이었다. 원인은 여기 판정이었다 — 클로드는 initialize에서
-// `elicitation: {}`(하위 키 없음)로 선언하는데, 우리는 `.form`이 있어야만 지원으로 봤다.
-// 그래서 요청조차 보내지 않고 'unavailable'로 떨어졌고, 상류가 앱 저장 카드를 띄웠다.
+// ⚠️먼저 사실 하나 — **빈 `elicitation:{}` 선언은 여기까지 오지 않는다.** SDK가 initialize를 파싱할
+// 때 `{}`를 `{form:{}}`로 정규화하고(types.js의 ElicitationCapabilitySchema z.preprocess),
+// getClientCapabilities()는 그 파싱된 값을 준다. 실측:
+//   {} -> {form:{}} · {form:{}} -> {form:{}} · {url:{}} -> {url:{}} · {applyDefaults:true} -> 그대로
+// 그래서 옛 검사(`!!caps?.elicitation?.form`)도 빈 선언 클라이언트는 통과시켰다 —
+// "빈 선언이라 요청조차 안 보냈다"는 처음 세운 가설은 **반증됐다**(그 가설로 이 코드를 짰었다).
 //
-// 사양: mode(form/url)는 나중에 붙은 확장이다. 하위 키 없는 `elicitation:{}`는 **원래(form)**
-// 방식 지원을 뜻한다 — 클로드의 수신부도 정확히 그렇게 읽는다(form!==undefined || (!form && !url)).
-// url만 선언한 클라이언트만 form 미지원이다.
+// 그럼 이 분기가 실제로 잡는 건 뭔가: `form`도 `url`도 없는 **비어 있지 않은** 선언(예:
+// `{applyDefaults:true}`)이다. 사양상 그것도 form 지원인데 SDK의 elicitInput은 `.form`을 요구하며
+// throw하므로(SDK가 사양보다 엄격), 그때만 헬퍼를 우회해 elicitation/create를 직접 보낸다.
 //
-// 그런데 SDK의 elicitInput(form)은 `.form`을 요구하며 throw한다(SDK가 사양보다 엄격). 그래서
-// 빈 선언일 때는 SDK 헬퍼를 우회해 elicitation/create를 직접 보낸다 — SDK의 capability 검사도
-// 그 메서드엔 `elicitation`이 있기만 하면 통과시킨다(server/index.js의 assertCapability).
+// ⚠️raw 경로의 대가: elicitInput이 하던 응답 content의 requestedSchema 검증이 사라진다. 즉 raw는
+// 사람 게이트가 한 겹 얇다. 우회는 "헬퍼가 막을 때"의 최후 수단이지 기본값이 아니다.
+// (capability 검사는 enforceStrictCapabilities를 켠 적이 없어 raw 경로에 아예 걸리지 않는다.)
 type FormElicit = 'sdk' | 'raw' | 'none';
 
 export function formElicitationMode(server: Pick<Server, 'getClientCapabilities'>): FormElicit {
