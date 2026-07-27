@@ -67,6 +67,49 @@ export function findSplitStores(dataDir: string, env: NodeJS.ProcessEnv = proces
   return found;
 }
 
+/**
+ * "내가 이 폴더에 쓰면 진짜 그 폴더에 들어가나?" — 컨테이너 안에서는 합쳐진 뷰만 보이므로
+ * 나열로는 절대 알 수 없다. 실제로 한 장 써 보고, 그게 패키지 컨테이너 쪽에 나타나는지로 판정한다.
+ * 관리자 권한도 UNC도 필요 없다.
+ *
+ * 반환: 리디렉션되는 컨테이너 경로(그 안에 표식이 나타난 곳), 아니면 null.
+ * never-throw — 판정에 실패하면 null(모르면 막지 않는다, 기존 동작 유지).
+ */
+export function probeRedirect(dataDir: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const local = env.LOCALAPPDATA;
+  if (!local) return null;
+  const name = path.basename(dataDir);
+  // 위키가 아니라 데이터 루트에 쓴다 — 위키 폴더는 git 저장소라 잡동사니를 남기면 안 된다.
+  const marker = `.redirect-probe-${process.pid}`;
+  const mine = path.join(dataDir, marker);
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(mine, '');
+  } catch {
+    return null; // 쓸 수 없으면 판정 불가 — 막지 않는다
+  }
+  try {
+    let packages: string[];
+    try {
+      packages = fs.readdirSync(path.join(local, 'Packages'));
+    } catch {
+      return null;
+    }
+    for (const pkg of packages) {
+      const container = path.join(local, 'Packages', pkg, 'LocalCache', 'Roaming', name);
+      if (path.resolve(container) === path.resolve(dataDir)) continue; // 내가 곧 그 폴더면 리디렉션이 아니다
+      try {
+        if (fs.existsSync(path.join(container, marker))) return container;
+      } catch {
+        /* 접근 불가한 패키지는 건너뛴다 */
+      }
+    }
+    return null;
+  } finally {
+    try { fs.unlinkSync(mine); } catch { /* 표식 정리 실패는 무해 */ }
+  }
+}
+
 /** 사람이 읽는 경고문. 갈라진 게 없으면 null(부를 자리에서 조건문을 또 쓰지 않게). */
 export function splitStoreWarning(dataDir: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const found = findSplitStores(dataDir, env);

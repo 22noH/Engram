@@ -7,7 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { HeadlessCoreModule } from './knowledge-core/headless-core.module';
 import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
-import { splitStoreWarning } from './knowledge-core/wiki/split-store';
+import { splitStoreWarning, probeRedirect } from './knowledge-core/wiki/split-store';
 import { ProposalStore } from './knowledge-core/proposal-store';
 import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
@@ -180,6 +180,10 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
   // 13장 중 11장이 그렇게 갈렸고 아무도 몰랐다). 갈라진 걸 발견하면 조용히 넘어가지 않는다.
   const split = splitStoreWarning(paths.getDataDir());
   if (split) process.stderr.write(`[mcp-headless] ${split}\n`);
+  // ★근본 방지: 내 쓰기가 컨테이너로 리디렉션되면 여기서 저장을 막는다. 그대로 두면 "저장했다"는
+  // 답을 돌려주면서 앱이 영영 못 보는 두 번째 위키를 만든다 — 그건 성공이 아니라 조용한 실패다.
+  // 읽기·검색은 그대로 둔다(합쳐진 뷰라 사용자에겐 정상으로 보이고, 막아서 얻을 게 없다).
+  const redirected = probeRedirect(paths.getDataDir());
   // ProposalApplier는 DI 없이도 되는 순수 클래스(WikiEngine+ProposalStore만 소비) — HeadlessCoreModule에
   // 등록해 EdgeModule 전체를 끌어올 필요 없이 직접 생성.
   const applier = new ProposalApplier(wiki, proposals);
@@ -196,6 +200,19 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
     // 원격을 말로 바꿀 수 있게. 위험한 값은 elicitation 승인이 없으면 거부된다(engram-mcp.ts).
     settings: makeMcpSettings(paths.getConfigDir()),
   };
+
+  // 리디렉션이 확인되면 쓰기 도구를 아예 빼고, propose는 이유를 들고 실패한다(도구층이 isError로
+  // 감싼다). 조용히 성공한 척하지 않는 것이 요점이다 — 사용자는 저장이 안 됐다는 걸 즉시 알아야 한다.
+  if (redirected) {
+    const why =
+      `refused: saving here would create a second wiki that the Engram app can never see. ` +
+      `This MCP server runs inside a sandboxed app, so its writes to ${paths.getDataDir()} are redirected to ${redirected}. ` +
+      `Start the Engram app and try again — then saves go through the app into the real wiki.`;
+    process.stderr.write(`[mcp-headless] writes disabled — ${why}\n`);
+    deps.propose = async () => { throw new Error(why); };
+    deps.write = null;
+    deps.recategorize = null;
+  }
 
   // 위키 git 원격 동기화(main.ts:124 배선의 헤드리스 짝) — config/wiki-remote.json에 원격이 있을
   // 때만 배선된다. 없으면 makeHeadlessWikiSync가 null을 돌려주고 deps는 손도 안 댄 원본 그대로다.
