@@ -7,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { HeadlessCoreModule } from './knowledge-core/headless-core.module';
 import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
+import { splitStoreWarning } from './knowledge-core/wiki/split-store';
 import { ProposalStore } from './knowledge-core/proposal-store';
 import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
@@ -174,6 +175,11 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
   const wiki = app.get(WikiEngine);
   const proposals = app.get(ProposalStore);
   const paths = app.get(PathResolver);
+  // ★코어 모드는 자기가 직접 위키에 쓴다 — 이 프로세스가 샌드박스된 호스트(패키지 데스크톱 앱) 안에서
+  // 돌면 그 쓰기가 컨테이너로 리디렉션돼 앱이 영영 못 보는 두 번째 위키가 생긴다(2026-07-27 실사고:
+  // 13장 중 11장이 그렇게 갈렸고 아무도 몰랐다). 갈라진 걸 발견하면 조용히 넘어가지 않는다.
+  const split = splitStoreWarning(paths.getDataDir());
+  if (split) process.stderr.write(`[mcp-headless] ${split}\n`);
   // ProposalApplier는 DI 없이도 되는 순수 클래스(WikiEngine+ProposalStore만 소비) — HeadlessCoreModule에
   // 등록해 EdgeModule 전체를 끌어올 필요 없이 직접 생성.
   const applier = new ProposalApplier(wiki, proposals);

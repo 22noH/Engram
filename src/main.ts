@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Orchestrator } from './agent-layer/orchestrator';
 import { PathResolver } from './pal/path-resolver';
+import { splitStoreWarning } from './knowledge-core/wiki/split-store';
 import { PinoLogger } from './pal/logger';
 import { loadMessengerConfig } from './edge/messenger/messenger.config';
 import { createMessenger } from './edge/messenger/messenger.factory';
@@ -182,6 +183,12 @@ async function bootstrap(): Promise<void> {
 
   const paths = app.get(PathResolver);
   const logger = app.get(PinoLogger);
+
+  // ★갈라진 위키 탐지(2026-07-27 실사고). 앱이 보는 위키가 2장인데 사용자 지식 11장이 샌드박스된
+  // MCP 호스트의 컨테이너 저장소에 갇혀 있었다 — 앱에도 로그에도 아무 흔적이 없어 며칠을 헤맸다.
+  // 발견하면 부팅 로그에 양쪽 경로를 남긴다(조용한 데이터 분기는 두 번 겪을 일이 아니다).
+  const splitWiki = splitStoreWarning(paths.getDataDir());
+  if (splitWiki) logger.warn(splitWiki, 'Wiki');
 
   // 클로드 MCP 패리티(설계 §3.2): 부트 1회, 두뇌 생성 이전. 미러 실패는 부팅을 막지 않는다.
   try {
