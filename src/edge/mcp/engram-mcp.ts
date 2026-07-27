@@ -340,27 +340,31 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   // 누가 묻느냐를 여기서 한 번에 정한다 — 경로가 달라도 사용자가 겪는 흐름은 같아야 한다.
   //  ① wiki.autosave=direct  → 아무도 안 묻는다(사용자가 위험 확인을 거쳐 켠 설정)
   //  ② 브리지가 이미 물어 승인받음 → 다시 묻지 않는다(중복 질문 금지). 브리지가 클라이언트 이름으로 알린다.
-  //  ③ 앱이 떠 있음(confirmSave 주입) → 앱 저장 카드가 묻는다. 'unavailable'이면 아래 elicitation로 이어감
-  //     (창이 없었을 뿐 클라이언트는 물을 수 있을지 모른다 — 물어볼 기회를 버리지 않는다)
-  //  ④ 그 외 → MCP 선택창(elicitation)
+  //  ③ **지금 사용자가 앉아 있는 그 클라이언트에 먼저 묻는다**(MCP 선택창). Codex면 Codex, Claude
+  //     Code면 Claude Code — 사용자가 보고 있는 화면에 떠야 한다. Engram이 깔려 있다고 앱으로
+  //     보내면, 다른 창을 쓰고 있는 사람에게는 아무것도 안 뜬 것과 같다(2026-07-27 사용자 지적).
+  //  ④ 클라이언트가 못 물을 때만(미지원·비대화형) 앱 저장 카드로 넘긴다 — 물어볼 기회를 버리지 않는다.
   const autosave = deps.settings?.read('wiki.autosave') === 'direct';
   const askedByBridge = server.getClientVersion()?.name === BRIDGE_APPROVED_CLIENT;
   let confirm: 'accept' | 'decline' | 'unavailable';
   if (autosave || askedByBridge) {
     confirm = 'accept';
   } else {
-    const viaApp = deps.confirmSave
-      ? await deps.confirmSave({
-          title,
-          ...(input.slug ? { targetSlug: input.slug } : {}),
-          // 카드가 "어느 폴더로 들어가는지"까지 보여줘야 승인이 의미가 있다(목업 승인 2026-07-27).
-          ...(normalizeCategoryPath(input.category) ? { category: normalizeCategoryPath(input.category)! } : {}),
-          body: content,
-        })
-      : 'unavailable';
-    confirm = viaApp === 'save' ? 'accept'
-      : viaApp === 'cancel' ? 'decline'
-      : await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+    const viaClient = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
+    if (viaClient !== 'unavailable') {
+      confirm = viaClient;
+    } else if (deps.confirmSave) {
+      const viaApp = await deps.confirmSave({
+        title,
+        ...(input.slug ? { targetSlug: input.slug } : {}),
+        // 카드가 "어느 폴더로 들어가는지"까지 보여줘야 승인이 의미가 있다(목업 승인 2026-07-27).
+        ...(normalizeCategoryPath(input.category) ? { category: normalizeCategoryPath(input.category)! } : {}),
+        body: content,
+      });
+      confirm = viaApp === 'save' ? 'accept' : viaApp === 'cancel' ? 'decline' : 'unavailable';
+    } else {
+      confirm = 'unavailable';
+    }
   }
   if (confirm === 'decline') return ok(declinedText({ title, content, slug: input.slug, op: 'propose' }));
   const id = await deps.propose(input);

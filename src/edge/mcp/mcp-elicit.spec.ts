@@ -19,12 +19,14 @@ import {
 type FakeServer = {
   getClientCapabilities: jest.Mock;
   elicitInput: jest.Mock;
+  request: jest.Mock;
 };
 
-function fakeServer(caps: unknown, elicit?: jest.Mock): FakeServer {
+function fakeServer(caps: unknown, elicit?: jest.Mock, request?: jest.Mock): FakeServer {
   return {
     getClientCapabilities: jest.fn().mockReturnValue(caps),
     elicitInput: elicit ?? jest.fn(),
+    request: request ?? jest.fn(),
   };
 }
 
@@ -54,6 +56,43 @@ describe('confirmWikiSave — capability 협상', () => {
     const s = fakeServer({ elicitation: { form: {} } }, elicit);
     await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('accept');
     expect(elicit).toHaveBeenCalledTimes(1);
+  });
+
+  // ★2026-07-27 실사고: 클로드 데스크톱에서 저장을 부르면 승인창이 엔그램 앱에 떴다(사용자가 원한
+  // 건 부른 쪽 화면). 클로드는 `elicitation:{}`(하위 키 없음)로 선언하는데 우리가 `.form`만 봐서
+  // '미지원'으로 떨어뜨렸기 때문. 사양상 빈 선언은 form 지원이다 — 요청을 반드시 보내야 한다.
+  it('하위 키 없는 elicitation:{} → form 지원. SDK가 막으므로 elicitation/create를 직접 보낸다', async () => {
+    const request = jest.fn().mockResolvedValue({ action: 'accept', content: { decision: 'save' } });
+    const elicit = jest.fn();
+    const s = fakeServer({ elicitation: {} }, elicit, request);
+    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('accept');
+    expect(elicit).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toMatchObject({ method: 'elicitation/create' });
+    expect(request.mock.calls[0][2]).toMatchObject({
+      timeout: DEFAULT_ELICIT_TIMEOUT_MS,
+      resetTimeoutOnProgress: false,
+    });
+  });
+
+  it('빈 선언 + 사람이 취소 → decline(직접 요청 경로도 판정은 동일)', async () => {
+    const request = jest.fn().mockResolvedValue({ action: 'accept', content: { decision: 'cancel' } });
+    const s = fakeServer({ elicitation: {} }, undefined, request);
+    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('decline');
+  });
+
+  it('빈 선언 + 직접 요청이 throw → unavailable(never-throw 유지)', async () => {
+    const request = jest.fn().mockRejectedValue(new Error('MCP error -32001: Request timed out'));
+    const s = fakeServer({ elicitation: {} }, undefined, request);
+    await expect(confirmWikiSave(s, REQ, {})).resolves.toBe('unavailable');
+  });
+
+  it('설정 변경 게이트도 같은 경로를 탄다(빈 선언 클라이언트에서 승인 가능)', async () => {
+    const request = jest.fn().mockResolvedValue({ action: 'accept', content: { decision: 'change' } });
+    const s = fakeServer({ elicitation: {} }, undefined, request);
+    const req = { key: 'wikiRemote', from: '', to: 'git@x', reason: 'remote' };
+    await expect(confirmSettingChange(s, req, {})).resolves.toBe('accept');
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
 

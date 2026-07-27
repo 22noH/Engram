@@ -517,37 +517,49 @@ describe('elicitation 승인 게이트', () => {
     return { deps: makeDeps({ propose, proposals, confirmSave }), proposals, propose };
   };
 
-  it('앱 카드에서 저장 → MCP 선택창을 띄우지 않고 그 자리에서 게시', async () => {
-    const asked: unknown[] = [];
-    const { deps, proposals } = savingDeps(async () => 'save');
-    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
+  // ★★순서가 핵심(2026-07-27 사용자 지적): 사용자는 지금 이 MCP 클라이언트 앞에 앉아 있다.
+  // Engram 앱이 깔려 있다는 이유로 앱 창에 띄우면, 다른 화면을 보고 있는 사람에겐 아무것도 안 뜬
+  // 것과 같다. 클라이언트가 물을 수 있으면 **반드시 거기서** 묻는다.
+  it('클라이언트가 먼저 묻는다 — 앱이 떠 있어도 앱 카드는 뜨지 않는다', async () => {
+    const appAsked: number[] = [];
+    const clientAsked: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => { appAsked.push(1); return 'save'; });
+    const c = await elicitingClient(deps, (p) => { clientAsked.push(p); return accept(p); });
     const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
-    expect(asked).toEqual([]); // 앱이 물었으니 MCP 선택창은 안 뜬다(중복 질문 금지)
+    expect(clientAsked).toHaveLength(1); // 사용자가 보고 있는 창에 떴다
+    expect(appAsked).toEqual([]);        // 앱 카드는 끼어들지 않는다
     expect(proposals.approve).toHaveBeenCalledWith('p-app');
     expect(out).toContain('saved to the Engram wiki');
     await c.close();
   });
 
-  it('앱 카드에서 취소 → 제안조차 만들지 않는다', async () => {
+  it('클라이언트가 못 물을 때만 앱 카드가 묻는다(저장 → 그 자리에서 게시)', async () => {
+    const { deps, proposals } = savingDeps(async () => 'save');
+    const s = await connectedSession(deps); // elicitation 미선언 = 물을 수 없는 클라이언트
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
+    await s.close();
+  });
+
+  it('클라이언트가 못 물고 앱 카드에서 취소 → 제안조차 만들지 않는다', async () => {
     const { deps, proposals, propose } = savingDeps(async () => 'cancel');
-    const c = await elicitingClient(deps, accept);
-    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    const s = await connectedSession(deps);
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
     expect(propose).not.toHaveBeenCalled();
     expect(proposals.approve).not.toHaveBeenCalled();
     expect(out.toLowerCase()).toContain('declined');
-    await c.close();
+    await s.close();
   });
 
-  // 앱 창이 없어 못 물었으면 물어볼 기회를 버리지 않는다 — 클라이언트 선택창으로 이어간다.
-  it('앱 카드가 unavailable(창 없음) → MCP 선택창으로 이어간다', async () => {
-    const asked: unknown[] = [];
+  // 양쪽 다 못 물으면(클라이언트 미지원 + 앱 창 없음) 승인함에 남긴다 — 조용히 게시하지 않는다.
+  it('클라이언트도 앱도 못 물으면 승인함에 남는다', async () => {
     const { deps, proposals } = savingDeps(async () => 'unavailable');
-    const c = await elicitingClient(deps, (p) => { asked.push(p); return accept(p); });
-    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
-    expect(asked).toHaveLength(1);
-    expect(proposals.approve).toHaveBeenCalledWith('p-app');
-    expect(out).toContain('saved to the Engram wiki');
-    await c.close();
+    const s = await connectedSession(deps);
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(proposals.approve).not.toHaveBeenCalled();
+    expect(out).toContain('queued');
+    await s.close();
   });
 
   // 브리지가 이미 사람에게 물어 승인받았으면(접속 이름으로 알림) 앱도 클라도 다시 묻지 않는다.

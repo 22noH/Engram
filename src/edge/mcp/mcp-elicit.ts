@@ -1,5 +1,6 @@
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import type { ElicitRequestFormParams } from '@modelcontextprotocol/sdk/types.js';
+import type { ElicitRequestFormParams, ElicitResult } from '@modelcontextprotocol/sdk/types.js';
+import { ElicitResultSchema } from '@modelcontextprotocol/sdk/types.js';
 
 // MCP elicitation 기반 "저장 전 사람 승인"(2026-07-25).
 //
@@ -151,16 +152,50 @@ export function saveConfirmParams(req: WikiSaveRequest): ElicitRequestFormParams
   };
 }
 
-// elicitation 지원 여부(capability 협상 결과). form 모드만 쓴다 — url 모드만 선언한 클라이언트는
-// SDK elicitInput이 throw하므로 여기서 미리 거른다.
-function supportsFormElicitation(server: Pick<Server, 'getClientCapabilities'>): boolean {
-  const caps = server.getClientCapabilities() as { elicitation?: { form?: unknown } } | undefined;
-  return !!caps?.elicitation?.form;
+// ★회귀 수정 3탄(2026-07-27) — "빈 elicitation 선언 = form 지원"이다.
+//
+// 실사고: 클로드 데스크톱(Claude Code)에서 wiki_propose를 부르면 승인창이 **엔그램 앱에** 떴다.
+// 사용자가 원한 건 부른 쪽(클로드) 화면이었다. 원인은 여기 판정이었다 — 클로드는 initialize에서
+// `elicitation: {}`(하위 키 없음)로 선언하는데, 우리는 `.form`이 있어야만 지원으로 봤다.
+// 그래서 요청조차 보내지 않고 'unavailable'로 떨어졌고, 상류가 앱 저장 카드를 띄웠다.
+//
+// 사양: mode(form/url)는 나중에 붙은 확장이다. 하위 키 없는 `elicitation:{}`는 **원래(form)**
+// 방식 지원을 뜻한다 — 클로드의 수신부도 정확히 그렇게 읽는다(form!==undefined || (!form && !url)).
+// url만 선언한 클라이언트만 form 미지원이다.
+//
+// 그런데 SDK의 elicitInput(form)은 `.form`을 요구하며 throw한다(SDK가 사양보다 엄격). 그래서
+// 빈 선언일 때는 SDK 헬퍼를 우회해 elicitation/create를 직접 보낸다 — SDK의 capability 검사도
+// 그 메서드엔 `elicitation`이 있기만 하면 통과시킨다(server/index.js의 assertCapability).
+type FormElicit = 'sdk' | 'raw' | 'none';
+
+export function formElicitationMode(server: Pick<Server, 'getClientCapabilities'>): FormElicit {
+  const el = (server.getClientCapabilities() as { elicitation?: { form?: unknown; url?: unknown } } | undefined)
+    ?.elicitation;
+  if (!el) return 'none';
+  if (el.form !== undefined) return 'sdk';
+  if (el.url !== undefined) return 'none'; // url 전용 = form 미지원
+  return 'raw';
+}
+
+type ElicitServer = Pick<Server, 'getClientCapabilities' | 'elicitInput' | 'request'>;
+
+// form elicitation 1회. 물어볼 수 없으면 null(=기존 경로). 예외는 호출자가 흡수한다.
+async function elicitForm(
+  server: ElicitServer,
+  params: ElicitRequestFormParams,
+  timeout: number,
+): Promise<ElicitResult | null> {
+  const mode = formElicitationMode(server);
+  if (mode === 'none') return null;
+  // 진행 알림으로 타임아웃이 무한 연장되지 않게(무한대기 절대 금지).
+  const opts = { timeout, resetTimeoutOnProgress: false };
+  if (mode === 'sdk') return server.elicitInput(params, opts);
+  return server.request({ method: 'elicitation/create', params }, ElicitResultSchema, opts);
 }
 
 // 저장 확정 전 사용자 승인 요청. never-throw — 어떤 실패도 'unavailable'(기존 경로)로 흡수한다.
 export async function confirmWikiSave(
-  server: Pick<Server, 'getClientCapabilities' | 'elicitInput'>,
+  server: ElicitServer,
   req: WikiSaveRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SaveConfirm> {
@@ -169,14 +204,10 @@ export async function confirmWikiSave(
   // 아니라는 원칙 그대로, 이미 사람 게이트가 있는 경로에 두 번째 게이트를 얹지 않는다.
   if (isEngramAppCall(env)) return 'unavailable';
   if (isElicitationDisabled(server)) return 'unavailable';
-  if (!supportsFormElicitation(server)) return 'unavailable';
   const startedAt = Date.now();
   try {
-    const result = await server.elicitInput(saveConfirmParams(req), {
-      timeout: elicitTimeoutMs(env),
-      // 진행 알림으로 타임아웃이 무한 연장되지 않게(무한대기 절대 금지).
-      resetTimeoutOnProgress: false,
-    });
+    const result = await elicitForm(server, saveConfirmParams(req), elicitTimeoutMs(env));
+    if (result === null) return 'unavailable';
     if (result.action === 'accept') {
       const decision = result.content?.decision;
       // 스키마상 'save' | 'cancel'. 값이 없으면(느슨한 클라이언트) accept=승인으로 본다.
@@ -260,18 +291,15 @@ export function settingConfirmParams(req: SettingChangeRequest): ElicitRequestFo
 
 // never-throw. 'unavailable'은 "물어볼 수 없었다"이며, 설정 경로에선 곧 거부 사유가 된다.
 export async function confirmSettingChange(
-  server: Pick<Server, 'getClientCapabilities' | 'elicitInput'>,
+  server: ElicitServer,
   req: SettingChangeRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SaveConfirm> {
   if (env[ELICIT_OFF_ENV]) return 'unavailable';
   if (isElicitationDisabled(server)) return 'unavailable';
-  if (!supportsFormElicitation(server)) return 'unavailable';
   try {
-    const result = await server.elicitInput(settingConfirmParams(req), {
-      timeout: elicitTimeoutMs(env),
-      resetTimeoutOnProgress: false,
-    });
+    const result = await elicitForm(server, settingConfirmParams(req), elicitTimeoutMs(env));
+    if (result === null) return 'unavailable';
     if (result.action === 'accept') {
       // 값이 없으면(느슨한 클라이언트) 승인으로 보지 않는다 — 설정 변경은 명시 승인만 인정.
       return result.content?.decision === 'change' ? 'accept' : 'decline';
