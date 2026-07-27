@@ -44,6 +44,7 @@ export class WikiEngine {
   //   엔진 자신의 쓰기 경로는 그 위에 명시적 invalidate까지 건다(같은 ms·같은 크기 재작성 대비).
   //   쓰기 경로(update/edit/publish/delete)가 읽는 건 여전히 캐시 없는 getPage다 — lost-update 위험 0.
   private readonly listCache = new Map<string, { key: string; page: WikiPage }>();
+  private loggedDir = false; // 진단 지문을 프로세스당 한 번만 찍기 위한 플래그(위 listPages 주석).
 
   private invalidate(slug: string, userId: string): void {
     this.listCache.delete(this.pagePath(slug, userId));
@@ -163,6 +164,13 @@ export class WikiEngine {
       throw err;
     }
     const slugs = files.filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
+    // ★계측(2026-07-27 미제 사건): 디스크엔 13개인데 앱만 2개로 보던 일이 있었다. 밖에서 같은
+    // 폴더를 읽으면 13개가 나와 "어느 경로를 읽고 몇 개를 봤나"를 앱 자신이 말하게 해야 갈린다.
+    // 프로세스당 한 줄만 — 상시 로그가 아니라 진단 지문이다.
+    if (!this.loggedDir) {
+      this.loggedDir = true;
+      console.warn(`[wiki] pages dir: ${dir} — ${files.length} entries, ${slugs.length} .md`);
+    }
     // 병렬 읽기 — 순차 await는 페이지 수만큼 디스크 왕복을 직렬로 쌓는다(측정 근거는 listCache 주석).
     const read = await Promise.all(slugs.map((s) => this.readForList(s, userId)));
     // 사라진 파일의 캐시 항목 정리(이 디렉터리 범위만) — 안 지우면 맵이 계속 커진다.
