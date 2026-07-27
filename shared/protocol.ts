@@ -81,7 +81,7 @@ export interface AttachmentMeta { id: string; name: string; mime: string; size: 
 
 // 위키 저장 확인 카드에 필요한 것만(본문 전체를 보내지 않는다 — preview는 서버가 잘라서 준다).
 // targetSlug 있으면 그 페이지에 이어붙이기, 없으면 새 페이지. bytes는 원본 본문 크기(잘리기 전).
-export interface WikiSaveAsk { id: string; title: string; targetSlug?: string; preview: string; bytes: number }
+export interface WikiSaveAsk { id: string; title: string; targetSlug?: string; category?: string; preview: string; bytes: number }
 
 export interface QuestionOption { label: string; desc?: string; recommended?: boolean }
 export interface QuestionItem { q: string; header?: string; multiSelect?: boolean; options: QuestionOption[] }

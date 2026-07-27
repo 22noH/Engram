@@ -74,6 +74,8 @@ export const T = {
   wikiCancel: ko ? '취소' : 'Cancel',
   wikiDeleteConfirm: ko ? '이 페이지를 영구 삭제합니다. 되돌릴 수 없습니다. 계속할까요?' : 'Permanently delete this page? This cannot be undone.',
   // 저장 확인 카드(목업 B, 2026-07-26) — 앱이 떠 있는 동안의 모든 저장이 이 카드로 묻는다.
+  // 폴더 트리(2026-07-27) — 분류가 없는 페이지가 모이는 칸.
+  wikiUnsorted: ko ? '미분류' : 'Unsorted',
   wikiSaveEyebrow: ko ? '엔그램 위키' : 'Engram wiki',
   wikiSaveAppend: ko ? '이어붙이기' : 'Append',
   wikiSaveNew: ko ? '새 페이지' : 'New page',

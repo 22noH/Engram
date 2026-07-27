@@ -3,7 +3,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema
 import { McpProposalsDeps } from './mcp-proposals';
 import { confirmSettingChange, confirmWikiSave, declinedText } from './mcp-elicit';
 import type { McpSettingsPort } from './mcp-settings';
-import { normalizeCategoryPath } from '../../knowledge-core/wiki/category-path';
+import { normalizeCategoryPath } from '../../../shared/category-path';
 import type { BrowserOp, BrowserOpResult } from '../../../shared/browser-ops';
 import { BROWSER_TOOL_DEFS, CHANNEL_ARG, isBrowserToolName, toBrowserOp } from '../../../shared/browser-ops';
 
@@ -34,7 +34,7 @@ export interface McpDeps {
   // 앱이 자기 UI로 "저장할까요?"를 묻는 경로(2026-07-26). 앱이 떠 있을 때만 주입된다(self.adapter).
   // MCP elicitation을 못 쓰는 두 경로 — 앱 두뇌(헤드리스 claude가 6ms에 cancel)와 stateless /mcp —
   // 가 이걸로 묻는다. 'unavailable'(창 없음·타임아웃)이면 기존대로 승인함 폴백.
-  confirmSave?: ((req: { title: string; targetSlug?: string; body: string }) => Promise<'save' | 'cancel' | 'unavailable'>) | null;
+  confirmSave?: ((req: { title: string; targetSlug?: string; category?: string; body: string }) => Promise<'save' | 'cancel' | 'unavailable'>) | null;
   // 페이지를 다른 폴더로 옮긴다(2026-07-27). 분류는 위키 내용에서 나오는 것이라, 이미 쌓인 페이지도
   // 두뇌가 읽고 정리할 수 있어야 한다 — 그 통로가 지금까지 MCP에도 ws에도 없었다.
   recategorize?: ((slug: string, category: string) => Promise<string>) | null;
@@ -350,7 +350,13 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
     confirm = 'accept';
   } else {
     const viaApp = deps.confirmSave
-      ? await deps.confirmSave({ title, ...(input.slug ? { targetSlug: input.slug } : {}), body: content })
+      ? await deps.confirmSave({
+          title,
+          ...(input.slug ? { targetSlug: input.slug } : {}),
+          // 카드가 "어느 폴더로 들어가는지"까지 보여줘야 승인이 의미가 있다(목업 승인 2026-07-27).
+          ...(normalizeCategoryPath(input.category) ? { category: normalizeCategoryPath(input.category)! } : {}),
+          body: content,
+        })
       : 'unavailable';
     confirm = viaApp === 'save' ? 'accept'
       : viaApp === 'cancel' ? 'decline'

@@ -34,3 +34,16 @@ describe('WikiSaveCard', () => {
     expect(calls).toEqual([['save-1', 'cancel']]);
   });
 });
+
+// 분류 줄(목업 승인 2026-07-27) — 어느 폴더로 들어가는지 모르고 승인하면 안 된다.
+describe('WikiSaveCard 분류', () => {
+  it('분류가 있으면 폴더 경로를 보여준다', () => {
+    render(<WikiSaveCard ask={{ ...base, category: '개발/릴리스' }} onAnswer={() => {}} />);
+    expect(document.querySelector('.wsFolder')?.textContent).toBe('개발 / 릴리스');
+  });
+
+  it('분류가 없으면 조용히 넘기지 않고 미분류라고 알린다', () => {
+    render(<WikiSaveCard ask={base} onAnswer={() => {}} />);
+    expect(document.querySelector('.wsFolder')?.textContent).toMatch(/unsorted|미분류/i);
+  });
+});

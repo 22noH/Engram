@@ -1,6 +1,6 @@
 import type { NewProposal, Proposal } from '../../knowledge-core/proposal-store';
 import { DEFAULT_USER } from '../../pal/path-resolver';
-import { categoryOrFallback } from '../../knowledge-core/wiki/category-path';
+import { categoryOrFallback } from '../../../shared/category-path';
 
 // MCP wiki_propose의 targetSlug 폴백(Phase 8c-2). ingester-agent.ts의 비공개 slugify(한글 유지)와
 // 달리 외부 MCP 클라이언트용이라 ascii 소문자-하이픈로 단순화. ★비ascii 전용 제목(한글 등)은

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import type { WikiPageMeta, WikiPageDto, ProposalDto, WikiSearchHit } from '../../../shared/protocol';
+import { buildCategoryTree, normalizeCategoryPath, CATEGORY_FALLBACK, type CategoryNode } from '../../../shared/category-path';
 import { renderMarkdown } from '../render/markdown';
 import { T } from '../i18n';
 import { ko } from '../config';
@@ -41,6 +42,10 @@ export function WikiArea(props: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 열린 폴더. 처음 페이지 목록이 도착할 때 최상위 폴더를 한 번 펼쳐 둔다 — 접힌 폴더만 잔뜩
+  // 보이면 위키가 비어 보인다. 그 뒤로는 사용자가 접고 펴는 대로만 따른다(자동 개입 없음).
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const seededFolders = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   // onSearch의 최신 참조(App이 매 렌더 새 콜백을 넘겨도 디바운스 effect를 재실행하지 않기 위함 — App의 ref 패턴).
   const onSearchRef = useRef(props.onSearch); onSearchRef.current = props.onSearch;
@@ -74,6 +79,20 @@ export function WikiArea(props: {
   const canAct = !!open && open.status === 'published'; // 게시 페이지만 대상
   const pendingCount = props.proposals.length;
 
+  useEffect(() => {
+    if (seededFolders.current || props.pages.length === 0) return;
+    seededFolders.current = true;
+    setOpenFolders(new Set(buildCategoryTree(props.pages.map((p) => p.category)).map((n) => n.path)));
+  }, [props.pages]);
+
+  const toggleFolder = (path: string) => {
+    setOpenFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -99,16 +118,16 @@ export function WikiArea(props: {
       <div className="wikiList">
         {tab === 'pages' && (
           q === '' ? (
-            props.pages.map((p) => (
-              <div key={p.slug} className={'pitem' + (open?.slug === p.slug ? ' sel' : '')} onClick={() => props.onOpenPage(p.slug)}>
-                <div className="t">{p.title}</div>
-                <div className="m">
-                  <StatusPill status={p.status} />
-                  <span className="cat">{p.category}</span>
-                  <span className="date">{formatDate(p.updated)}</span>
-                </div>
-              </div>
-            ))
+            // 폴더 트리(목업 승인 2026-07-27). 폴더는 고정 목록이 아니라 페이지들의 category에서
+            // 파생된다 — 위키 내용이 바뀌면 트리도 따라 바뀐다. 폴더가 곧 분류라 페이지 줄에서
+            // 분류 칩은 뺐다(같은 정보 두 번).
+            <FolderTree
+              pages={props.pages}
+              openSlug={open?.slug}
+              expanded={openFolders}
+              onToggle={toggleFolder}
+              onOpenPage={props.onOpenPage}
+            />
           ) : props.searchResults.length === 0 ? (
             <div className="empty">{T.wikiNoResults}</div>
           ) : (
@@ -195,6 +214,75 @@ export function WikiArea(props: {
       </div>
     </div>
   );
+}
+
+// ── 폴더 트리(목업 승인 2026-07-27) ────────────────────────────────────────────
+// 폴더는 페이지들의 category에서 파생한다. 고정 목록이 아니라 위키가 실제로 갖게 된 것이라,
+// 내용이 바뀌면 트리도 바뀐다. 분류가 없는 페이지는 맨 아래 "미분류" 한 칸으로 모은다 —
+// 트리에서 사라지면 사용자는 페이지를 잃어버린 것으로 본다.
+const UNSORTED = CATEGORY_FALLBACK;
+
+function FolderTree(props: {
+  pages: WikiPageMeta[];
+  openSlug?: string;
+  expanded: Set<string>;
+  onToggle: (path: string) => void;
+  onOpenPage: (slug: string) => void;
+}) {
+  const byPath = new Map<string, WikiPageMeta[]>();
+  for (const p of props.pages) {
+    const key = normalizeCategoryPath(p.category) ?? UNSORTED;
+    const list = byPath.get(key);
+    if (list) list.push(p); else byPath.set(key, [p]);
+  }
+  const roots = buildCategoryTree(props.pages.map((p) => p.category));
+  // 미분류는 항상 맨 아래 — 정리된 폴더들이 먼저 보여야 한다.
+  const ordered = [...roots.filter((n) => n.path !== UNSORTED), ...roots.filter((n) => n.path === UNSORTED)];
+
+  const rows: ReactElement[] = [];
+  const walk = (nodes: CategoryNode[], depth: number): void => {
+    for (const node of nodes) {
+      const isOpen = props.expanded.has(node.path);
+      const total = countPages(node);
+      rows.push(
+        <div
+          key={`f:${node.path}`}
+          className={'wfolder' + (isOpen ? ' open' : '')}
+          style={{ paddingLeft: 10 + depth * 12 }}
+          onClick={() => props.onToggle(node.path)}
+        >
+          <span className="tw">{isOpen ? '▾' : '▸'}</span>
+          <span className="fname">{node.path === UNSORTED ? T.wikiUnsorted : node.name}</span>
+          <span className="fcount">{total}</span>
+        </div>,
+      );
+      if (!isOpen) continue;
+      walk(node.children, depth + 1);
+      for (const p of byPath.get(node.path) ?? []) {
+        rows.push(
+          <div
+            key={`p:${p.slug}`}
+            className={'pitem' + (props.openSlug === p.slug ? ' sel' : '')}
+            style={{ paddingLeft: 10 + (depth + 1) * 12 }}
+            onClick={() => props.onOpenPage(p.slug)}
+          >
+            <div className="t">{p.title}</div>
+            <div className="m">
+              <StatusPill status={p.status} />
+              <span className="date">{formatDate(p.updated)}</span>
+            </div>
+          </div>,
+        );
+      }
+    }
+  };
+  walk(ordered, 0);
+  return <>{rows}</>;
+}
+
+// 폴더가 품은 전체 페이지 수(하위 폴더 포함) — 접힌 폴더의 숫자가 실제보다 작아 보이면 안 된다.
+function countPages(node: CategoryNode): number {
+  return node.count + node.children.reduce((sum, c) => sum + countPages(c), 0);
 }
 
 // 제안 본문 미리보기 — 검증된 마크다운 빌더 재사용(XSS 안전).

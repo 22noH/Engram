@@ -222,3 +222,54 @@ describe('WikiArea', () => {
     expect(wikiArea!.querySelector('.wikiSearch')).toBeNull();
   });
 });
+
+// 폴더 트리(목업 승인 2026-07-27) — 폴더는 고정 목록이 아니라 페이지들의 category에서 파생한다.
+describe('WikiArea 폴더 트리', () => {
+  const page = (slug: string, category: string, title = slug): WikiPageMeta =>
+    ({ slug, title, category, status: 'published', updated: '2026-07-26T00:00:00Z' });
+
+  function renderTree(pages: WikiPageMeta[]) {
+    const opened: string[] = [];
+    render(
+      <WikiArea
+        pages={pages} openPage={null} proposals={[]} searchResults={[]}
+        canApprove={false} canUnpublish={false} canEdit={false} canDelete={false}
+        onOpenPage={(s) => opened.push(s)} onApprove={() => {}} onReject={() => {}}
+        onUnpublish={() => {}} onEdit={() => {}} onDelete={() => {}} onSearch={() => {}}
+      />,
+    );
+    return opened;
+  }
+
+  it('카테고리에서 폴더가 나오고, 최상위는 처음부터 펼쳐져 페이지가 보인다', () => {
+    renderTree([page('a', '릴리스', '릴리스 사고'), page('b', '릴리스', '두 번째'), page('c', 'MCP 연동')]);
+    expect(screen.getByText('릴리스')).toBeTruthy();
+    expect(screen.getByText('MCP 연동')).toBeTruthy();
+    expect(screen.getByText('릴리스 사고')).toBeTruthy(); // 펼쳐진 상태라 페이지가 보인다
+  });
+
+  it('폴더를 누르면 접히고 그 안 페이지가 사라진다', () => {
+    renderTree([page('a', '릴리스', '릴리스 사고')]);
+    fireEvent.click(screen.getByText('릴리스'));
+    expect(screen.queryByText('릴리스 사고')).toBeNull();
+  });
+
+  it('페이지를 누르면 onOpenPage(slug)', () => {
+    const opened = renderTree([page('a', '릴리스', '릴리스 사고')]);
+    fireEvent.click(screen.getByText('릴리스 사고'));
+    expect(opened).toEqual(['a']);
+  });
+
+  it('분류 없는 페이지는 미분류 칸으로 모인다(트리에서 사라지지 않는다)', () => {
+    renderTree([page('a', 'external', '이름 없는 것'), page('b', '릴리스')]);
+    expect(screen.getByText(/unsorted|미분류/i)).toBeTruthy();
+    expect(screen.getByText('이름 없는 것')).toBeTruthy();
+  });
+
+  it('폴더 숫자는 하위 폴더까지 합쳐 센다(접었을 때 실제보다 작아 보이면 안 된다)', () => {
+    renderTree([page('a', '개발/릴리스'), page('b', '개발/MCP'), page('c', '개발')]);
+    const root = document.querySelector('.wfolder') as HTMLElement;
+    expect(root.textContent).toContain('개발');
+    expect(root.querySelector('.fcount')?.textContent).toBe('3');
+  });
+});

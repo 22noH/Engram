@@ -18,6 +18,9 @@ export function WikiSaveCard(props: {
       </div>
       <div className="wsTitle">{ask.title}</div>
       <div className="wsMeta">{(ask.targetSlug ? T.wikiSaveTargetAppend(ask.targetSlug) : T.wikiSaveTargetNew) + ' · ' + kb}</div>
+      {/* 어느 폴더로 들어가는지(목업 승인 2026-07-27). 분류가 없으면 줄 자체를 빼지 않고 미분류로
+          알린다 — 조용히 미분류로 쌓이는 게 지금 위키가 한 통이 된 이유다. */}
+      <div className="wsFolder">{ask.category ? ask.category.split('/').join(' / ') : T.wikiUnsorted}</div>
       <div className="wsPreview">{ask.preview}</div>
       <div className="wsActions">
         <button type="button" className="wsSave" onClick={() => props.onAnswer(ask.id, 'save')}>{T.wikiSaveConfirm}</button>

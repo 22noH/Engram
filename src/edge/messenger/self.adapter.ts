@@ -323,7 +323,7 @@ export class SelfMessenger implements MessengerPort {
   private pendingSaves = new Map<string, (d: SaveAnswer) => void>();
   private saveAskSeq = 0;
 
-  async askWikiSave(req: { title: string; targetSlug?: string; body: string }): Promise<SaveAnswer> {
+  async askWikiSave(req: { title: string; targetSlug?: string; category?: string; body: string }): Promise<SaveAnswer> {
     const open = [...(this.wss?.clients ?? [])].filter((c) => c.readyState === WebSocket.OPEN && this.isConnected(c));
     if (open.length === 0) return 'unavailable'; // 볼 사람이 없는 카드는 띄우지 않는다
     const id = `save-${++this.saveAskSeq}`;
@@ -332,6 +332,7 @@ export class SelfMessenger implements MessengerPort {
       id,
       title: req.title,
       ...(req.targetSlug ? { targetSlug: req.targetSlug } : {}),
+      ...(req.category ? { category: req.category } : {}),
       preview: body.length > SAVE_PREVIEW_CHARS ? `${body.slice(0, SAVE_PREVIEW_CHARS)}…` : body,
       bytes: Buffer.byteLength(body, 'utf8'),
     };
