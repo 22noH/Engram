@@ -33,6 +33,19 @@ git tag v0.0.16 && git push origin v0.0.16
 - ⚠️`isEngramAppCall` 건너뛰기를 **지우지 마라** — 앱 카드로 교체한 것이다. 지우면 07-25 회귀(앱 저장 전면 불가)가 재발한다.
 - ⚠️앱 UI를 MCP 설명에 섞지 마라 — 플러그인만 쓰는 사용자에겐 앱이 없다.
 
+## 해결된 미제 — "위키가 2장만 보인다"(2026-07-27)
+
+**Engram 버그가 아니었다.** 위키가 물리적으로 두 벌로 갈라져 있었다.
+
+- 진짜 `%APPDATA%\engram\wiki\pages\default` → 2장. 앱은 이걸 정확히 읽고 있었다.
+- Claude 데스크톱 MSIX 컨테이너(`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\engram\...`) → 나머지 11장.
+- 원인: `npx engram-wiki-mcp`는 앱이 꺼져 있으면 **코어 모드로 자기가 직접 쓴다**. 그 프로세스가 패키지 컨테이너 안에서 돌면 Windows가 `%APPDATA%` 쓰기를 컨테이너로 리디렉션한다. 앱이 떠 있을 때 저장한 2장만 브리지를 타고 앱이 직접 써서 진짜 폴더에 남았다.
+- 두 저장소의 `wiki/.git` 이력이 공통 조상 없이 분리돼 있었고 진짜 쪽엔 **delete 커밋이 0** — 지워진 게 아니라 애초에 없었다는 증거.
+
+⚠️**조사할 때 반드시**: 에이전트 셸은 그 컨테이너 안에서 돌아 `%APPDATA%`를 **합쳐진 뷰**(진짜+오버레이)로 본다. 디스크 나열을 진실로 믿지 마라. 진짜는 UNC로 본다 — `Get-ChildItem "\\localhost\C$\Users\...\AppData\Roaming\engram\..."`. `dangerouslyDisableSandbox`로도 안 바뀐다(에이전트 샌드박스≠패키지 정체성).
+
+조치: 11장은 UNC 경로로 진짜 폴더에 복사해 회수(앱이 13장 확인). 컨테이너 원본은 백업으로 남겨둠. 재발 방지로 `src/knowledge-core/wiki/split-store.ts`가 부팅 때 갈라진 저장소를 찾아 양쪽 경로·장수를 로그에 남긴다(앱·헤드리스 둘 다).
+
 ## 1순위 — 미제 버그
 
 ### `code=1` 백엔드 크래시 (최우선)
