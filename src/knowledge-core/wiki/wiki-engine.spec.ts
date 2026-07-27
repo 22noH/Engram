@@ -124,6 +124,12 @@ describe('WikiEngine 상태(draft/published)', () => {
 // wikiChanged가 올 때마다 그 비용을 통째로 다시 냈다. mtime+size 캐시로 "안 바뀐 파일은 다시 안 읽는다".
 // 아래 테스트는 그 비용(=readFile 호출 수)과, 캐시가 절대 낡은 값을 주지 않음을 함께 못박는다.
 describe('WikiEngine listPages 캐시', () => {
+  // ★여기서부터 이 파일의 기본 타임아웃을 올린다(jest.setTimeout은 블록이 아니라 파일 스코프다).
+  // 이 파일의 테스트는 페이지마다 실제 git 커밋을 남긴다(createPage/editPage/deletePage → commitAll).
+  // 느린 CI 러너에서는 git init + 커밋 두어 번이 jest 기본 5초를 넘긴다 — 실제로 v0.0.20 윈도우 잡이
+  // 이걸로 죽어 릴리스가 반쪽으로 막혔다(로컬 격리 3회는 전부 통과 — 로직 경합이 아니라 I/O 속도).
+  jest.setTimeout(30_000);
+
   it('두 번째 listPages는 안 바뀐 페이지를 다시 읽지 않는다', async () => {
     const engine = await makeEngine();
     for (const s of ['a', 'b', 'c']) {
