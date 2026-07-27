@@ -80,3 +80,31 @@ describe('makeMcpPropose', () => {
     expect(store.last().verdict.reason).toBe('external MCP client proposal');
   });
 });
+
+// 분류 경로(2026-07-27) — 그동안 전부 'external' 한 통에 몰려 사실상 분류가 없었다.
+describe('makeMcpPropose 분류(category)', () => {
+  const engine = { getPage: async () => null };
+  const capture = () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const store = { enqueue: async (p: Record<string, unknown>) => { seen.push(p); return { id: 'p1' } as never; } };
+    return { seen, store };
+  };
+
+  it('넘긴 분류가 정규화돼 저장된다', async () => {
+    const { seen, store } = capture();
+    await makeMcpPropose(engine as never, store as never)({ title: 'T', content: 'C', category: '/Engram//Release/' });
+    expect(seen[0].category).toBe('Engram/Release');
+  });
+
+  it('미지정이면 기존대로 external(회귀 0)', async () => {
+    const { seen, store } = capture();
+    await makeMcpPropose(engine as never, store as never)({ title: 'T', content: 'C' });
+    expect(seen[0].category).toBe('external');
+  });
+
+  it('경로 이탈 시도는 걸러진다', async () => {
+    const { seen, store } = capture();
+    await makeMcpPropose(engine as never, store as never)({ title: 'T', content: 'C', category: '../../etc' });
+    expect(seen[0].category).toBe('etc');
+  });
+});

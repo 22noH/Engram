@@ -171,10 +171,20 @@ export class WikiEngine {
     for (const k of this.listCache.keys()) if (k.startsWith(prefix) && !live.has(k)) this.listCache.delete(k);
 
     const pages: WikiPage[] = [];
-    for (const page of read) {
-      if (!page) continue;
-      if (filter?.status && page.frontmatter.status !== filter.status) continue;
+    const dropped: string[] = [];
+    read.forEach((page, i) => {
+      // ★조용히 버리지 마라(2026-07-27 실사고). 디렉터리엔 .md가 13개 있는데 목록엔 2개만 나오던
+      // 사건에서, 이 자리가 아무 흔적도 안 남겨 원인 추적에 한 시간이 들었다. 여기서 null은
+      // "파일이 사라졌다"(정상적인 경합)거나 "읽을 수 없다"(비정상)인데, 후자를 알 길이 없었다.
+      // 목록에서 페이지가 사라지는 건 사용자에겐 데이터 유실로 보인다 — 반드시 흔적을 남긴다.
+      if (!page) { dropped.push(slugs[i]); return; }
+      if (filter?.status && page.frontmatter.status !== filter.status) return;
       pages.push(page);
+    });
+    if (dropped.length > 0) {
+      console.warn(
+        `[wiki] listPages: ${dropped.length}/${slugs.length} pages in ${dir} could not be read and were dropped: ${dropped.join(', ')}`,
+      );
     }
     return pages;
   }

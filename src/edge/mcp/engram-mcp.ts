@@ -11,7 +11,7 @@ export interface McpDeps {
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; snippet: string }>>;
   read(slug: string): Promise<{ title: string; content: string } | null>;
   list(): Promise<Array<{ slug: string; title: string; category?: string }>>;
-  propose(input: { slug?: string; title: string; content: string; reason?: string }): Promise<string>;
+  propose(input: { slug?: string; title: string; content: string; reason?: string; category?: string }): Promise<string>;
   askBrain: ((brain: string, task: string) => Promise<string>) | null;
   brainNames(): string[];
   // §3.3 확장 — 미주입/null이면 기존 도구 4/5종 그대로(회귀 0). proposals=공용 승인 어댑터(mcp-proposals.ts)
@@ -126,6 +126,7 @@ const WIKI_PROPOSE_TOOL: Tool = {
       title: { type: 'string' },
       content: { type: 'string' },
       slug: { type: 'string', description: 'optional — slug of an existing page to append to. Prefer this over creating a near-duplicate: search first (wiki_search), and if a page already covers this topic, pass its slug so the content is appended there instead of making a new page.' },
+      category: { type: 'string', description: "optional but strongly preferred — folder path this page belongs in, like \"engram/release\" or \"infra/networking\". Call wiki_list first and reuse an existing path when one fits; only invent a new one for a genuinely new area. Up to 3 levels. Omitting it dumps the page in the unsorted \"external\" folder." },
       reason: { type: 'string', description: 'optional — why this is being proposed' },
     },
     required: ['title', 'content'],
@@ -293,8 +294,9 @@ async function callWikiList(deps: McpDeps): Promise<CallToolResult> {
 async function callWikiPropose(server: Server, deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
   const title = typeof args.title === 'string' ? args.title : '';
   const content = typeof args.content === 'string' ? args.content : '';
-  const input: { slug?: string; title: string; content: string; reason?: string } = { title, content };
+  const input: { slug?: string; title: string; content: string; reason?: string; category?: string } = { title, content };
   if (typeof args.slug === 'string') input.slug = args.slug;
+  if (typeof args.category === 'string') input.category = args.category;
   if (typeof args.reason === 'string') input.reason = args.reason;
   // ★저장 확정 전 사람 승인(elicitation) — 미지원·실패·타임아웃이면 unavailable로 떨어져
   // 아래 기존 경로가 그대로 돈다(mcp-elicit.ts 주석 참조).
@@ -435,7 +437,7 @@ const PROMPTS: EngramPrompt[] = [
 // (context7·supabase 등과 같은 관례). 설치만 하면 "먼저 저장 제안→채팅 동의=승인" 흐름이 기본이 된다.
 export const ENGRAM_MCP_INSTRUCTIONS = [
   "Engram is the user's personal knowledge wiki. When a question may be covered by it, search first (wiki_search, then wiki_read) and answer from what the wiki actually says.",
-  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), call wiki_propose. Do NOT ask "save this?" in chat first — wiki_propose asks the user itself, in a dialog, and that dialog is the one and only place that question gets asked. Asking in chat as well just makes the user answer the same question twice. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page.',
+  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), call wiki_propose. Do NOT ask "save this?" in chat first — wiki_propose asks the user itself, in a dialog, and that dialog is the one and only place that question gets asked. Asking in chat as well just makes the user answer the same question twice. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page. Also pass a category: call wiki_list to see the folder paths already in use and reuse the one that fits, inventing a new short path only for a genuinely new area — pages saved without a category all pile up unsorted.',
   'When the user accepts that dialog the page is saved right then — wiki_propose finishes the job and tells you so. Do not call approve_proposal afterwards and do not ask the user anything else about it; one approval means saved. Only when the dialog could not be shown does wiki_propose leave the item queued, and it says so; those queued items are reviewed in chat with list_proposals and approved with approve_proposal for whichever one the user names.',
 ].join('\n\n');
 

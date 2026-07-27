@@ -1,5 +1,6 @@
 import type { NewProposal, Proposal } from '../../knowledge-core/proposal-store';
 import { DEFAULT_USER } from '../../pal/path-resolver';
+import { categoryOrFallback } from '../../knowledge-core/wiki/category-path';
 
 // MCP wiki_propose의 targetSlug 폴백(Phase 8c-2). ingester-agent.ts의 비공개 slugify(한글 유지)와
 // 달리 외부 MCP 클라이언트용이라 ascii 소문자-하이픈로 단순화. ★비ascii 전용 제목(한글 등)은
@@ -17,7 +18,7 @@ export function slugifyMcpTitle(title: string): string {
 export function makeMcpPropose(
   wiki: { getPage(slug: string): Promise<object | null> },
   proposals: { enqueue(p: NewProposal): Promise<Proposal> },
-): (input: { slug?: string; title: string; content: string; reason?: string }) => Promise<string> {
+): (input: { slug?: string; title: string; content: string; reason?: string; category?: string }) => Promise<string> {
   return async (input) => {
     const targetSlug = input.slug ?? slugifyMcpTitle(input.title);
     const existing = await wiki.getPage(targetSlug);
@@ -26,7 +27,9 @@ export function makeMcpPropose(
       op: existing ? 'append' : 'create',
       targetSlug,
       title: input.title,
-      category: 'external',
+      // 분류 경로(2026-07-27). 미지정·못 쓰는 값이면 기존 그대로 'external'(회귀 0) —
+      // 그동안 전부 여기로 몰려 사실상 분류가 없었다.
+      category: categoryOrFallback(input.category),
       payload: input.content,
       sources: ['mcp'],
       importance: 3,
