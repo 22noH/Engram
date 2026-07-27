@@ -804,6 +804,26 @@ describe('prompts (슬래시 명령 노출)', () => {
     await c.close();
   });
 
+  // 위키 정리(마이그레이션) — 폴더를 옮길 수 있을 때만 뜬다(도구 노출 조건과 같은 관례).
+  it('recategorize 주입 → organize 프롬프트가 뜨고, 내용에서 폴더를 뽑으라고 지시한다', async () => {
+    const c = await rawClient(makeDeps({ recategorize: jest.fn() }));
+    const { prompts } = await c.listPrompts();
+    expect(prompts.map((p) => p.name)).toContain('organize');
+    const got = await c.getPrompt({ name: 'organize', arguments: {} });
+    const text = got.messages.map((m) => (typeof m.content === 'object' && 'text' in m.content ? m.content.text : '')).join('\n');
+    expect(text).toContain('wiki_list');
+    expect(text).toContain('wiki_recategorize');
+    expect(text.toLowerCase()).toContain('do not edit page titles or bodies');
+    await c.close();
+  });
+
+  it('recategorize 미주입 → organize 프롬프트 없음(할 수 없는 걸 권하지 않는다)', async () => {
+    const c = await rawClient(makeDeps());
+    const { prompts } = await c.listPrompts();
+    expect(prompts.map((p) => p.name)).not.toContain('organize');
+    await c.close();
+  });
+
   it('getPrompt: 인자가 지시문에 치환되고 해당 도구 이름을 언급한다', async () => {
     const c = await rawClient(makeDeps());
     const r = await c.getPrompt({ name: 'wiki-search', arguments: { query: 'deploy-steps' } });

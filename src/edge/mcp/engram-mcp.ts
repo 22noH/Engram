@@ -454,6 +454,21 @@ const PROMPTS: EngramPrompt[] = [
     args: [{ name: 'topic', description: 'optional — what to save; defaults to the key insight of the conversation', required: false }],
     text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body). Before submitting, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass its slug to wiki_propose so your note is appended there instead of creating a duplicate; otherwise submit without a slug to create a new page. Then tell the user the proposal id and that a human must approve it before it appears in the wiki.`,
   },
+  // 위키 정리(마이그레이션, 2026-07-27). 도구는 이미 다 있었지만 "전체를 한 번에 정리해라"는
+  // 입구가 없어서 아무도 못 했다. 분류는 고정 목록이 아니라 지금 위키에 뭐가 들었느냐에서 나온다.
+  {
+    name: 'organize', description: 'Sort the whole Engram wiki into folders, derived from what it actually holds',
+    args: [{ name: 'hint', description: 'optional — how you want it grouped (e.g. "keep it coarse")', required: false }],
+    text: (a) => `Organize the Engram wiki into folders.
+
+1. Call wiki_list to get every page and the folders currently in use.
+2. Read the pages you are unsure about with wiki_read — decide by what a page is ABOUT, not by its slug.
+3. Work out a small set of broad folders that covers this wiki. Do not impose a generic taxonomy: the folders must come from the material in front of you, and a folder should hold several pages. Reuse folders that already exist rather than renaming them for style. Two levels only if one is genuinely too coarse.
+4. Call wiki_recategorize for each page that should move. Skip pages already in the right folder.
+5. Report the resulting folders with their page counts, and name any page you were unsure about.
+
+Do not edit page titles or bodies — only folders change.${a.hint ? `\n\nThe user asks: ${a.hint}` : ''}`,
+  },
   {
     name: 'proposals', description: 'Show pending Engram wiki proposals awaiting human review',
     args: [],
@@ -495,6 +510,8 @@ export function buildMcpServer(deps: McpDeps): Server {
     const prompts = PROMPTS.filter((p) => {
       if (p.name === 'proposals' || p.name === 'approve') return !!deps.proposals;
       if (p.name === 'config' || p.name === 'config-set') return !!deps.settings;
+      // 정리는 폴더를 옮길 수 있을 때만 의미가 있다(도구 노출 조건과 같은 관례).
+      if (p.name === 'organize') return !!deps.recategorize;
       return true;
     });
     return {
