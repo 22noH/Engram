@@ -1,11 +1,13 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import * as lancedb from '@lancedb/lancedb';
 import * as fs from 'fs/promises';
+import * as path from 'path';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
 import { PinoLogger } from '../../pal/logger';
 import { EMBEDDER, IEmbedder } from './embedder.port';
 import { chunkBody } from './chunker';
+import { IndexFingerprints, keyOf } from './index-fingerprint';
 import { IndexablePage, PageIndexer, SearchResult } from './rag.types';
 
 const TABLE = 'chunks';
@@ -124,6 +126,12 @@ export class RagStore implements PageIndexer {
     @Optional() private readonly logger?: PinoLogger,
   ) {}
 
+  // 지문 파일은 rag 폴더 옆(state)에 둔다 — 격리(rename)로 rag 폴더가 통째로 옮겨져도 같이 끌려가지
+  // 않아야, 격리 후 clear()로 명시적으로 버리는 흐름이 성립한다.
+  private fingerprints(): IndexFingerprints {
+    return new IndexFingerprints(path.join(this.paths.getStateDir(), 'rag-index.json'));
+  }
+
   async init(): Promise<void> {
     this.ready = false;
     // 주기 정비 카운터만 초기화한다. 재생성 상한(ftsRebuilds)·영구 디그레이드(ftsDegraded)는
@@ -174,6 +182,9 @@ export class RagStore implements PageIndexer {
       throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
     }
     this.logger?.warn(`손상 rag 폴더 격리 완료 → ${dest} — 빈 폴더에 재생성`, 'RagStore');
+    // 색인이 통째로 사라졌으니 지문도 버린다 — 안 버리면 "이미 색인됨"으로 오판해 빈 스토어를
+    // 그대로 두게 된다(검색이 조용히 아무것도 못 찾는 상태).
+    this.fingerprints().clear();
     await this.init(); // 격리된 빈 폴더 위에 새 스토어 생성(오픈 경로가 createEmptyTable로 진입).
   }
 
@@ -360,25 +371,40 @@ export class RagStore implements PageIndexer {
       this.logger?.warn(`RAG 디그레이드 상태 — 전체 재색인 스킵(${pages.length}건)`, 'RagStore');
       return;
     }
+    // ★안 바뀐 페이지는 건너뛴다(2026-07-27). 이전엔 부팅마다 전 페이지를 다시 임베딩했다 —
+    // 13장에 약 4분, 100장이면 30분, 그동안 백엔드가 응답을 못 한다. 지문이 전부 일치하면
+    // embedder.embed를 한 번도 부르지 않으므로 **2.1GB 모델조차 로드되지 않는다**.
+    const fp = this.fingerprints();
+    fp.load();
     let ok = 0;
     let seen = 0;
+    let skipped = 0;
+    let changed = false;
     for (const p of pages) {
-      try {
-        await this.indexPage(p);
-        ok++;
-      } catch (err) {
-        this.logger?.warn(
-          `전체 재색인 중 페이지 실패(건너뜀): ${p.slug} — ${err instanceof Error ? err.message : String(err)}`,
-          'RagStore',
-        );
+      const fpInput = { ...p, userId: p.userId ?? DEFAULT_USER };
+      if (fp.matches(fpInput)) {
+        skipped++;
+      } else {
+        try {
+          await this.indexPage(p);
+          fp.set(fpInput);
+          changed = true;
+          ok++;
+        } catch (err) {
+          this.logger?.warn(
+            `전체 재색인 중 페이지 실패(건너뜀): ${p.slug} — ${err instanceof Error ? err.message : String(err)}`,
+            'RagStore',
+          );
+        }
       }
       seen++;
       try { onProgress?.(seen, pages.length); } catch { /* 계측이 재색인을 막지 않게 */ }
     }
-    // 세션당 최소 1회 통합: 대량 쓰기 끝에서 한 번만 강제 정비한다(쓰기마다 부르지 않는 대신).
-    // 실패해도 maintainIndex가 흡수하므로 여기서 재색인이 실패로 뒤집히지 않는다.
-    await this.maintainIndex(true);
-    this.logger?.log(`전체 재색인 완료(${ok}/${pages.length}건)`, 'RagStore');
+    fp.keepOnly(new Set(pages.map((p) => keyOf({ ...p, userId: p.userId ?? DEFAULT_USER }))));
+    fp.save();
+    // 쓴 게 하나도 없으면 정비할 것도 없다 — 안 바뀐 부팅에서 통합만 도는 낭비를 막는다.
+    if (changed) await this.maintainIndex(true);
+    this.logger?.log(`전체 재색인 완료(색인 ${ok}건 · 그대로 ${skipped}건 / 총 ${pages.length}건)`, 'RagStore');
   }
 
   async search(query: string, limit = 5, userId: string = DEFAULT_USER): Promise<SearchResult[]> {

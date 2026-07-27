@@ -210,7 +210,48 @@ describe('RagStore', () => {
 
     expect(spy).toHaveBeenCalledTimes(3); // bad를 포함해 전부 시도됐다
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('bad'), 'RagStore');
-    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('2/3건'), 'RagStore');
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('색인 2건'), 'RagStore');
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('총 3건'), 'RagStore');
+  });
+
+  // ★2026-07-27 실사고: 부팅마다 전 페이지를 다시 임베딩했다 — 13장 약 4분, 100장이면 30분이고
+  // 그동안 백엔드가 이벤트 루프를 잡아 앱이 응답하지 못한다. 안 바뀐 페이지는 건너뛰어야 한다.
+  it('두 번째 reindexAll은 안 바뀐 페이지를 다시 색인하지 않는다(부팅 비용 0)', async () => {
+    const s = new RagStore(new PathResolver(dir), new FakeEmbedder());
+    await s.init();
+    const pages = [page('fp1', '첫째'), page('fp2', '둘째')];
+
+    await s.reindexAll(pages);
+    const spy = jest.spyOn(s, 'indexPage');
+    await s.reindexAll(pages);
+    expect(spy).not.toHaveBeenCalled(); // 임베딩은 물론 모델 로드도 일어나지 않는다
+    spy.mockRestore();
+  });
+
+  it('바뀐 페이지만 다시 색인한다', async () => {
+    const s = new RagStore(new PathResolver(dir), new FakeEmbedder());
+    await s.init();
+    await s.reindexAll([page('ch1', '그대로'), page('ch2', '바뀔 것')]);
+
+    const spy = jest.spyOn(s, 'indexPage');
+    await s.reindexAll([page('ch1', '그대로'), { ...page('ch2', '바뀔 것'), body: '본문이 바뀌었다' }]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].slug).toBe('ch2');
+    spy.mockRestore();
+  });
+
+  // 격리로 색인이 사라졌는데 지문이 남으면 "이미 됐다"로 오판해 빈 스토어를 그대로 둔다.
+  it('격리·재생성 후에는 전부 다시 색인한다', async () => {
+    const s = new RagStore(new PathResolver(dir), new FakeEmbedder());
+    await s.init();
+    const pages = [page('q1', '하나'), page('q2', '둘')];
+    await s.reindexAll(pages);
+
+    await s.quarantineAndReinit();
+    const spy = jest.spyOn(s, 'indexPage');
+    await s.reindexAll(pages);
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
   });
 
   it('재오픈 후 추가한 페이지도 검색된다(2회 init FTS stale 회귀)', async () => {
