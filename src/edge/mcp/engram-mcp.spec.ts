@@ -819,3 +819,42 @@ describe('prompts (슬래시 명령 노출)', () => {
     await c.close();
   });
 });
+
+// 폴더 이동(2026-07-27) — 분류는 위키 내용에서 나오므로 이미 쌓인 페이지도 옮길 수 있어야 한다.
+describe('wiki_recategorize', () => {
+  const withRecat = (recategorize: McpDeps['recategorize']) => makeDeps({ recategorize });
+
+  it('미주입이면 도구 자체가 안 뜬다(회귀 0)', async () => {
+    const s = await connectedSession(makeDeps());
+    const names = (await s.listToolDefs()).map((d) => d.name);
+    expect(names).not.toContain(T('wiki_recategorize'));
+    await s.close();
+  });
+
+  it('주입되면 도구가 뜨고, 정규화된 분류로 호출된다', async () => {
+    const calls: Array<[string, string]> = [];
+    const s = await connectedSession(withRecat(async (slug, category) => { calls.push([slug, category]); return `moved ${slug} to ${category}`; }));
+    const names = (await s.listToolDefs()).map((d) => d.name);
+    expect(names).toContain(T('wiki_recategorize'));
+    const out = await s.callTool(T('wiki_recategorize'), { slug: 'alpha', category: '/MCP 연동//' });
+    expect(calls).toEqual([['alpha', 'MCP 연동']]);
+    expect(out).toContain('moved alpha');
+    await s.close();
+  });
+
+  it('못 쓰는 분류는 거부하고 페이지를 건드리지 않는다', async () => {
+    const calls: string[] = [];
+    const s = await connectedSession(withRecat(async (slug) => { calls.push(slug); return 'ok'; }));
+    const out = await s.callTool(T('wiki_recategorize'), { slug: 'alpha', category: '   ' });
+    expect(calls).toEqual([]);
+    expect(out.toLowerCase()).toContain('invalid category');
+    await s.close();
+  });
+
+  it('없는 페이지면 엔진 오류를 그대로 알린다', async () => {
+    const s = await connectedSession(withRecat(async () => { throw new Error('Page not found: default/nope'); }));
+    const out = await s.callTool(T('wiki_recategorize'), { slug: 'nope', category: 'x' });
+    expect(out).toContain('Page not found');
+    await s.close();
+  });
+});

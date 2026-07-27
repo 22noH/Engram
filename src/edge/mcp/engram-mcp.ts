@@ -3,6 +3,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema
 import { McpProposalsDeps } from './mcp-proposals';
 import { confirmSettingChange, confirmWikiSave, declinedText } from './mcp-elicit';
 import type { McpSettingsPort } from './mcp-settings';
+import { normalizeCategoryPath } from '../../knowledge-core/wiki/category-path';
 import type { BrowserOp, BrowserOpResult } from '../../../shared/browser-ops';
 import { BROWSER_TOOL_DEFS, CHANNEL_ARG, isBrowserToolName, toBrowserOp } from '../../../shared/browser-ops';
 
@@ -34,6 +35,9 @@ export interface McpDeps {
   // MCP elicitation을 못 쓰는 두 경로 — 앱 두뇌(헤드리스 claude가 6ms에 cancel)와 stateless /mcp —
   // 가 이걸로 묻는다. 'unavailable'(창 없음·타임아웃)이면 기존대로 승인함 폴백.
   confirmSave?: ((req: { title: string; targetSlug?: string; body: string }) => Promise<'save' | 'cancel' | 'unavailable'>) | null;
+  // 페이지를 다른 폴더로 옮긴다(2026-07-27). 분류는 위키 내용에서 나오는 것이라, 이미 쌓인 페이지도
+  // 두뇌가 읽고 정리할 수 있어야 한다 — 그 통로가 지금까지 MCP에도 ws에도 없었다.
+  recategorize?: ((slug: string, category: string) => Promise<string>) | null;
 }
 
 const MAX_OUTPUT = 50_000; // src/brain/mcp-client.ts MAX_OUTPUT과 동일 상한(§3.1)
@@ -126,7 +130,7 @@ const WIKI_PROPOSE_TOOL: Tool = {
       title: { type: 'string' },
       content: { type: 'string' },
       slug: { type: 'string', description: 'optional — slug of an existing page to append to. Prefer this over creating a near-duplicate: search first (wiki_search), and if a page already covers this topic, pass its slug so the content is appended there instead of making a new page.' },
-      category: { type: 'string', description: "optional but strongly preferred — folder path this page belongs in, like \"engram/release\" or \"infra/networking\". Call wiki_list first and reuse an existing path when one fits; only invent a new one for a genuinely new area. Up to 3 levels. Omitting it dumps the page in the unsorted \"external\" folder." },
+      category: { type: 'string', description: 'optional but strongly preferred — the folder this page belongs in. There is no fixed list of folders: they come from what the wiki already holds, so call wiki_list first, reuse a folder that fits, and only name a new one when the page is genuinely about something the wiki has no folder for. Keep it a broad subject, not a narrow slice. Up to 3 levels with "/". Omitting it leaves the page unsorted.' },
       reason: { type: 'string', description: 'optional — why this is being proposed' },
     },
     required: ['title', 'content'],
@@ -166,6 +170,24 @@ const REJECT_PROPOSAL_TOOL: Tool = {
     type: 'object',
     properties: { id: { type: 'string', description: 'proposal id, from list_proposals' } },
     required: ['id'],
+  },
+};
+
+const WIKI_RECATEGORIZE_TOOL: Tool = {
+  name: 'wiki_recategorize',
+  description:
+    'Move a wiki page into a different folder. Folders are not a fixed list — they come from what the wiki ' +
+    'actually holds, so call wiki_list first to see the folders in use and reuse one when it fits. ' +
+    'Only the folder changes: the title and the body are untouched.',
+  // 분류(메타데이터)만 바꾼다 — 본문은 손대지 않으므로 잃는 게 없다.
+  annotations: ADDITIVE_LOCAL,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slug: { type: 'string', description: 'page slug, from wiki_list' },
+      category: { type: 'string', description: 'folder path, e.g. a broad topic. Up to 3 levels with "/".' },
+    },
+    required: ['slug', 'category'],
   },
 };
 
@@ -289,6 +311,21 @@ async function callWikiList(deps: McpDeps): Promise<CallToolResult> {
   const pages = await deps.list();
   if (pages.length === 0) return ok('no pages');
   return ok(pages.map((p) => `${p.slug} — ${p.title}${p.category ? ` [${p.category}]` : ''}`).join('\n'));
+}
+
+// 폴더 이동. 승인창을 걸지 않는다 — 본문을 바꾸지 않는 메타데이터 정리이고, 두뇌가 위키 전체를
+// 훑어 정리하는 게 목적이라 페이지마다 물으면 그 목적 자체가 성립하지 않는다(사용자 결정 2026-07-27).
+async function callWikiRecategorize(deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
+  if (!deps.recategorize) return fail('wiki_recategorize is not available here');
+  const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+  if (!slug) return fail('slug is required');
+  const category = normalizeCategoryPath(args.category);
+  if (!category) return fail(`invalid category ${JSON.stringify(args.category)} — expected a folder name, optionally with "/" levels`);
+  try {
+    return ok(await deps.recategorize(slug, category));
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function callWikiPropose(server: Server, deps: McpDeps, args: Record<string, unknown>): Promise<CallToolResult> {
@@ -437,7 +474,7 @@ const PROMPTS: EngramPrompt[] = [
 // (context7·supabase 등과 같은 관례). 설치만 하면 "먼저 저장 제안→채팅 동의=승인" 흐름이 기본이 된다.
 export const ENGRAM_MCP_INSTRUCTIONS = [
   "Engram is the user's personal knowledge wiki. When a question may be covered by it, search first (wiki_search, then wiki_read) and answer from what the wiki actually says.",
-  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), call wiki_propose. Do NOT ask "save this?" in chat first — wiki_propose asks the user itself, in a dialog, and that dialog is the one and only place that question gets asked. Asking in chat as well just makes the user answer the same question twice. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page. Also pass a category: call wiki_list to see the folder paths already in use and reuse the one that fits, inventing a new short path only for a genuinely new area — pages saved without a category all pile up unsorted.',
+  'When a conversation produces reusable knowledge (a solved problem, a decision, a how-to), call wiki_propose. Do NOT ask "save this?" in chat first — wiki_propose asks the user itself, in a dialog, and that dialog is the one and only place that question gets asked. Asking in chat as well just makes the user answer the same question twice. Before proposing, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass that page\'s slug to wiki_propose so your note is appended there instead of creating a duplicate page; otherwise omit slug to create a new page. Also pass a category. Folders are not a fixed vocabulary — they are whatever the wiki has grown, so call wiki_list to see the folders in use, put the page in the one that fits, and name a new broad folder only when nothing does. Pages saved without a category pile up unsorted. Use wiki_recategorize when a page is clearly in the wrong folder.',
   'When the user accepts that dialog the page is saved right then — wiki_propose finishes the job and tells you so. Do not call approve_proposal afterwards and do not ask the user anything else about it; one approval means saved. Only when the dialog could not be shown does wiki_propose leave the item queued, and it says so; those queued items are reviewed in chat with list_proposals and approved with approve_proposal for whichever one the user names.',
 ].join('\n\n');
 
@@ -478,6 +515,7 @@ export function buildMcpServer(deps: McpDeps): Server {
     if (deps.askBrain) tools.push(askBrainTool(deps.brainNames()));
     if (deps.proposals) tools.push(LIST_PROPOSALS_TOOL, APPROVE_PROPOSAL_TOOL, REJECT_PROPOSAL_TOOL);
     if (deps.write) tools.push(WIKI_WRITE_TOOL);
+    if (deps.recategorize) tools.push(WIKI_RECATEGORIZE_TOOL);
     if (deps.settings) tools.push(CONFIG_GET_TOOL, CONFIG_SET_TOOL);
     // AI 웹 조작: 앱이 배선했을 때만. inputSchema는 shared 정의 그대로(_channel은 스키마에 없다).
     if (deps.browser) {
@@ -520,6 +558,8 @@ export function buildMcpServer(deps: McpDeps): Server {
           return await callRejectProposal(deps, args);
         case 'wiki_write':
           return await callWikiWrite(server, deps, args);
+        case 'wiki_recategorize':
+          return await callWikiRecategorize(deps, args);
         case 'engram_config_get':
           return await callConfigGet(deps, args);
         case 'engram_config_set':

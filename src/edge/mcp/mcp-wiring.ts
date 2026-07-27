@@ -11,7 +11,7 @@ import { makeMcpPropose, slugifyMcpTitle } from './mcp-propose';
 export function makeWikiMcpDeps(
   wiki: WikiEngine,
   proposals: ProposalStore,
-): Pick<McpDeps, 'search' | 'read' | 'list' | 'propose'> {
+): Pick<McpDeps, 'search' | 'read' | 'list' | 'propose' | 'recategorize'> {
   return {
     search: async (query, limit) =>
       (await wiki.search(query, limit)).map((h) => ({ slug: h.slug, title: h.title, snippet: h.text })),
@@ -26,6 +26,15 @@ export function makeWikiMcpDeps(
       })),
     // targetSlug 선확정 → 그 slug로 존재 검사(한글 제목 slugify 폴백 충돌 봉쇄 — mcp-propose.ts).
     propose: makeMcpPropose(wiki, proposals),
+    recategorize: makeRecategorize(wiki),
+  };
+}
+
+// 분류만 바꾼다. updatePage가 락·커밋·재색인을 이미 다 하므로 그대로 위임한다(새 쓰기 경로 금지).
+export function makeRecategorize(wiki: WikiEngine): (slug: string, category: string) => Promise<string> {
+  return async (slug, category) => {
+    const page = await wiki.updatePage(slug, { category });
+    return `moved ${slug} to ${page.frontmatter.category}`;
   };
 }
 
@@ -90,9 +99,12 @@ export function makeFileSearch(wiki: WikiEngine): McpDeps['search'] {
 export function makeWikiMcpDepsCore(
   wiki: WikiEngine,
   proposals: ProposalStore,
-): Pick<McpDeps, 'search' | 'read' | 'list' | 'propose' | 'searchFallback'> {
+): Pick<McpDeps, 'search' | 'read' | 'list' | 'propose' | 'recategorize' | 'searchFallback'> {
   const base = makeWikiMcpDeps(wiki, proposals);
-  return { read: base.read, list: base.list, propose: base.propose, search: makeFileSearch(wiki), searchFallback: true };
+  return {
+    read: base.read, list: base.list, propose: base.propose, recategorize: base.recategorize,
+    search: makeFileSearch(wiki), searchFallback: true,
+  };
 }
 
 // wiki_write 실 구현(§3.3, main.ts 0fe1f02 리뷰 반영분 verbatim 추출).
