@@ -4,7 +4,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListTool
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
-import { ENGRAM_MCP_INSTRUCTIONS, BRIDGE_APPROVED_CLIENT } from './edge/mcp/engram-mcp';
+import { instructionsWithPluginNotice, BRIDGE_APPROVED_CLIENT } from './edge/mcp/engram-mcp';
 import { confirmWikiSave, declinedText, WikiSaveRequest } from './edge/mcp/mcp-elicit';
 import { loadWikiSaveMode } from './knowledge-core/wiki/wiki-save.config';
 import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
@@ -95,7 +95,7 @@ export function makeBridgeServer(url: string, configDir?: string): Server {
   // 브리지는 도구만 패스스루라 상주의 instructions가 전달되지 않는다 — 같은 안내문을 직접 싣는다.
   const server = new Server(
     { name: 'engram-bridge', version: '1.0.0' },
-    { capabilities: { tools: {} }, instructions: ENGRAM_MCP_INSTRUCTIONS },
+    { capabilities: { tools: {} }, instructions: instructionsWithPluginNotice() },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {

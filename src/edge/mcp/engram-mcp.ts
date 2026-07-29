@@ -4,6 +4,7 @@ import { McpProposalsDeps } from './mcp-proposals';
 import { confirmSettingChange, confirmWikiSave, declinedText } from './mcp-elicit';
 import type { McpSettingsPort } from './mcp-settings';
 import { normalizeCategoryPath } from '../../../shared/category-path';
+import { stalePluginNotice } from './plugin-version';
 import type { BrowserOp, BrowserOpResult } from '../../../shared/browser-ops';
 import { BROWSER_TOOL_DEFS, CHANNEL_ARG, isBrowserToolName, toBrowserOp } from '../../../shared/browser-ops';
 
@@ -503,10 +504,17 @@ export const ENGRAM_MCP_INSTRUCTIONS = [
   'When the user accepts that dialog the page is saved right then — wiki_propose finishes the job and tells you so. Do not call approve_proposal afterwards and do not ask the user anything else about it; one approval means saved. Only when the dialog could not be shown does wiki_propose leave the item queued, and it says so; those queued items are reviewed in chat with list_proposals and approved with approve_proposal for whichever one the user names.',
 ].join('\n\n');
 
+// 낡은 플러그인 안내를 뒤에 덧붙인 안내문. 낡지 않았으면 원문 그대로(바이트 동일 — 회귀 0).
+// initialize 때 한 번만 계산된다(instructions는 연결 시 1회 주입).
+export function instructionsWithPluginNotice(env: NodeJS.ProcessEnv = process.env): string {
+  const notice = stalePluginNotice(env);
+  return notice ? `${ENGRAM_MCP_INSTRUCTIONS}\n\n${notice}` : ENGRAM_MCP_INSTRUCTIONS;
+}
+
 export function buildMcpServer(deps: McpDeps): Server {
   const server = new Server(
     { name: 'engram', version: '1.0.0' },
-    { capabilities: { tools: {}, prompts: {} }, instructions: ENGRAM_MCP_INSTRUCTIONS },
+    { capabilities: { tools: {}, prompts: {} }, instructions: instructionsWithPluginNotice() },
   );
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => {

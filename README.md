@@ -127,7 +127,20 @@ claude plugin marketplace add 22noH/Engram
 claude plugin install engram@engram
 ```
 
-Then in any project: `/engram:wiki-search <query>` · `/engram:wiki-save` · `/engram:wiki-list` · `/engram:proposals` · `/engram:approve <id>`.
+Then in any project: `/engram:wiki-search <query>` · `/engram:wiki-save` · `/engram:wiki-list` · `/engram:organize` · `/engram:proposals` · `/engram:approve <id>` · `/engram:config`.
+
+**Keeping the commands current.** Claude Code decides whether a plugin is up to date by looking at a local
+copy of the marketplace, and for third-party marketplaces that copy is not refreshed on its own — so the
+`/engram:` commands stay frozen at whatever version you installed. The tools themselves are always current
+(they run through `npx -y`), but new commands will not appear. To update:
+
+```bash
+claude plugin marketplace update engram
+claude plugin update engram@engram
+```
+
+then restart Claude Code. To have it happen automatically, enable auto-update for this marketplace:
+`/plugin` → Marketplaces → engram → Enable auto-update.
 
 ### Or add the MCP server directly
 
