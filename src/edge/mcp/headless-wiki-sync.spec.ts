@@ -232,7 +232,11 @@ describe('makeHeadlessWikiSync', () => {
       const wrapped = sync.wrap(deps);
       const a = wrapped.write!({ title: 'a', content: 'c' });
       const b = wrapped.write!({ title: 'b', content: 'c' });
-      await new Promise((r) => setTimeout(r, 20));
+      // 고정 20ms 대기는 부하가 걸린 전체 실행에서 첫 pull이 시작되기도 전에 지나가 0을 본다
+      // (2026-07-30 실측 — v0.0.20 윈도우 CI를 세운 것과 같은 부류). 조건이 성립할 때까지 기다린다.
+      const deadline = Date.now() + 5000;
+      while (git.calls.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 20)); // 두 번째가 끼어들 여유를 주고 나서 센다
       expect(git.calls.filter((c) => c.startsWith('pull')).length).toBe(1); // 두 번째는 대기 중
       release();
       await Promise.all([a, b]);
