@@ -3,6 +3,7 @@ import { PathResolver, DEFAULT_USER } from '../pal/path-resolver';
 import { WikiEngine } from './wiki/wiki-engine';
 import { WikiGit } from './wiki/wiki-git';
 import { WikiPage } from './wiki/page.types';
+import { importSplitStorePages } from './wiki/split-store';
 import { EMBEDDER } from './rag/embedder.port';
 import { TransformersEmbedder } from './rag/transformers-embedder';
 import { CachingEmbedder } from './rag/caching-embedder';
@@ -110,6 +111,14 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
       this.stage('wiki');
       await this.git.ensureRepo();
 
+      // ★샌드박스에 갇힌 페이지를 데려온다(2026-07-30). MCP 서버가 패키지 컨테이너 안에서 돌면
+      // Windows가 그 쓰기를 컨테이너 오버레이로 보내고, 안에서는 합쳐진 뷰만 보여 갈라진 걸 알 수도
+      // 없다. 컨테이너 안에서는 진짜 폴더에 쓸 방법이 아예 없으므로(%APPDATA% 전체가 가상화),
+      // 가상화 밖에 있는 이쪽이 정리한다. 경고만 찍던 걸 실제 이동으로 바꿨다 — 11장이 몇 주 갇혀
+      // 있었고 사용자가 손으로 옮겼다. ensureRepo 뒤에 두는 이유: 가져온 페이지가 이번 부팅의
+      // 재색인에 포함되고, git 저장소가 이미 준비된 상태여야 다음 커밋이 이 파일들을 담는다.
+      this.importSandboxedPages();
+
       // ★근본픽스(2026-07-20): RAG 초기화 실패는 더 이상 이 메서드를 throw로 죽이지 않는다.
       // git.ensureRepo()·wiki 재색인·watcher 시작 등 그 외 단계 실패는 오늘과 동일하게 throw
       // (부트 자체가 의미 없는 상태라 판단 — 이번 근본픽스는 실사고 2건 모두의 진앙인 RAG(Lance)
@@ -146,6 +155,34 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     if (this.reindexTimer) clearTimeout(this.reindexTimer);
+  }
+
+  // 갈라진(샌드박스) 저장소에서 페이지를 데려온다. 계측이 본 작업을 막지 못하게 never-throw —
+  // 파일을 못 옮겨도 부팅은 계속돼야 한다(오늘의 교훈: 한 장의 문제가 앱을 못 켜게 하면 안 된다).
+  private importSandboxedPages(): void {
+    try {
+      const r = importSplitStorePages(this.paths.getDataDir());
+      if (r.imported.length > 0) {
+        this.logger.log(
+          `샌드박스에 갇혀 있던 위키 페이지 ${r.imported.length}장을 가져왔습니다(${r.from.join(', ')}): ${r.imported.join(', ')}`,
+          'KnowledgeCoreModule',
+        );
+      }
+      // 충돌은 매 부팅 반복된다(가져오지 않으니 상태가 그대로다) — 실측: 사용자 머신에서 11장이
+      // 걸렸고 전부 분류만 낡은 사본이었다(`category: external` vs 정리된 폴더명). 그래서 파일명을
+      // 다 늘어놓지 않고 요약만 남긴다. 조용히 삼키지도 않는다 — 진짜로 앱 쪽이 잘못된 경우
+      // 사람이 이 줄을 보고 찾아갈 수 있어야 한다.
+      if (r.conflicts.length > 0) {
+        const head = r.conflicts.slice(0, 3).join(', ');
+        const rest = r.conflicts.length > 3 ? ` 외 ${r.conflicts.length - 3}장` : '';
+        this.logger.log(
+          `갈라진 저장소에 이름은 같고 내용이 다른 사본 ${r.conflicts.length}장이 있습니다 — 이쪽을 최신으로 보고 그대로 뒀습니다(${head}${rest})`,
+          'KnowledgeCoreModule',
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`샌드박스 페이지 가져오기 실패(건너뜀): ${String(err)}`, 'KnowledgeCoreModule');
+    }
   }
 
   // WikiPage → RagStore 색인용 평탄 타입(§5.2). 정상 부팅 경로·백그라운드 재색인 양쪽이 공유.

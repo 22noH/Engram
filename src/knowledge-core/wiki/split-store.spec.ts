@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { findSplitStores, splitStoreWarning, probeRedirect } from './split-store';
+import { findSplitStores, splitStoreWarning, probeRedirect, importSplitStorePages } from './split-store';
 
 // 2026-07-27 실사고: 위키가 진짜 %APPDATA%와 Claude 패키지 컨테이너로 조용히 갈라져 있었다.
 // 앱은 2장, 컨테이너엔 11장. 아무도 몰랐고 알 방법도 없었다 — 그 침묵을 깨는 게 이 코드다.
@@ -121,5 +121,112 @@ describe('probeRedirect', () => {
     const dataDir = path.join(local, 'Packages', 'Claude_x', 'LocalCache', 'Roaming', 'engram');
     fs.mkdirSync(dataDir, { recursive: true });
     expect(probeRedirect(dataDir, { LOCALAPPDATA: local } as NodeJS.ProcessEnv)).toBeNull();
+  });
+});
+
+// ★2026-07-30: 경고만 찍는 걸로는 안 된다 — 11장이 몇 주 갇혀 있었고 사용자가 손으로 옮겼다.
+// 컨테이너 안에서는 진짜 폴더에 쓸 수단이 없으므로(그게 OS가 하는 일), 가상화 밖에 있는 앱이 데려온다.
+describe('importSplitStorePages', () => {
+  const tmps: string[] = [];
+  function makeRoot(): string {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'engram-import-'));
+    tmps.push(d);
+    return d;
+  }
+  function page(dir: string, name: string, body = 'x'): string {
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `${name}.md`);
+    fs.writeFileSync(p, `---\ntitle: ${name}\nstatus: published\n---\n${body}`);
+    return p;
+  }
+  function setup(): { dataDir: string; env: NodeJS.ProcessEnv; mine: string; theirs: string } {
+    const root = makeRoot();
+    const dataDir = path.join(root, 'real', 'engram');
+    const local = path.join(root, 'Local');
+    return {
+      dataDir,
+      env: { LOCALAPPDATA: local } as NodeJS.ProcessEnv,
+      mine: path.join(dataDir, 'wiki', 'pages', 'default'),
+      theirs: path.join(local, 'Packages', 'Claude_x', 'LocalCache', 'Roaming', 'engram', 'wiki', 'pages', 'default'),
+    };
+  }
+  afterAll(() => { for (const d of tmps) fs.rmSync(d, { recursive: true, force: true }); });
+
+  it('갇힌 페이지를 내 저장소로 데려온다', () => {
+    const { dataDir, env, mine, theirs } = setup();
+    page(mine, 'here');
+    page(theirs, 'trapped-1');
+    page(theirs, 'trapped-2');
+
+    const r = importSplitStorePages(dataDir, env);
+    expect(r.imported.sort()).toEqual(['default/trapped-1.md', 'default/trapped-2.md']);
+    expect(fs.readdirSync(mine).sort()).toEqual(['here.md', 'trapped-1.md', 'trapped-2.md']);
+    expect(fs.readFileSync(path.join(mine, 'trapped-1.md'), 'utf8')).toContain('title: trapped-1');
+  });
+
+  it('원본은 지우지 않는다(실패해도 잃는 게 없어야 한다)', () => {
+    const { dataDir, env, theirs } = setup();
+    page(theirs, 'keep-me');
+    importSplitStorePages(dataDir, env);
+    expect(fs.existsSync(path.join(theirs, 'keep-me.md'))).toBe(true);
+  });
+
+  it('두 번째 부팅은 아무것도 하지 않는다(같은 바이트 = 이미 가져옴)', () => {
+    const { dataDir, env, theirs } = setup();
+    page(theirs, 'once');
+    expect(importSplitStorePages(dataDir, env).imported).toHaveLength(1);
+    const second = importSplitStorePages(dataDir, env);
+    expect(second.imported).toEqual([]);
+    expect(second.conflicts).toEqual([]); // 같은 내용이면 충돌도 아니다
+  });
+
+  it('내용이 다른 같은 이름은 덮어쓰지 않고 충돌로 보고한다(앱 쪽이 이긴다)', () => {
+    const { dataDir, env, mine, theirs } = setup();
+    page(mine, 'same-name', '앱이 쓴 최신 내용');
+    page(theirs, 'same-name', '샌드박스의 낡은 내용');
+
+    const r = importSplitStorePages(dataDir, env);
+    expect(r.imported).toEqual([]);
+    expect(r.conflicts).toEqual(['default/same-name.md']);
+    expect(fs.readFileSync(path.join(mine, 'same-name.md'), 'utf8')).toContain('앱이 쓴 최신 내용');
+  });
+
+  it('.md가 아닌 것과 git 내부는 가져오지 않는다', () => {
+    const { dataDir, env, mine, theirs } = setup();
+    fs.mkdirSync(theirs, { recursive: true });
+    fs.writeFileSync(path.join(theirs, 'notes.txt'), 'x');
+    fs.mkdirSync(path.join(theirs, '..', '..', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(theirs, '..', '..', '.git', 'HEAD'), 'ref: x');
+    page(theirs, 'real-page');
+
+    const r = importSplitStorePages(dataDir, env);
+    expect(r.imported).toEqual(['default/real-page.md']);
+    expect(fs.existsSync(path.join(mine, 'notes.txt'))).toBe(false);
+  });
+
+  it('갈라진 저장소가 없으면 아무 일도 없다(회귀 0)', () => {
+    const { dataDir, env, mine } = setup();
+    page(mine, 'only');
+    const r = importSplitStorePages(dataDir, env);
+    expect(r).toEqual({ imported: [], conflicts: [], from: [] });
+    expect(fs.readdirSync(mine)).toEqual(['only.md']);
+  });
+
+  it('임시 파일을 남기지 않는다(부분 쓰기 흔적 금지)', () => {
+    const { dataDir, env, mine, theirs } = setup();
+    page(theirs, 'atomic');
+    importSplitStorePages(dataDir, env);
+    expect(fs.readdirSync(mine).filter((f) => f.includes('importing'))).toEqual([]);
+  });
+
+  it('여러 사용자 폴더를 각각 제 자리로 가져온다', () => {
+    const { dataDir, env, theirs } = setup();
+    const otherUser = path.join(theirs, '..', 'alice');
+    page(theirs, 'for-default');
+    page(otherUser, 'for-alice');
+
+    const r = importSplitStorePages(dataDir, env);
+    expect(r.imported.sort()).toEqual(['alice/for-alice.md', 'default/for-default.md']);
+    expect(fs.existsSync(path.join(dataDir, 'wiki', 'pages', 'alice', 'for-alice.md'))).toBe(true);
   });
 });

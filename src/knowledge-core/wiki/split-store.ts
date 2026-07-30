@@ -110,6 +110,82 @@ export function probeRedirect(dataDir: string, env: NodeJS.ProcessEnv = process.
   }
 }
 
+export interface SplitImportResult {
+  /** 가져온 페이지("userId/slug.md"). */
+  imported: string[];
+  /** 이미 있는데 내용이 달라 **건드리지 않은** 것. 앱 쪽이 이긴다. */
+  conflicts: string[];
+  /** 스캔한 갈라진 저장소 경로들. */
+  from: string[];
+}
+
+/**
+ * 갈라진 저장소의 페이지를 내 저장소로 **가져온다**(2026-07-30).
+ *
+ * 왜 이걸 여기서 하나: 컨테이너 **안에서는 진짜 폴더에 쓸 방법이 없다**. %APPDATA% 아래는 전부
+ * 가상화되므로 경로를 어떻게 적어도 OS가 오버레이로 보낸다 — MCP 서버가 스스로 고칠 수 있는 문제가
+ * 아니다. 반면 앱은 가상화 밖에 있고, 오버레이 폴더를 **읽을 수는 있다**(findSplitStores가 이미
+ * 찾아낸다). 그래서 고치는 쪽은 컨테이너 밖에 있는 앱이다: 부팅할 때 갇혀 있던 페이지를 데려온다.
+ * 지금까지는 경고만 찍고 사용자가 손으로 옮기게 했다 — 실제로 11장이 몇 주 갇혀 있었다.
+ *
+ * 어느 쓰기가 오버레이로 가고 어느 쓰기가 통과하는지는 아직 모른다(실측: 새 페이지는 오버레이,
+ * 기존 페이지 수정은 진짜 폴더로 갔다). 이 함수는 그 기전에 의존하지 않는다 — "저쪽에 있는데
+ * 이쪽에 없는 것"을 데려올 뿐이라 어느 쪽이든 결과가 같다.
+ *
+ * 안전 규칙:
+ *  - 원본은 **절대 지우지 않는다**(사용자 데이터다. 실패해도 잃는 게 없다).
+ *  - 이미 있고 내용이 다르면 **덮어쓰지 않는다** — 앱이 쓴 쪽이 최신일 수 있다. 기록만 남긴다.
+ *  - 두 번째 부팅부터는 파일이 이미 있으므로 자연히 no-op이다(별도 표식 불필요).
+ *  - never-throw: 한 장이 실패해도 나머지를 가져온다.
+ */
+export function importSplitStorePages(
+  dataDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): SplitImportResult {
+  const result: SplitImportResult = { imported: [], conflicts: [], from: [] };
+  const myPages = path.join(dataDir, 'wiki', 'pages');
+  for (const store of findSplitStores(dataDir, env)) {
+    result.from.push(store.pagesDir);
+    let users: string[];
+    try {
+      users = fs.readdirSync(store.pagesDir);
+    } catch {
+      continue;
+    }
+    for (const user of users) {
+      const srcDir = path.join(store.pagesDir, user);
+      let files: string[];
+      try {
+        files = fs.readdirSync(srcDir).filter((f) => f.endsWith('.md'));
+      } catch {
+        continue; // 폴더가 아니거나 읽을 수 없음
+      }
+      for (const file of files) {
+        const src = path.join(srcDir, file);
+        const dest = path.join(myPages, user, file);
+        try {
+          if (fs.existsSync(dest)) {
+            // 바이트가 같으면 이미 가져온 것 — 조용히 넘어간다(로그도 남기지 않는다).
+            if (!fs.readFileSync(src).equals(fs.readFileSync(dest))) {
+              result.conflicts.push(`${user}/${file}`);
+            }
+            continue;
+          }
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          // copyFile은 부분 쓰기 위험이 있다 — 임시 이름에 쓴 뒤 rename으로 원자적으로 놓는다.
+          const tmp = `${dest}.importing-${process.pid}`;
+          fs.copyFileSync(src, tmp);
+          fs.renameSync(tmp, dest);
+          result.imported.push(`${user}/${file}`);
+        } catch {
+          /* 한 장 실패는 그 한 장에서 끝난다 */
+        }
+      }
+    }
+  }
+  return result;
+}
+
 /** 사람이 읽는 경고문. 갈라진 게 없으면 null(부를 자리에서 조건문을 또 쓰지 않게). */
 export function splitStoreWarning(dataDir: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const found = findSplitStores(dataDir, env);
@@ -122,6 +198,7 @@ export function splitStoreWarning(dataDir: string, env: NodeJS.ProcessEnv = proc
     ...lines,
     'This happens when the MCP server runs inside a sandboxed app (e.g. a packaged desktop client)',
     'while the Engram app is not running: Windows redirects its writes into that app\'s private store.',
-    'Copy those pages into the folder above to merge them.',
+    // 손으로 옮기라는 안내는 지웠다 — 앱이 부팅할 때 스스로 가져온다(importSplitStorePages).
+    'The Engram desktop app imports these pages into the folder above the next time it starts.',
   ].join('\n');
 }

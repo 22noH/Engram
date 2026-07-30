@@ -209,11 +209,15 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
   // 안내했다(실측 재현: "Start the Engram app and try again"). 조용한 실패가 나쁜 것과 별개로,
   // **아예 못 쓰게 만드는 건 더 나쁘다.** 이제 막지 않고 사실만 알린다 — 모델이 보는 곳에 실어야
   // 사용자에게 닿는다(stderr는 아무도 안 본다).
+  // ★문구 정정 2탄(2026-07-30): "앱은 이 페이지들을 영원히 못 본다"고 적었는데, 이제 틀렸다.
+  // 앱이 부팅할 때 갇힌 페이지를 자기 위키로 가져온다(knowledge-core.module의 importSandboxedPages).
+  // 사용자에게 "손으로 옮겨라"라고 말하게 만드는 문구는 이제 잘못된 지시다.
   if (redirected) {
     redirectNotice =
       `NOTE: this MCP server runs inside a sandboxed app, so its writes to ${paths.getDataDir()} actually land in ` +
-      `${redirected}. Saving works. But if the Engram desktop app is installed later it will not see these pages — ` +
-      `they are in the sandbox's private store. Tell the user this the first time they save, then drop it.`;
+      `${redirected}. Saving works. If the user also has the Engram desktop app, a page saved here shows up in it ` +
+      `the next time the app starts — the app imports pages from this store on boot. Nothing to move by hand. ` +
+      `Say this once if the user wonders why a new page is not in the app yet, then drop it.`;
     process.stderr.write(`[mcp-headless] ${redirectNotice}\n`);
   }
 
