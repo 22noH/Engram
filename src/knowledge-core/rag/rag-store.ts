@@ -381,21 +381,24 @@ export class RagStore implements PageIndexer {
     let skipped = 0;
     let changed = false;
     for (const p of pages) {
-      const fpInput = { ...p, userId: p.userId ?? DEFAULT_USER };
-      if (fp.matches(fpInput)) {
-        skipped++;
-      } else {
-        try {
+      // ★지문 계산까지 try 안에 둔다(2026-07-30 실사고). 밖에 있던 fp.matches가 이상한 frontmatter에
+      // 던지면 reindexAll 전체가 reject되고 부팅이 영원히 안 끝났다 — 페이지 한 장의 문제가 앱을
+      // 못 켜게 만들면 안 된다. 여기서 던지면 그 페이지만 warn하고 넘어간다(색인 실패와 같은 취급).
+      try {
+        const fpInput = { ...p, userId: p.userId ?? DEFAULT_USER };
+        if (fp.matches(fpInput)) {
+          skipped++;
+        } else {
           await this.indexPage(p);
           fp.set(fpInput);
           changed = true;
           ok++;
-        } catch (err) {
-          this.logger?.warn(
-            `전체 재색인 중 페이지 실패(건너뜀): ${p.slug} — ${err instanceof Error ? err.message : String(err)}`,
-            'RagStore',
-          );
         }
+      } catch (err) {
+        this.logger?.warn(
+          `전체 재색인 중 페이지 실패(건너뜀): ${p.slug} — ${err instanceof Error ? err.message : String(err)}`,
+          'RagStore',
+        );
       }
       seen++;
       try { onProgress?.(seen, pages.length); } catch { /* 계측이 재색인을 막지 않게 */ }

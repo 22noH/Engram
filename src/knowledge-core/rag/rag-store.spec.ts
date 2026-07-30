@@ -228,6 +228,24 @@ describe('RagStore', () => {
     spy.mockRestore();
   });
 
+  // ★2026-07-30 실사고(위 스킵 기능이 데려온 회귀): 위키 페이지의 frontmatter는 타입 검증 없이
+  // `as PageFrontmatter`로 캐스트된다 — `title: 2026-07-30`은 Date, 빈 `category:`는 null이 온다.
+  // 지문 계산이 그 값을 crypto에 넣어 던졌고, 그 호출이 try 밖이라 reindexAll 전체가 reject됐다.
+  // 부팅은 이 await에서 영원히 멈췄다(앱이 안 켜진다). 한 페이지 문제는 한 페이지에서 끝나야 한다.
+  it('frontmatter가 문자열이 아닌 페이지가 있어도 부팅 재색인이 끝난다', async () => {
+    const logger = { warn: jest.fn(), log: jest.fn(), error: jest.fn(), debug: jest.fn(), verbose: jest.fn() };
+    const s = new RagStore(new PathResolver(dir), new FakeEmbedder(), logger as never);
+    await s.init();
+    // YAML이 실제로 주는 값들(문자열이 아님) — 타입 시스템은 이걸 막지 못했다.
+    const odd = { slug: 'odd', title: new Date('2026-07-30'), category: null, sources: ['mcp'], body: '본문' };
+
+    await expect(
+      s.reindexAll([page('ok1', '첫째 글'), odd as unknown as IndexablePage, page('ok2', '둘째 글')]),
+    ).resolves.toBeUndefined();
+
+    expect((await s.search('글', 50)).map((r) => r.slug)).toEqual(expect.arrayContaining(['ok1', 'ok2']));
+  });
+
   it('바뀐 페이지만 다시 색인한다', async () => {
     const s = new RagStore(new PathResolver(dir), new FakeEmbedder());
     await s.init();
