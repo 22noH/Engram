@@ -87,6 +87,30 @@ function wikiSaveRequest(name: string, args: Record<string, unknown>): WikiSaveR
   };
 }
 
+// ★버전 어긋남 보정(2026-07-30 감사 #2).
+//
+// 브리지는 "사람이 이미 승인했다"를 상류 클라이언트 이름(BRIDGE_APPROVED_CLIENT) 하나로만 알린다.
+// 그 이름을 알아듣는 건 v0.0.17+ 앱뿐이다. 사용자의 앱이 그보다 낡으면(자동 업데이트가 늦거나 꺼진
+// 상태 — 흔하다) 이름은 무시되고 제안이 승인함에 그대로 쌓인다. 사용자는 브리지 선택창에서 저장을
+// 눌렀는데 위키에는 아무것도 없고, 앱을 열어 같은 걸 또 승인해야 한다 = "한 번 승인 = 저장 완료"가
+// 깨진다.
+//
+// 보정: 승인을 받고 넘겼는데도 상류가 "제안 <id>"를 돌려주면(= 게시되지 않았다는 뜻) 그 id로
+// approve_proposal을 우리가 대신 부른다. 상류 버전을 캐묻지 않아도 되는 이유는 결과 텍스트가
+// 곧 사실이기 때문이다 — 새 앱이 게시했으면 "saved to the Engram wiki"라 답하고 여기 걸리지 않는다.
+// `approve_proposal`/`reject_proposal`의 부분 문자열은 앞이 `_`(단어 문자)라 \b가 서지 않아 안 잡힌다.
+const QUEUED_ID = /\bproposal ([A-Za-z0-9][\w.-]*)/;
+
+export function queuedProposalId(result: CallToolResult): string | null {
+  if (result.isError) return null;
+  for (const part of result.content ?? []) {
+    if (part.type !== 'text' || typeof part.text !== 'string') continue;
+    const m = QUEUED_ID.exec(part.text);
+    if (m) return m[1]!;
+  }
+  return null;
+}
+
 // 엔트리에서 분리한 순수 조립부(브리프 §요건) — stdio 서버를 만들고 ListTools/CallTool
 // 핸들러가 그때그때 상주 /mcp에 연결해 그대로 패스스루. never-throw: 실패해도 stdio 프로토콜은
 // 죽지 않는다(CallTool→isError 텍스트, ListTools→빈 목록+stderr 로그, 절대 stdout 아님).
@@ -126,12 +150,30 @@ export function makeBridgeServer(url: string, configDir?: string): Server {
       }
       // ★채널 정체성 주입(AI 웹 조작) — browser_* 호출에만 붙는다(다른 도구는 인자 바이트 동일).
       const args = withChannelIdentity(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, process.env);
-      return (await withUpstream(
+      const result = (await withUpstream(
         url,
         (client) => client.callTool({ name: req.params.name, arguments: args }),
         undefined,
         approvedHere ? BRIDGE_APPROVED_CLIENT : undefined,
       )) as CallToolResult;
+      // 승인을 받고 넘겼는데 큐에 남았다 = 상류가 낡아 승인 신호를 못 알아들었다. 우리가 마무리한다.
+      const queued = approvedHere ? queuedProposalId(result) : null;
+      if (queued) {
+        // 실패하면(승인 도구가 없는 상류·이미 처리된 제안 등) 원래 결과를 그대로 돌려준다 —
+        // 없던 성공을 만들어내지 않고, "큐에 있다"는 안내도 잃지 않는다. isError는 throw로 오지
+        // 않으므로 반드시 따로 본다(이걸 빼먹으면 큐 안내가 승인 실패 메시지로 바뀐다).
+        try {
+          const applied = (await withUpstream(url, (client) =>
+            client.callTool({ name: 'approve_proposal', arguments: { id: queued } }),
+          )) as CallToolResult;
+          if (!applied.isError) return applied;
+          console.error('[mcp-bridge] follow-up approve rejected:', JSON.stringify(applied.content));
+        } catch (e) {
+          console.error('[mcp-bridge] follow-up approve failed:', e instanceof Error ? e.message : String(e));
+        }
+        return result;
+      }
+      return result;
     } catch (e) {
       return {
         content: [{ type: 'text', text: `bridge error: ${e instanceof Error ? e.message : String(e)}` }],

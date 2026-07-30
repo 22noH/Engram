@@ -2,11 +2,12 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Server as SdkServer } from '@modelcontextprotocol/sdk/server/index.js';
+import { ElicitRequestSchema, ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
 import { handleMcpRequest } from './edge/mcp/mcp-http';
 import { McpSession, MCP_TOOL_PREFIX } from './brain/mcp-client';
-import { makeBridgeServer, parseBridgeArgs, withChannelIdentity } from './mcp-bridge';
+import { makeBridgeServer, parseBridgeArgs, queuedProposalId, withChannelIdentity } from './mcp-bridge';
 import { APP_CHANNEL_ENV, APP_RESIDENT_ENV, ELICIT_HUMAN_MIN_MS_ENV } from './edge/mcp/mcp-elicit';
 import { CHANNEL_ARG } from '../shared/browser-ops';
 
@@ -45,6 +46,36 @@ async function connectedBridgeSession(url: string): Promise<McpSession> {
   const s = McpSession.createForTest('bridge', clientT);
   await s.connect();
   return s;
+}
+
+// ★감사 #2 회귀 테스트(2026-07-30): 상류(앱)가 브리지보다 낡은 경우.
+// v0.0.16까지의 앱은 BRIDGE_APPROVED_CLIENT라는 이름을 모르므로 승인 신호를 무시하고 제안만
+// 만든다 — 그 시절의 실제 응답 텍스트를 그대로 돌려주는 가짜 상류를 세운다(지금 buildMcpServer로는
+// 재현 불가: 이 버전은 이름을 알아듣고 곧바로 게시해버린다).
+async function startOldUpstream(): Promise<{ url: string; approved: string[]; close: () => Promise<void> }> {
+  const approved: string[] = [];
+  const old = new SdkServer({ name: 'engram-old', version: '0.0.16' }, { capabilities: { tools: {} } });
+  old.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      { name: 'wiki_propose', description: 'x', inputSchema: { type: 'object' as const } },
+      { name: 'approve_proposal', description: 'x', inputSchema: { type: 'object' as const } },
+    ],
+  }));
+  old.setRequestHandler(CallToolRequestSchema, async (req) => {
+    if (req.params.name === 'approve_proposal') {
+      approved.push(String((req.params.arguments as { id?: unknown } | undefined)?.id));
+      return { content: [{ type: 'text' as const, text: 'applied to page ops' }] };
+    }
+    return { content: [{ type: 'text' as const, text: 'proposal p-old-42 created — a human will review it in the Engram app' }] };
+  });
+  const httpServer = http.createServer((req, res) => { void handleMcpRequest(old, req, res); });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const port = (httpServer.address() as AddressInfo).port;
+  return {
+    url: `http://127.0.0.1:${port}/mcp`,
+    approved,
+    close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
+  };
 }
 
 describe('parseBridgeArgs', () => {
@@ -155,6 +186,49 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
     const r = (await c.callTool({ name, arguments: args })) as { content: Array<{ text?: string }> };
     return r.content.map((x) => x.text ?? '').join('\n');
   }
+
+  // ★감사 #2: 사용자의 앱이 낡아 승인 신호를 못 알아들어도 "한 번 승인 = 저장 완료"는 지켜야 한다.
+  // 낡은 앱은 제안만 만들고 끝낸다 — 그러면 사용자는 저장을 눌렀는데 위키가 비어 있고, 앱을 열어
+  // 같은 것을 또 승인해야 했다. 브리지가 그 id로 approve_proposal을 대신 부른다.
+  it('상류가 낡아 큐에 남으면 브리지가 대신 승인해 저장을 끝낸다', async () => {
+    const upstream = await startOldUpstream();
+    try {
+      const c = await elicitingBridgeClient(upstream.url, () => ({ action: 'accept', content: { decision: 'save' } }));
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C', slug: 'ops' });
+      expect(upstream.approved).toEqual(['p-old-42']);
+      expect(out).toContain('applied to page ops'); // 사용자에게 "큐에 있다"고 말하지 않는다
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  // 승인을 받지 않았으면(못 물었다) 큐에 남는 게 맞다 — 사람 게이트를 브리지가 건너뛰면 안 된다.
+  it('승인을 못 받았으면 대신 승인하지 않는다', async () => {
+    const upstream = await startOldUpstream();
+    try {
+      const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+      await makeBridgeServer(upstream.url).connect(serverT);
+      const c = new Client({ name: 'no-elicit', version: '1.0.0' }, { capabilities: {} });
+      await c.connect(clientT);
+      const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+      expect(upstream.approved).toEqual([]);
+      expect(out).toContain('p-old-42');
+      await c.close();
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('queuedProposalId — 게시됐다는 응답에서는 id를 찾지 않는다', () => {
+    const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
+    expect(queuedProposalId(text('saved to the Engram wiki — applied to page ops'))).toBeNull();
+    expect(queuedProposalId(text('proposal p1 created — a human will review it'))).toBe('p1');
+    expect(queuedProposalId(text('so proposal ab3f is only queued.'))).toBe('ab3f');
+    // 도구 이름 안의 'proposal'은 잡히지 않는다(앞이 _라 단어 경계가 없다).
+    expect(queuedProposalId(text('call approve_proposal with id x'))).toBeNull();
+    expect(queuedProposalId({ isError: true, content: [{ type: 'text' as const, text: 'proposal p9' }] })).toBeNull();
+  });
 
   it('승인 → 상류로 그대로 전달(대화상자는 브리지에서 1회만)', async () => {
     const propose = jest.fn().mockResolvedValue('p-bridge');
