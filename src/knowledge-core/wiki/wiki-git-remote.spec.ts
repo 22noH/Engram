@@ -58,6 +58,31 @@ describe('WikiGit 원격', () => {
   });
   afterEach(() => { /* base tmpdir는 OS가 정리; 명시 rm은 생략(핸들 안전) */ });
 
+  // ★2026-07-30 실측: git 연결의 **첫 순간**(방금 만든 빈 원격)이 실패로 보고됐다. 브랜치를 지정한
+  // fetch는 원격에 그 브랜치가 없으면 던지고, 호출자는 그걸 "remote unreachable or credentials
+  // denied"로 표시한다 — 정상인데 인증이 틀린 것처럼 보인다. 브랜치 없는 fetch로 원격 자체가
+  // 살아있는지 갈라낸다.
+  it('빈 원격에 처음 붙일 때 pull은 실패가 아니다(첫 설정 화면에 거짓 인증 오류 금지)', async () => {
+    await writePage(dirA, 'first', 'hello');
+    await gitA.ensureRemote(remote);
+    await gitA.commitAll('add first');
+
+    // 원격은 방금 init된 빈 저장소 — main 브랜치가 아직 없다.
+    expect(await gitA.pull('main')).toEqual({ ok: true, conflict: false });
+    // 그리고 이어지는 push가 첫 커밋을 실제로 올린다.
+    expect((await gitA.push('main')).ok).toBe(true);
+    await gitB.ensureRemote(remote);
+    expect((await gitB.pull('main')).ok).toBe(true);
+    expect(readPage(dirB, 'first')).toBe('hello');
+  });
+
+  it('원격이 진짜로 없으면 pull은 실패로 보고한다(위 완화가 실패를 삼키지 않는다)', async () => {
+    await writePage(dirA, 'x', 'y');
+    await gitA.ensureRemote(path.join(os.tmpdir(), 'engram-no-such-remote-12345.git'));
+    await gitA.commitAll('add x');
+    expect(await gitA.pull('main')).toEqual({ ok: false, conflict: false });
+  });
+
   it('A push → B가 pull로 받아온다', async () => {
     await writePage(dirA, 'alpha', 'from-A');
     await gitA.ensureRemote(remote);

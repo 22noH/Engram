@@ -95,7 +95,17 @@ export class WikiGit {
     try {
       await this.git.fetch('origin', branch);
     } catch {
-      return { ok: false, conflict: false }; // 네트워크/원격 접근 실패 → 다음 주기
+      // ★빈 원격을 실패로 보고하던 것(2026-07-30 실측). 브랜치 지정 fetch는 원격에 그 브랜치가 아직
+      // 없으면 던진다("couldn't find remote ref main") — 방금 만든 빈 저장소를 처음 붙이는, 즉 git
+      // 연결의 **첫 순간**이 늘 이 경우다. 그런데 호출자는 이걸 "remote unreachable or credentials
+      // denied"로 표시해서, 실제로는 정상인데 인증이 틀린 것처럼 보였다.
+      // 판별: 브랜치 없이 한 번 더 fetch해 본다. 그게 되면 원격은 멀쩡하고 브랜치만 없는 것이므로
+      // 계속 진행한다(아래 hasRemoteRef가 ok로 처리하고, 이어지는 push가 첫 커밋을 올린다).
+      try {
+        await this.git.fetch('origin');
+      } catch {
+        return { ok: false, conflict: false }; // 진짜 네트워크/인증 실패 → 다음 주기
+      }
     }
     // fetch 이후 단계 전체에 안전망(Fix #3): 예기치 못한 throw도 never-throw 계약({ok,conflict})으로 흡수.
     try {
