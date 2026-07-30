@@ -314,7 +314,9 @@ describe('core 모드 MCP 배선(HeadlessCoreModule 근본픽스)', () => {
     expect(listOut).toContain('p1');
 
     const proposeOut = await s.callTool(T('wiki_propose'), { title: 'New', content: 'new body' });
-    expect(proposeOut).toMatch(/proposal .+ created/);
+    // 못 물으면 "저장 안 됨 + 모델이 물어서 끝내라"가 온다(2026-07-29 실측 반영). 제안은 그대로 큐에 남는다.
+    expect(proposeOut).toContain('NOT SAVED YET');
+    expect(proposeOut).toContain('approve_proposal');
     const pending = await proposals.listPending();
     expect(pending).toHaveLength(1);
 

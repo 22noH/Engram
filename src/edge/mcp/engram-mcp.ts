@@ -376,7 +376,23 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
     const applied = await deps.proposals.approve(id);
     return ok(`saved to the Engram wiki — ${applied}`);
   }
-  return ok(`proposal ${id} created — queued, a human still has to approve it`);
+  // ★못 물었으면 조용히 큐에 넣고 끝내지 않는다(2026-07-29 실측).
+  // elicitation은 "클라이언트야 물어봐 줘"라는 부탁이고, 안 그려주는 클라이언트에서는 서버가
+  // 카드를 띄울 방법이 없다(Claude Code 비대화형 세션에서 즉답 거부를 실측). 앱이 없으면 승인함을
+  // 열어볼 화면조차 없어서, 사용자 입장에서 저장은 **영영 완료되지 않는다** — 그런데도 우리는
+  // "queued"만 돌려주고 끝냈다. 그래서 마지막 고리는 모델에게 넘긴다: 어느 클라이언트든 모델
+  // 자신의 질문 UI는 항상 뜨므로, 여기까지 온 저장은 반드시 사람에게 한 번 닿는다.
+  const folder = normalizeCategoryPath(input.category) ?? 'unsorted';
+  const target = input.slug ? `appended to the existing page "${input.slug}"` : 'a new page';
+  return ok(
+    `NOT SAVED YET — nothing is published. This client did not show the save dialog, so proposal ${id} is only queued.\n\n` +
+    `Ask the user now, using this client's own question UI: save "${title}" to the Engram wiki? ` +
+    `(${target}, folder "${folder}")\n` +
+    `• yes → call approve_proposal with id ${id}\n` +
+    `• no  → call reject_proposal with id ${id}\n` +
+    `Do not leave it queued without asking, and do not decide on the user's behalf — they will otherwise ` +
+    `believe it was saved. If they want to stop being asked, tell them about the wiki.autosave setting.`,
+  );
 }
 
 async function callListProposals(deps: McpDeps): Promise<CallToolResult> {

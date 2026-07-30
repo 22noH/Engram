@@ -435,12 +435,17 @@ describe('elicitation 승인 게이트', () => {
 
   const accept: ElicitHandler = () => ({ action: 'accept', content: { decision: 'save' } });
 
-  it('미지원 클라이언트(elicitation 미선언) → 물어보지 않고 기존 동작 그대로(회귀 0)', async () => {
+  // ★2026-07-29 실측: 못 물으면 조용히 큐에 넣고 끝냈다 — 앱이 없는 사용자는 승인함을 볼 화면조차
+  // 없어 저장이 영영 완료되지 않는데도 사용자는 저장된 줄 안다. 마지막 고리를 모델에게 넘긴다.
+  it('아무도 못 물으면 "저장 안 됨"과 함께 모델에게 물어보라고 지시한다', async () => {
     const propose = jest.fn().mockResolvedValue('proposal-42');
     const s = await connectedSession(makeDeps({ propose }));
     const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
     expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
-    expect(out).toBe('proposal proposal-42 created — queued, a human still has to approve it');
+    expect(out).toContain('NOT SAVED YET');       // 성공으로 오인할 수 없게
+    expect(out).toContain('proposal-42');         // 승인/거부에 쓸 id
+    expect(out).toContain('approve_proposal');
+    expect(out).toContain('reject_proposal');
     await s.close();
   });
 

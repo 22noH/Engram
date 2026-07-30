@@ -217,7 +217,10 @@ describe('makeBridgeServer — elicitation 승인 게이트', () => {
       const s = await connectedBridgeSession(upstream.url);
       const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
       expect(propose).toHaveBeenCalledWith({ title: 'T', content: 'C' });
-      expect(out).toBe('proposal p-plain created — queued, a human still has to approve it');
+      // 못 물었으면 "저장 안 됨"과 함께 모델이 물어서 끝내라는 지시가 온다(2026-07-29 실측 반영).
+      expect(out).toContain('NOT SAVED YET');
+      expect(out).toContain('p-plain');
+      expect(out).toContain('approve_proposal');
       await s.close();
     } finally {
       await upstream.close();
