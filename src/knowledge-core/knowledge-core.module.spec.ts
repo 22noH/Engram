@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import { Test, TestingModule } from '@nestjs/testing';
 import { KnowledgeCoreModule, BOOT_RETRY_OPTIONS, REINDEX_DELAY_MS } from './knowledge-core.module';
 import { WikiEngine } from './wiki/wiki-engine';
+import { WikiGit } from './wiki/wiki-git';
 import { RagStore } from './rag/rag-store';
 import { EMBEDDER } from './rag/embedder.port';
 import { FakeEmbedder } from './rag/fake-embedder';
@@ -303,5 +304,57 @@ describe('KnowledgeCoreModule (integration)', () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(indexPage).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ★2026-07-30: 샌드박스(패키지 컨테이너)에 갇힌 페이지를 앱이 부팅할 때 데려온다.
+// 여기서 통합으로 보는 건 두 가지다 — (1) 부팅 순서상 가져온 페이지가 이번 부팅의 재색인에 들어가
+// 바로 검색되는가 (2) git에 커밋되는가. (2)는 실측으로 발견한 구멍이다: WikiEngine의 모든 쓰기는
+// commitAll(msg, relPath)로 경로를 지정해 커밋하므로 파일만 복사하면 영영 untracked로 남아
+// git 원격 동기화를 쓰는 사용자의 다른 기기로 가지 않는다.
+describe('KnowledgeCoreModule — 샌드박스 페이지 가져오기', () => {
+  let root: string;
+  beforeEach(async () => { root = await fs.mkdtemp(path.join(os.tmpdir(), 'engram-kc-import-')); });
+  afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
+
+  it('갇힌 페이지를 데려와 색인하고 git에 커밋한다', async () => {
+    const dataDir = path.join(root, 'Roaming', 'Engram');
+    const local = path.join(root, 'Local');
+    const trapped = path.join(local, 'Packages', 'Claude_x', 'LocalCache', 'Roaming', 'Engram', 'wiki', 'pages', DEFAULT_USER);
+    await fs.mkdir(trapped, { recursive: true });
+    await fs.writeFile(
+      path.join(trapped, 'trapped.md'),
+      serializePage({
+        slug: 'trapped',
+        frontmatter: { title: '갇힌 페이지', category: 'test', status: 'published', sources: ['mcp'], created: '2026-07-30T00:00:00.000Z', updated: '2026-07-30T00:00:00.000Z' },
+        body: 'sandbox rescued body',
+      }),
+    );
+
+    const saved = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = local;
+    try {
+      const ref: TestingModule = await Test.createTestingModule({ imports: [KnowledgeCoreModule] })
+        .overrideProvider(PathResolver).useValue(new PathResolver(dataDir))
+        .overrideProvider(EMBEDDER).useClass(FakeEmbedder)
+        .overrideProvider(BOOT_RETRY_OPTIONS).useValue({ attempts: 2, baseDelayMs: 1, maxDelayMs: 2 })
+        .compile();
+      await ref.init();
+
+      // (1) 파일이 제자리에 오고, 같은 부팅의 재색인에 포함돼 검색된다.
+      const wiki = ref.get(WikiEngine);
+      expect((await wiki.listPages(undefined, DEFAULT_USER)).map((p) => p.slug)).toContain('trapped');
+      const hits = await ref.get(RagStore).search('rescued', 10);
+      expect(hits.map((h: { slug: string }) => h.slug)).toContain('trapped');
+
+      // (2) untracked로 남지 않는다 — 커밋 메시지에 흔적이 있어야 원격으로도 나간다.
+      const messages = await ref.get(WikiGit).recentMessages(10);
+      expect(messages.some((m) => m.includes('import') && m.includes('trapped'))).toBe(true);
+
+      await ref.close();
+    } finally {
+      if (saved === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = saved;
+    }
   });
 });

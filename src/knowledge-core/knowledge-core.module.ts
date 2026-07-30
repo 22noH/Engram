@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Inject, Module, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PathResolver, DEFAULT_USER } from '../pal/path-resolver';
 import { WikiEngine } from './wiki/wiki-engine';
@@ -117,7 +118,7 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
       // 가상화 밖에 있는 이쪽이 정리한다. 경고만 찍던 걸 실제 이동으로 바꿨다 — 11장이 몇 주 갇혀
       // 있었고 사용자가 손으로 옮겼다. ensureRepo 뒤에 두는 이유: 가져온 페이지가 이번 부팅의
       // 재색인에 포함되고, git 저장소가 이미 준비된 상태여야 다음 커밋이 이 파일들을 담는다.
-      this.importSandboxedPages();
+      await this.importSandboxedPages();
 
       // ★근본픽스(2026-07-20): RAG 초기화 실패는 더 이상 이 메서드를 throw로 죽이지 않는다.
       // git.ensureRepo()·wiki 재색인·watcher 시작 등 그 외 단계 실패는 오늘과 동일하게 throw
@@ -159,10 +160,23 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
 
   // 갈라진(샌드박스) 저장소에서 페이지를 데려온다. 계측이 본 작업을 막지 못하게 never-throw —
   // 파일을 못 옮겨도 부팅은 계속돼야 한다(오늘의 교훈: 한 장의 문제가 앱을 못 켜게 하면 안 된다).
-  private importSandboxedPages(): void {
+  private async importSandboxedPages(): Promise<void> {
     try {
       const r = importSplitStorePages(this.paths.getDataDir());
       if (r.imported.length > 0) {
+        // ★가져온 파일은 반드시 커밋한다(2026-07-30 실측으로 발견한 구멍). WikiEngine의 모든 쓰기는
+        // commitAll(msg, relPath)로 **경로를 지정해** 커밋하므로, 파일만 복사하면 영영 untracked로
+        // 남는다 — git 원격 동기화를 쓰는 사용자에게는 가져온 페이지가 다른 기기로 가지 않고,
+        // 버전 관리되는 지식 베이스인데 가져온 사실이 이력에 안 남는다. (유실 위험은 없다: pull은
+        // merge고 코드베이스에 git clean이 없어서 untracked 파일이 지워지지는 않는다.)
+        // 경로를 하나씩 지정해 커밋한다 — add('.')로 쓸어담으면 무관한 더티 상태까지 끌어온다.
+        for (const rel of r.imported) {
+          try {
+            await this.git.commitAll(`import ${rel} (sandboxed store)`, path.join('pages', rel));
+          } catch (err) {
+            this.logger.warn(`가져온 페이지 커밋 실패(파일은 이미 제자리에 있습니다): ${rel} — ${String(err)}`, 'KnowledgeCoreModule');
+          }
+        }
         this.logger.log(
           `샌드박스에 갇혀 있던 위키 페이지 ${r.imported.length}장을 가져왔습니다(${r.from.join(', ')}): ${r.imported.join(', ')}`,
           'KnowledgeCoreModule',
