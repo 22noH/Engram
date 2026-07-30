@@ -125,7 +125,10 @@ export function saveConfirmMessage(req: WikiSaveRequest): string {
     ``,
     `Title: ${req.title}`,
     `Target: ${target}`,
-    `Action: ${what}${req.op === 'propose' ? ' (queued as a proposal)' : ''}`,
+    // ★문구 정정(2026-07-30): '(queued as a proposal)'이라 적어 뒤에 검토 단계가 또 있는 것처럼
+    // 오해시켰다. 실제로는 이 창에서 저장을 누르는 순간 게시된다(engram-mcp.ts의 accept 분기가
+    // 곧바로 approve까지 한다). 되돌릴 큐가 없으므로 사실대로 말한다.
+    `Action: ${what}${req.op === 'propose' ? ' — saved right away when you accept' : ''}`,
     ``,
     preview(req.content),
   ].join('\n');

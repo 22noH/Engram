@@ -121,8 +121,9 @@ const WIKI_LIST_TOOL: Tool = {
 const WIKI_PROPOSE_TOOL: Tool = {
   name: 'wiki_propose',
   description:
-    'Propose new knowledge for the Engram wiki. A human reviews and approves it in the Engram app — nothing is written directly. ' +
-    'Safe to call: it only queues a proposal locally. It never edits or deletes an existing page, and publishing requires a separate human approval.',
+    'Save knowledge to the Engram wiki, asking the user first. It shows them a dialog with the title, the target page and a preview; ' +
+    'accepting publishes it right then. Only when no dialog can be shown is it left queued for approve_proposal. ' +
+    'It never edits or deletes an existing page — a new page is created, or the text is appended to the page you name.',
   // 제안 큐에 한 줄 넣을 뿐 — 기존 페이지를 고치거나 지우지 않고, 게시는 사람 승인을 또 거친다.
   annotations: ADDITIVE_LOCAL,
   inputSchema: {
@@ -471,9 +472,9 @@ const PROMPTS: EngramPrompt[] = [
     text: (a) => `Search the Engram wiki using the wiki_search tool with query: ${a.query ?? ''}. Read the most relevant hits with wiki_read if needed, then answer based on what the wiki actually says. If nothing relevant is found, say so.`,
   },
   {
-    name: 'wiki-save', description: 'Save knowledge from this conversation to the Engram wiki (as a proposal — a human approves)',
+    name: 'wiki-save', description: 'Save knowledge from this conversation to the Engram wiki (asks you first)',
     args: [{ name: 'topic', description: 'optional — what to save; defaults to the key insight of the conversation', required: false }],
-    text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body). Before submitting, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass its slug to wiki_propose so your note is appended there instead of creating a duplicate; otherwise submit without a slug to create a new page. Then tell the user the proposal id and that a human must approve it before it appears in the wiki.`,
+    text: (a) => `Distill ${a.topic ? `the topic "${a.topic}"` : 'the most valuable reusable knowledge from this conversation'} into a concise wiki page (clear title, markdown body). Before submitting, search the wiki (wiki_search) for an existing page on the same topic — if one clearly covers it, pass its slug to wiki_propose so your note is appended there instead of creating a duplicate; otherwise submit without a slug to create a new page. Then report the result as wiki_propose gave it: it shows the user a dialog and, when they accept, the page is saved right then — say it is saved and stop. Only if it reports the item as queued (nobody could be asked) tell the user it is waiting for approve_proposal.`,
   },
   // 위키 정리(마이그레이션, 2026-07-27). 도구는 이미 다 있었지만 "전체를 한 번에 정리해라"는
   // 입구가 없어서 아무도 못 했다. 분류는 고정 목록이 아니라 지금 위키에 뭐가 들었느냐에서 나온다.
@@ -527,10 +528,13 @@ export function instructionsWithPluginNotice(env: NodeJS.ProcessEnv = process.en
   return notice ? `${ENGRAM_MCP_INSTRUCTIONS}\n\n${notice}` : ENGRAM_MCP_INSTRUCTIONS;
 }
 
-export function buildMcpServer(deps: McpDeps): Server {
+// extraNotice: 이 실행 환경에서만 참인 사실(예: 쓰기가 샌드박스로 리디렉션된다)을 안내문 끝에 붙인다.
+// 로그가 아니라 instructions에 실어야 모델을 거쳐 사용자에게 닿는다.
+export function buildMcpServer(deps: McpDeps, extraNotice?: string | null): Server {
+  const base = instructionsWithPluginNotice();
   const server = new Server(
     { name: 'engram', version: '1.0.0' },
-    { capabilities: { tools: {}, prompts: {} }, instructions: instructionsWithPluginNotice() },
+    { capabilities: { tools: {}, prompts: {} }, instructions: extraNotice ? `${base}\n\n${extraNotice}` : base },
   );
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
