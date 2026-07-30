@@ -184,6 +184,7 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
   // 답을 돌려주면서 앱이 영영 못 보는 두 번째 위키를 만든다 — 그건 성공이 아니라 조용한 실패다.
   // 읽기·검색은 그대로 둔다(합쳐진 뷰라 사용자에겐 정상으로 보이고, 막아서 얻을 게 없다).
   const redirected = probeRedirect(paths.getDataDir());
+  let redirectNotice: string | null = null;
   // ProposalApplier는 DI 없이도 되는 순수 클래스(WikiEngine+ProposalStore만 소비) — HeadlessCoreModule에
   // 등록해 EdgeModule 전체를 끌어올 필요 없이 직접 생성.
   const applier = new ProposalApplier(wiki, proposals);
@@ -203,15 +204,17 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
 
   // 리디렉션이 확인되면 쓰기 도구를 아예 빼고, propose는 이유를 들고 실패한다(도구층이 isError로
   // 감싼다). 조용히 성공한 척하지 않는 것이 요점이다 — 사용자는 저장이 안 됐다는 걸 즉시 알아야 한다.
+  // ★회귀 정정(2026-07-30): 여기서 저장을 **거부**했다 — 틀렸다. 앱이 없는 사용자에게 그 리디렉션된
+  // 저장소는 **유일한 위키**다. 갈라질 상대가 없는데 갈라짐을 막겠다고 저장을 막고, 없는 앱을 켜라고
+  // 안내했다(실측 재현: "Start the Engram app and try again"). 조용한 실패가 나쁜 것과 별개로,
+  // **아예 못 쓰게 만드는 건 더 나쁘다.** 이제 막지 않고 사실만 알린다 — 모델이 보는 곳에 실어야
+  // 사용자에게 닿는다(stderr는 아무도 안 본다).
   if (redirected) {
-    const why =
-      `refused: saving here would create a second wiki that the Engram app can never see. ` +
-      `This MCP server runs inside a sandboxed app, so its writes to ${paths.getDataDir()} are redirected to ${redirected}. ` +
-      `Start the Engram app and try again — then saves go through the app into the real wiki.`;
-    process.stderr.write(`[mcp-headless] writes disabled — ${why}\n`);
-    deps.propose = async () => { throw new Error(why); };
-    deps.write = null;
-    deps.recategorize = null;
+    redirectNotice =
+      `NOTE: this MCP server runs inside a sandboxed app, so its writes to ${paths.getDataDir()} actually land in ` +
+      `${redirected}. Saving works. But if the Engram desktop app is installed later it will not see these pages — ` +
+      `they are in the sandbox's private store. Tell the user this the first time they save, then drop it.`;
+    process.stderr.write(`[mcp-headless] ${redirectNotice}\n`);
   }
 
   // 위키 git 원격 동기화(main.ts:124 배선의 헤드리스 짝) — config/wiki-remote.json에 원격이 있을
@@ -232,7 +235,7 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
     void sync.start(); // 시작 pull/push는 백그라운드(MCP initialize를 네트워크에 물리지 않는다)
   }
 
-  const server = buildMcpServer(sync ? sync.wrap(deps) : deps);
+  const server = buildMcpServer(sync ? sync.wrap(deps) : deps, redirectNotice);
   server.onerror = (e) => console.error('[mcp-headless] core server error:', e);
   const transport = new StdioServerTransport();
 
