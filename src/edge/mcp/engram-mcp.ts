@@ -124,7 +124,9 @@ const WIKI_PROPOSE_TOOL: Tool = {
     'Save knowledge to the Engram wiki, asking the user first. It shows them a dialog with the title, the target page and a preview; ' +
     'accepting publishes it right then. Only when no dialog can be shown is it left queued for approve_proposal. ' +
     'It never edits or deletes an existing page — a new page is created, or the text is appended to the page you name.',
-  // 제안 큐에 한 줄 넣을 뿐 — 기존 페이지를 고치거나 지우지 않고, 게시는 사람 승인을 또 거친다.
+  // 비파괴로 보는 근거: 기존 페이지를 고치거나 지우지 않는다(새 페이지 생성 또는 지정한 페이지에 덧붙이기).
+  // ⚠️"게시는 사람 승인을 또 거친다"고 적혀 있던 주석은 삭제했다 — 승인창에서 저장을 누르면 그 자리에서
+  // 게시되는 것이 확정 시나리오다(2026-07-30). 위 설명문과 정반대라 읽는 사람을 속였다.
   annotations: ADDITIVE_LOCAL,
   inputSchema: {
     type: 'object',
