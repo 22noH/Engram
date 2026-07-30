@@ -1,3 +1,5 @@
+import * as os from 'os';
+import * as path from 'path';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -37,6 +39,24 @@ async function connectedSession(deps: McpDeps): Promise<McpSession> {
 }
 
 describe('buildMcpServer', () => {
+  // ★이 테스트는 개발 머신의 상태를 읽고 있었다(2026-07-30 실측). instructions 뒤에는 낡은 플러그인
+  // 안내가 붙을 수 있고(v0.0.22 기능), 그 판정은 `~/.claude/plugins/installed_plugins.json`을 읽는다.
+  // 그래서 레포 버전과 이 컴퓨터에 설치된 플러그인 버전이 어긋나는 순간 — 릴리스 직후엔 반드시 어긋난다 —
+  // 제품엔 아무 문제가 없는데도 실패했다. 홈 디렉터리를 빈 곳으로 돌려 기계 상태와 무관하게 만든다.
+  const HOME_ENVS = ['USERPROFILE', 'HOME'];
+  let savedHome: Array<string | undefined> = [];
+  beforeEach(() => {
+    savedHome = HOME_ENVS.map((k) => process.env[k]);
+    HOME_ENVS.forEach((k) => { process.env[k] = path.join(os.tmpdir(), 'engram-no-plugin-home'); });
+  });
+  afterEach(() => {
+    HOME_ENVS.forEach((k, i) => {
+      const v = savedHome[i];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    });
+  });
+
   it('initialize: instructions로 선제 저장 제안 안내를 클라이언트에 전달', async () => {
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await buildMcpServer(makeDeps()).connect(serverT);
