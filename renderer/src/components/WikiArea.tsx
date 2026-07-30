@@ -118,6 +118,11 @@ export function WikiArea(props: {
       <div className="wikiList">
         {tab === 'pages' && (
           q === '' ? (
+            // 페이지가 0장이면 백지였다 — 첫 실행 사용자에게는 이게 앱의 첫 화면인데
+            // "비어 있음"인지 "고장"인지 구분이 안 됐다. 개발 머신은 페이지가 많아 안 보이던 화면.
+            props.pages.length === 0 ? (
+              <div className="empty">{T.wikiPagesEmpty}</div>
+            ) : (
             // 폴더 트리(목업 승인 2026-07-27). 폴더는 고정 목록이 아니라 페이지들의 category에서
             // 파생된다 — 위키 내용이 바뀌면 트리도 따라 바뀐다. 폴더가 곧 분류라 페이지 줄에서
             // 분류 칩은 뺐다(같은 정보 두 번).
@@ -128,6 +133,7 @@ export function WikiArea(props: {
               onToggle={toggleFolder}
               onOpenPage={props.onOpenPage}
             />
+            )
           ) : props.searchResults.length === 0 ? (
             <div className="empty">{T.wikiNoResults}</div>
           ) : (

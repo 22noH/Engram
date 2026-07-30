@@ -61,6 +61,8 @@ export const T = {
   // Phase 15a — 위키(페이지 읽기 + 승인함)
   wikiPages: ko ? '페이지' : 'Pages',
   wikiInbox: ko ? '승인함' : 'Inbox',
+  // 빈 위키(첫 실행)가 백지로 보이던 것 — 개발 머신은 페이지가 많아 절대 안 보이는 화면이었다.
+  wikiPagesEmpty: ko ? '아직 저장된 페이지가 없습니다' : 'No pages yet',
   wikiInboxEmpty: ko ? '대기 중인 제안이 없습니다' : 'No pending proposals',
   wikiFilterPh: ko ? '필터…' : 'Filter…',
   wikiSearchPh: ko ? '위키 검색…' : 'Search wiki…',
