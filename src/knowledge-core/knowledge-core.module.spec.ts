@@ -331,6 +331,10 @@ describe('KnowledgeCoreModule — 샌드박스 페이지 가져오기', () => {
       }),
     );
 
+    // 막 쓰인 파일은 가져오지 않는다(잘린 사본 방지, SETTLE_MS) — 몇 분 전에 저장된 파일로 만든다.
+    const old = new Date(Date.now() - 10 * 60_000);
+    await fs.utimes(path.join(trapped, 'trapped.md'), old, old);
+
     const saved = process.env.LOCALAPPDATA;
     process.env.LOCALAPPDATA = local;
     try {

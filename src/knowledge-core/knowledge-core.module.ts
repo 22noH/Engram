@@ -1,10 +1,10 @@
-import * as path from 'path';
 import { Inject, Module, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PathResolver, DEFAULT_USER } from '../pal/path-resolver';
 import { WikiEngine } from './wiki/wiki-engine';
 import { WikiGit } from './wiki/wiki-git';
 import { WikiPage } from './wiki/page.types';
 import { importSplitStorePages } from './wiki/split-store';
+import { parsePage } from './wiki/page-serializer';
 import { EMBEDDER } from './rag/embedder.port';
 import { TransformersEmbedder } from './rag/transformers-embedder';
 import { CachingEmbedder } from './rag/caching-embedder';
@@ -162,35 +162,46 @@ export class KnowledgeCoreModule implements OnModuleInit, OnModuleDestroy {
   // 파일을 못 옮겨도 부팅은 계속돼야 한다(오늘의 교훈: 한 장의 문제가 앱을 못 켜게 하면 안 된다).
   private async importSandboxedPages(): Promise<void> {
     try {
-      const r = importSplitStorePages(this.paths.getDataDir());
+      // ★가져온 파일은 반드시 커밋한다(2026-07-30 실측으로 발견한 구멍). WikiEngine의 모든 쓰기는
+      // commitAll(msg, relPath)로 **경로를 지정해** 커밋하므로, 파일만 복사하면 영영 untracked로
+      // 남는다 — git 원격 동기화를 쓰는 사용자에게는 가져온 페이지가 다른 기기로 가지 않고, 버전
+      // 관리되는 지식 베이스인데 가져온 사실이 이력에 안 남으며, 나중에 그 페이지를 지우면
+      // deletePage의 경로 지정 커밋이 pathspec 오류로 던진다(파일은 사라졌는데 색인엔 남는다).
+      // 커밋이 성공해야 원장에 기록되므로 실패는 다음 부팅에 저절로 재시도된다.
+      // ★가져오기 전에 파싱을 검증한다 — 깨진 frontmatter 한 장이 곧이어 도는 listPages를
+      // 실패시키면 부팅이 끝나지 않는다(오늘 아침에 고친 것과 같은 부류).
+      const r = await importSplitStorePages(this.paths.getDataDir(), {
+        commit: (rel) => this.git.commitAll(`import ${rel} (sandboxed store)`, rel),
+        validate: (text) => { parsePage('validate', text); },
+      });
       if (r.imported.length > 0) {
-        // ★가져온 파일은 반드시 커밋한다(2026-07-30 실측으로 발견한 구멍). WikiEngine의 모든 쓰기는
-        // commitAll(msg, relPath)로 **경로를 지정해** 커밋하므로, 파일만 복사하면 영영 untracked로
-        // 남는다 — git 원격 동기화를 쓰는 사용자에게는 가져온 페이지가 다른 기기로 가지 않고,
-        // 버전 관리되는 지식 베이스인데 가져온 사실이 이력에 안 남는다. (유실 위험은 없다: pull은
-        // merge고 코드베이스에 git clean이 없어서 untracked 파일이 지워지지는 않는다.)
-        // 경로를 하나씩 지정해 커밋한다 — add('.')로 쓸어담으면 무관한 더티 상태까지 끌어온다.
-        for (const rel of r.imported) {
-          try {
-            await this.git.commitAll(`import ${rel} (sandboxed store)`, path.join('pages', rel));
-          } catch (err) {
-            this.logger.warn(`가져온 페이지 커밋 실패(파일은 이미 제자리에 있습니다): ${rel} — ${String(err)}`, 'KnowledgeCoreModule');
-          }
-        }
         this.logger.log(
           `샌드박스에 갇혀 있던 위키 페이지 ${r.imported.length}장을 가져왔습니다(${r.from.join(', ')}): ${r.imported.join(', ')}`,
           'KnowledgeCoreModule',
         );
       }
-      // 충돌은 매 부팅 반복된다(가져오지 않으니 상태가 그대로다) — 실측: 사용자 머신에서 11장이
-      // 걸렸고 전부 분류만 낡은 사본이었다(`category: external` vs 정리된 폴더명). 그래서 파일명을
-      // 다 늘어놓지 않고 요약만 남긴다. 조용히 삼키지도 않는다 — 진짜로 앱 쪽이 잘못된 경우
-      // 사람이 이 줄을 보고 찾아갈 수 있어야 한다.
+      // 충돌은 한 번만 보고된다(원장에 남기므로 다음 부팅엔 조용하다) — 실측: 사용자 머신에서
+      // 11장이 걸렸고 전부 분류만 낡은 사본이었다(`category: external` vs 정리된 폴더명).
+      // 파일명을 다 늘어놓지 않고 요약만 남긴다. 조용히 삼키지도 않는다 — 진짜로 앱 쪽이 잘못된
+      // 경우 사람이 이 줄을 보고 찾아갈 수 있어야 한다.
       if (r.conflicts.length > 0) {
         const head = r.conflicts.slice(0, 3).join(', ');
         const rest = r.conflicts.length > 3 ? ` 외 ${r.conflicts.length - 3}장` : '';
         this.logger.log(
           `갈라진 저장소에 이름은 같고 내용이 다른 사본 ${r.conflicts.length}장이 있습니다 — 이쪽을 최신으로 보고 그대로 뒀습니다(${head}${rest})`,
+          'KnowledgeCoreModule',
+        );
+      }
+      // 실패·보류를 침묵시키지 않는다 — "전부 실패"와 "할 일 없음"이 로그에서 같아 보이면 안 된다.
+      if (r.failed.length > 0) {
+        this.logger.warn(
+          `가져오지 못한 페이지 ${r.failed.length}장(다음 부팅에 다시 시도합니다): ${r.failed.slice(0, 3).join(', ')}`,
+          'KnowledgeCoreModule',
+        );
+      }
+      if (r.skipped.length > 0) {
+        this.logger.log(
+          `아직 데려오지 않은 페이지 ${r.skipped.length}장(막 쓰이는 중이거나 형식이 깨진 파일 — 다음 부팅에 다시 봅니다): ${r.skipped.slice(0, 3).join(', ')}`,
           'KnowledgeCoreModule',
         );
       }

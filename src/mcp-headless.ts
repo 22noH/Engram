@@ -7,7 +7,8 @@ import { NestFactory } from '@nestjs/core';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { HeadlessCoreModule } from './knowledge-core/headless-core.module';
 import { WikiEngine } from './knowledge-core/wiki/wiki-engine';
-import { splitStoreWarning, probeRedirect } from './knowledge-core/wiki/split-store';
+import { splitStoreWarning, probeRedirect, importSplitStorePages } from './knowledge-core/wiki/split-store';
+import { parsePage } from './knowledge-core/wiki/page-serializer';
 import { ProposalStore } from './knowledge-core/proposal-store';
 import { ProposalApplier } from './edge/proposal-applier';
 import { buildMcpServer, McpDeps } from './edge/mcp/engram-mcp';
@@ -219,6 +220,26 @@ async function runCore(dataDir: string, writeMode: boolean, mode: 'core' | 'brid
       `the next time the app starts — the app imports pages from this store on boot. Nothing to move by hand. ` +
       `Say this once if the user wonders why a new page is not in the app yet, then drop it.`;
     process.stderr.write(`[mcp-headless] ${redirectNotice}\n`);
+  } else if (split) {
+    // ★앱이 없는 사용자도 합쳐진다(2026-07-30 적대적 검토 지적). 갈라진 저장소를 발견했는데
+    // **내 쓰기는 리디렉션되지 않는다** = 이 프로세스가 가상화 밖에 있다 = 앱이 하는 일을 내가
+    // 할 수 있다. 실제 조합: 사용자가 클로드 데스크톱(샌드박스)과 클로드 코드 CLI(샌드박스 아님)를
+    // 같이 쓰면, 갇힌 페이지를 CLI 쪽이 데려온다 — 엔그램 앱이 아예 없어도 위키가 한 벌이 된다.
+    // redirected가 null일 때만 돈다 — 내가 가상화된 쪽이면 데려와도 또 오버레이에 쓸 뿐이다.
+    void importSplitStorePages(paths.getDataDir(), {
+      commit: (rel) => app.get(WikiGit).commitAll(`import ${rel} (sandboxed store)`, rel),
+      validate: (text) => { parsePage('validate', text); },
+    }).then((r) => {
+      if (r.imported.length > 0) {
+        process.stderr.write(`[mcp-headless] 갇혀 있던 위키 페이지 ${r.imported.length}장을 가져왔습니다: ${r.imported.join(', ')}\n`);
+      }
+      if (r.failed.length > 0) {
+        process.stderr.write(`[mcp-headless] 가져오지 못한 페이지 ${r.failed.length}장 — 다음 실행에 다시 시도합니다\n`);
+      }
+    }).catch((e) => {
+      // never-throw: 못 데려와도 MCP 서버는 정상 동작해야 한다.
+      process.stderr.write(`[mcp-headless] 샌드박스 페이지 가져오기 실패(건너뜀): ${e instanceof Error ? e.message : String(e)}\n`);
+    });
   }
 
   // 위키 git 원격 동기화(main.ts:124 배선의 헤드리스 짝) — config/wiki-remote.json에 원격이 있을

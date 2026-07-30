@@ -465,6 +465,8 @@ describe('RagStore — 네이티브 인덱스 패닉 격리(2026-07-25)', () => 
     spy.mockRestore();
   });
 
+  // ★부하 걸린 전체 실행에서 기본 5초를 넘겼다(2026-07-30, 격리 3/3 통과 — 시간 가정 문제).
+  // 실제 LanceDB 정비를 상한까지 반복하는 테스트라 콜드 윈도우 러너에서는 5초가 모자란다.
   it('정비가 계속 패닉하면 상한 안에서 FTS 인덱스만 재생성하고, 상한을 넘으면 정비를 영구 중단한다(무한 루프 없음)', async () => {
     const optSpy = jest.spyOn(store as unknown as Seam, 'optimizeTable').mockImplementation(panic);
     const idxSpy = jest.spyOn(store as unknown as Seam, 'createFtsIndex').mockImplementation(panic);
@@ -493,7 +495,7 @@ describe('RagStore — 네이티브 인덱스 패닉 격리(2026-07-25)', () => 
     await expect(store.indexPage(page('after-degrade', '디그레이드 후에도 저장'))).resolves.toBeUndefined();
     const hits = await store.search('디그레이드 후에도 저장', 50);
     expect(hits.map((h) => h.slug)).toContain('after-degrade');
-  });
+  }, 30_000);
 
   it('FTS 인덱스가 아예 없어도 검색은 빈 배열이 아니라 벡터 단독 결과로 디그레이드한다', async () => {
     // createIndex를 계속 실패시켜 FTS 인덱스가 한 번도 안 만들어진 상태를 만든다.

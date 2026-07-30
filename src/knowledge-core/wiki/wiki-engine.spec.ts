@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { PathResolver, DEFAULT_USER } from '../../pal/path-resolver';
@@ -359,5 +360,39 @@ describe('WikiEngine + PAGE_INDEXER', () => {
   it('search: 빈/공백 쿼리는 indexer 미호출·빈 배열', async () => {
     expect(await engine.search('   ')).toEqual([]);
     expect(spy.searchQueries).toEqual([]);
+  });
+});
+
+// ★2026-07-30 적대적 검토: getPage는 ENOENT가 아닌 에러를 그대로 던지고 readForList가 안 잡아서,
+// YAML이 깨진 페이지 한 장이 listPages를 reject시켰다 — 그러면 onModuleInit의 await가 끝나지 않아
+// **앱이 안 켜진다**. 손편집·git 동기화·잘린 쓰기로 언제든 생기는 파일이다. 목록에서 떨어뜨리고
+// 부팅은 계속한다(getPage 자체의 계약은 그대로: 한 페이지를 콕 집어 열 때는 원인을 알아야 한다).
+describe('WikiEngine listPages — 깨진 페이지가 부팅을 세우지 않는다', () => {
+  const tmps: string[] = [];
+  afterAll(() => { for (const d of tmps) fsSync.rmSync(d, { recursive: true, force: true }); });
+
+  function engine(): { wiki: WikiEngine; pagesDir: string } {
+    const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'engram-broken-'));
+    tmps.push(dir);
+    const paths = new PathResolver(dir);
+    const pagesDir = paths.getWikiPagesDir(DEFAULT_USER);
+    fsSync.mkdirSync(pagesDir, { recursive: true });
+    return { wiki: new WikiEngine(paths, { commitAll: async () => {}, ensureRepo: async () => {} } as never, new KeyedLock()), pagesDir };
+  }
+
+  it('YAML이 깨진 페이지는 목록에서 떨어지고 나머지는 그대로 나온다', async () => {
+    const { wiki, pagesDir } = engine();
+    fsSync.writeFileSync(path.join(pagesDir, 'good.md'), ['---', 'title: 정상', 'status: published', '---', 'body'].join('\n'));
+    // gray-matter가 파싱에 실패하는 frontmatter(닫히지 않은 flow 시퀀스).
+    fsSync.writeFileSync(path.join(pagesDir, 'broken.md'), ['---', 'title: [열고 안 닫음', 'status: published', '---', 'body'].join('\n'));
+
+    const pages = await wiki.listPages(undefined, DEFAULT_USER);
+    expect(pages.map((p) => p.slug)).toEqual(['good']);
+  });
+
+  it('깨진 페이지 하나만 있어도 목록은 빈 배열로 성공한다(reject 아님)', async () => {
+    const { wiki, pagesDir } = engine();
+    fsSync.writeFileSync(path.join(pagesDir, 'only-broken.md'), ['---', 'title: [열고 안 닫음', '---', 'x'].join('\n'));
+    await expect(wiki.listPages(undefined, DEFAULT_USER)).resolves.toEqual([]);
   });
 });

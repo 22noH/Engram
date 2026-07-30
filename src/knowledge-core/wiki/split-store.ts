@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -111,12 +112,65 @@ export function probeRedirect(dataDir: string, env: NodeJS.ProcessEnv = process.
 }
 
 export interface SplitImportResult {
-  /** 가져온 페이지("userId/slug.md"). */
+  /** 이번에 가져온 페이지("userId/slug.md"). */
   imported: string[];
   /** 이미 있는데 내용이 달라 **건드리지 않은** 것. 앱 쪽이 이긴다. */
   conflicts: string[];
+  /** 지금은 데려오지 않은 것(막 쓰이는 중이거나 파싱이 안 되는 파일). 다음 부팅에 다시 본다. */
+  skipped: string[];
+  /** 복사·커밋이 실패한 것. 조용히 삼키지 않는다(다음 부팅에 재시도된다). */
+  failed: string[];
   /** 스캔한 갈라진 저장소 경로들. */
   from: string[];
+}
+
+// 원장(ledger) — "이 원본 내용은 이미 처리했다"를 기억하는 파일. state/에 둔다(위키 트리 밖 —
+// 거기 두면 원장 자체가 위키 페이지처럼 동기화된다). rag-index.json과 같은 자리·같은 결.
+const LEDGER = 'split-import.json';
+
+// 막 쓰인 파일은 건드리지 않는다. 컨테이너 쪽 WikiEngine은 평범한 writeFile로 쓰므로 저장 도중에
+// 복사하면 잘린 바이트를 가져올 수 있고, 그 잘린 사본이 영구 사본이 된다(그다음부터는 원본과 달라
+// 영원히 conflict로 분류된다). 몇 초 기다렸다 다음 부팅에 데려오는 편이 훨씬 싸다.
+const SETTLE_MS = 3_000;
+
+type Ledger = Record<string, string>;
+
+function ledgerPath(dataDir: string): string {
+  return path.join(dataDir, 'state', LEDGER);
+}
+
+function loadLedger(dataDir: string): Ledger {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(ledgerPath(dataDir), 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Ledger = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'string') out[k] = v;
+      }
+      return out;
+    }
+  } catch { /* 없거나 깨짐 → 빈 원장(안전측: 다시 판단한다) */ }
+  return {};
+}
+
+function saveLedger(dataDir: string, ledger: Ledger): void {
+  try {
+    fs.mkdirSync(path.dirname(ledgerPath(dataDir)), { recursive: true });
+    fs.writeFileSync(ledgerPath(dataDir), JSON.stringify(ledger, null, 2));
+  } catch { /* 원장을 못 써도 부팅은 계속된다 — 다음 부팅에 다시 판단할 뿐이다 */ }
+}
+
+export interface SplitImportOptions {
+  env?: NodeJS.ProcessEnv;
+  /**
+   * 가져온 페이지를 커밋한다("pages/<user>/<slug>.md" 기준 상대경로를 받는다). 이게 성공해야
+   * 원장에 기록한다 — 실패하면 다음 부팅에 다시 시도한다. 미지정이면 커밋 없이 기록만 한다.
+   */
+  commit?: (rel: string) => Promise<void>;
+  /** 파싱 검증(주입 — split-store가 page-serializer에 의존하지 않게). 던지면 그 파일은 건너뛴다. */
+  validate?: (text: string) => void;
+  /** 테스트용 현재 시각. */
+  now?: number;
 }
 
 /**
@@ -132,19 +186,35 @@ export interface SplitImportResult {
  * 기존 페이지 수정은 진짜 폴더로 갔다). 이 함수는 그 기전에 의존하지 않는다 — "저쪽에 있는데
  * 이쪽에 없는 것"을 데려올 뿐이라 어느 쪽이든 결과가 같다.
  *
+ * ★★원장이 필요한 이유(2026-07-30 적대적 검토에서 재현된 치명 버그). 처음엔 "대상 파일이 이미
+ * 있으면 가져온 것"으로 판정했다. 그런데 원본은 절대 지우지 않으므로, 사용자가 **앱에서 페이지를
+ * 지우면** 다음 부팅에 대상이 없어져 그 페이지가 되살아난다 — 부팅마다, 영원히. 사용자는 막을
+ * 방법이 없다(그 사본은 다른 앱의 사설 폴더에 있어 화면에서 보이지도 않는다). 충돌로 분류됐던
+ * 페이지는 더 나쁘다: 지우면 **낡은 샌드박스 버전**이 되살아난다. 그래서 판정 기준을 "대상이
+ * 있는가"에서 "이 원본 내용을 이미 처리했는가"로 바꿨다 — 원본 바이트의 sha256을 원장에 남긴다.
+ * 삭제는 유지되고, 원본이 진짜로 새 내용으로 바뀌면(해시가 다르면) 그때만 다시 데려온다.
+ *
  * 안전 규칙:
  *  - 원본은 **절대 지우지 않는다**(사용자 데이터다. 실패해도 잃는 게 없다).
  *  - 이미 있고 내용이 다르면 **덮어쓰지 않는다** — 앱이 쓴 쪽이 최신일 수 있다. 기록만 남긴다.
- *  - 두 번째 부팅부터는 파일이 이미 있으므로 자연히 no-op이다(별도 표식 불필요).
+ *  - 막 쓰인 파일·파싱 안 되는 파일은 데려오지 않는다(잘린 사본·부팅 정지 방지).
+ *  - 커밋이 성공해야 원장에 남긴다 — 실패하면 다음 부팅에 재시도된다.
  *  - never-throw: 한 장이 실패해도 나머지를 가져온다.
  */
-export function importSplitStorePages(
+export async function importSplitStorePages(
   dataDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): SplitImportResult {
-  const result: SplitImportResult = { imported: [], conflicts: [], from: [] };
+  opts: SplitImportOptions = {},
+): Promise<SplitImportResult> {
+  const env = opts.env ?? process.env;
+  const now = opts.now ?? Date.now();
+  const result: SplitImportResult = { imported: [], conflicts: [], skipped: [], failed: [], from: [] };
   const myPages = path.join(dataDir, 'wiki', 'pages');
-  for (const store of findSplitStores(dataDir, env)) {
+  const stores = findSplitStores(dataDir, env);
+  if (stores.length === 0) return result; // 갈라진 게 없으면 원장도 건드리지 않는다
+  const ledger = loadLedger(dataDir);
+  let ledgerDirty = false;
+
+  for (const store of stores) {
     result.from.push(store.pagesDir);
     let users: string[];
     try {
@@ -161,28 +231,79 @@ export function importSplitStorePages(
         continue; // 폴더가 아니거나 읽을 수 없음
       }
       for (const file of files) {
+        const rel = `${user}/${file}`;
         const src = path.join(srcDir, file);
         const dest = path.join(myPages, user, file);
+        const key = `${store.pagesDir}|${rel}`;
         try {
+          // 한 번만 읽는다 — 해시를 낸 바이트와 쓰는 바이트가 같아야 한다(중간에 바뀌면 아래 재확인에서 걸린다).
+          const buf = fs.readFileSync(src);
+          const hash = crypto.createHash('sha256').update(buf).digest('hex');
+          if (ledger[key] === hash) continue; // 이미 처리한 내용 → 삭제가 유지된다
+
+          const before = fs.statSync(src);
+          if (now - before.mtimeMs < SETTLE_MS) { result.skipped.push(rel); continue; }
+          if (opts.validate) {
+            try {
+              opts.validate(buf.toString('utf8'));
+            } catch {
+              // 못 읽는 바이트를 저장소에 들이지 않는다 — 부팅 경로가 곧 이 폴더를 읽는다.
+              result.skipped.push(rel);
+              continue;
+            }
+          }
+
+          const relFromWiki = path.join('pages', user, file);
           if (fs.existsSync(dest)) {
-            // 바이트가 같으면 이미 가져온 것 — 조용히 넘어간다(로그도 남기지 않는다).
-            if (!fs.readFileSync(src).equals(fs.readFileSync(dest))) {
-              result.conflicts.push(`${user}/${file}`);
+            if (fs.readFileSync(dest).equals(buf)) {
+              // 이미 같은 내용이 있다 = 예전에 가져왔거나 앱이 같은 걸 썼다. 커밋만 보장하고 기록한다
+              // (지난 부팅에 커밋이 실패했을 수 있다 — commitAll은 스테이징이 없으면 그냥 넘어간다).
+              try {
+                if (opts.commit) await opts.commit(relFromWiki);
+                ledger[key] = hash;
+                ledgerDirty = true;
+              } catch {
+                result.failed.push(rel);
+              }
+            } else {
+              // 앱 쪽이 이긴다. 그래도 **기록은 남긴다** — 안 남기면 사용자가 이 페이지를 지웠을 때
+              // 낡은 샌드박스 사본이 되살아난다.
+              result.conflicts.push(rel);
+              ledger[key] = hash;
+              ledgerDirty = true;
             }
             continue;
           }
+
           fs.mkdirSync(path.dirname(dest), { recursive: true });
-          // copyFile은 부분 쓰기 위험이 있다 — 임시 이름에 쓴 뒤 rename으로 원자적으로 놓는다.
+          // 임시 이름에 쓴 뒤 rename으로 원자적으로 놓는다(부분 쓰기가 저장소에 보이지 않게).
           const tmp = `${dest}.importing-${process.pid}`;
-          fs.copyFileSync(src, tmp);
+          fs.writeFileSync(tmp, buf);
+          const after = fs.statSync(src);
+          if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
+            // 우리가 읽는 동안 원본이 바뀌었다 = 잘린 사본일 수 있다. 버리고 다음 부팅에 다시 본다.
+            try { fs.unlinkSync(tmp); } catch { /* 정리 실패는 무해 */ }
+            result.skipped.push(rel);
+            continue;
+          }
           fs.renameSync(tmp, dest);
-          result.imported.push(`${user}/${file}`);
+          // 파일은 이미 제자리에 있으므로 imported로 센다. 커밋이 실패하면 failed에도 올라가고 원장에는
+          // 남기지 않는다 — 다음 부팅이 "이미 같은 내용이 있다" 분기로 들어와 커밋만 다시 시도한다.
+          result.imported.push(rel);
+          try {
+            if (opts.commit) await opts.commit(relFromWiki);
+            ledger[key] = hash;
+            ledgerDirty = true;
+          } catch {
+            result.failed.push(rel);
+          }
         } catch {
-          /* 한 장 실패는 그 한 장에서 끝난다 */
+          result.failed.push(rel); // 조용히 삼키지 않는다
         }
       }
     }
   }
+  if (ledgerDirty) saveLedger(dataDir, ledger);
   return result;
 }
 

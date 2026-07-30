@@ -62,7 +62,15 @@ export class WikiEngine {
     }
     const key = `${stat.mtimeMs}:${stat.size}`;
     const hit = this.listCache.get(file);
-    const page = hit && hit.key === key ? hit.page : await this.getPage(slug, userId);
+    // ★파싱 실패를 목록 전체의 실패로 만들지 않는다(2026-07-30 적대적 검토). getPage는 ENOENT가
+    // 아닌 에러를 그대로 던지므로, YAML이 깨진 페이지 한 장이 Promise.all을 통과해 listPages를
+    // reject시키고 그러면 onModuleInit의 await가 끝나지 않아 **앱이 안 켜진다**. 손편집·git 동기화·
+    // 잘린 쓰기로 언제든 생길 수 있는 파일이다. 목록에서는 떨어뜨리고(아래 dropped 보고가 이미
+    // 있다) 부팅은 계속한다 — getPage 자체의 계약(던진다)은 그대로 둔다: 특정 페이지를 콕 집어
+    // 열 때는 원인을 알아야 한다.
+    const page = hit && hit.key === key
+      ? hit.page
+      : await this.getPage(slug, userId).catch(() => null);
     if (!page) { this.listCache.delete(file); return null; }
     if (!hit || hit.key !== key) this.listCache.set(file, { key, page });
     // 캐시본은 공유물이라 호출자가 손대면 다음 목록까지 오염된다 — 얕은 복사로 그 사고를 막는다.
