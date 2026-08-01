@@ -53,7 +53,10 @@ describe('Orchestrator.codeRun', () => {
     expect(r.status).toBe('STUCK');
   });
 
-  it('리뷰어가 계속 미승인이면 SUCCESS 안 되고 STUCK', async () => {
+  // 정책 변경(2026-08-01, 실사고): 예전엔 "리뷰어 승인 없이는 STUCK"이었지만, 리뷰어가 잡일에
+  // 무한 미승인하며 시간을 태우는 게 실물에서 관측됐다(2분 반 작업이 12분+). 이제 보완 기회
+  // 1회 소진 후 전 티켓 착지+게이트 초록이면 SUCCESS로 마감한다(사유 게시).
+  it('리뷰어가 계속 미승인이어도 보완 1회 뒤 게이트 초록이면 SUCCESS로 마감', async () => {
     const tickets = [{ id: 'tk0', area: '.', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }];
     const tasks = {
       createCoding: async () => ({ id: 's1' }), transition: async () => {}, addTickets: async () => {},
@@ -71,7 +74,7 @@ describe('Orchestrator.codeRun', () => {
       fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
       { assertWritable: () => {}, codingFlags: () => [] } as any);
     const r = await o.codeRun('p', { maxRounds: 20, stuckK: 3 });
-    expect(r.status).toBe('STUCK');   // SUCCESS가 아니어야 한다
+    expect(r.status).toBe('SUCCESS'); // 보완 상한 소진 + 게이트 초록 = 완료(무한 리뷰 루프 차단)
   });
 
   it('opts.brain 지정 → decompose·coder.work 모두 채널 두뇌로 불리고 기본 codeBrain은 안 불림(Task 2 스펙 §3.2)', async () => {
