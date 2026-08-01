@@ -92,6 +92,17 @@ it('완료 보고서는 카드 아래에 그대로 보인다(액션 줄은 코�
   expect(document.querySelector('.reportActions')).toBeNull(); // 채팅 채널엔 변경점/PR이 없다
 });
 
+it('스레드 답글로 달린 진행 보고도 카드로 접힌다(실사고 2026-08-01 — 턴 응답은 유발 메시지 밑에 threadId가 달린다)', async () => {
+  await openWith([
+    { id: 'u1', authorId: 'me', text: '리뷰 붙여줘', ts: ts(400) },
+    ...HISTORY.slice(1, 5).map((m) => ({ ...m, threadId: 'u1' })),
+  ]);
+  expect(cards()).toHaveLength(1);
+  expect(document.querySelectorAll('.msg.progress')).toHaveLength(0); // 낱개 진행 줄 없음
+  fireEvent.click(document.querySelector('.pcHead')!);
+  expect(document.querySelectorAll('.pcStep')).toHaveLength(4);
+});
+
 it('진행 표시가 없는 보통 대화는 카드를 만들지 않는다(회귀 0)', async () => {
   await openWith([
     { id: 'a', authorId: 'me', text: '안녕', ts: ts(10) },

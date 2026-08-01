@@ -1050,9 +1050,15 @@ export default function App() {
                 <>
               <div id="msgs" ref={msgsRef} onClick={onMsgsClick}>
                 {(() => {
+                  // 진행 카드 스레드 예외(2026-08-01, 실사용 발견): 턴의 응답은 유발 메시지 밑에
+                  // threadId로 달리므로 진행 보고도 전부 "스레드 답글"이다 — threadId만으로 걸러내면
+                  // 카드가 묶일 기회가 영영 없다(자율 코딩 진행이 낱개 메시지로 흘렀다). Chat·Code는
+                  // 어차피 스레드를 평평하게 펼치는 모드라, 진행 표식이 있는 답글은 스레드에서 꺼내
+                  // 카드로 묶는다. Team(진짜 스레드 UI)은 기존 그대로 — 스레드 안 표시를 유지한다.
+                  const cardable = (m: Msg): boolean => mode !== 'team' && Boolean(m.progress && m.progressRun?.id);
                   const byAnchor = new Map<string, Msg[]>();
                   for (const m of mergedMsgs) {
-                    if (m.threadId) {
+                    if (m.threadId && !cardable(m)) {
                       const list = byAnchor.get(m.threadId);
                       if (list) list.push(m); else byAnchor.set(m.threadId, [m]);
                     }
@@ -1060,7 +1066,7 @@ export default function App() {
                   // 진행 카드(2026-07-25) — 한 실행의 진행 보고들을 카드 하나로 묶는다. 묶는 근거는
                   // 기록에 남은 표식(m.progressRun)뿐이라 재시작 후에도 같은 카드가 복원된다.
                   // 답글이 달린 진행 메시지는 접지 않는다(접으면 그 답글이 화면에서 사라진다).
-                  return groupProgressRuns(mergedMsgs.filter((m) => !m.threadId), (m) => byAnchor.has(m.id)).map((item) => (
+                  return groupProgressRuns(mergedMsgs.filter((m) => !m.threadId || cardable(m)), (m) => byAnchor.has(m.id)).map((item) => (
                     item.kind === 'run' ? (
                       <ProgressCard key={item.id} run={item}
                         running={item.steps.some((s) => s.id === activeProgressId)} />
