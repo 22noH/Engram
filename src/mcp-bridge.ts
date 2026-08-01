@@ -4,8 +4,8 @@ import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListTool
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
-import { instructionsWithPluginNotice, BRIDGE_APPROVED_CLIENT } from './edge/mcp/engram-mcp';
-import { confirmWikiSave, declinedText, WikiSaveRequest } from './edge/mcp/mcp-elicit';
+import { instructionsWithPluginNotice, BRIDGE_APPROVED_CLIENT, BRIDGE_CLIENT, BRIDGE_APP_CLIENT } from './edge/mcp/engram-mcp';
+import { confirmWikiSave, declinedText, WikiSaveRequest, isEngramAppCall } from './edge/mcp/mcp-elicit';
 import { loadWikiSaveMode } from './knowledge-core/wiki/wiki-save.config';
 import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
 
@@ -18,6 +18,9 @@ import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
 // stdio 브리지의 저빈도 호출 특성상 단순함·상주 재시작 내성이 더 값지다.
 
 const UPSTREAM_TIMEOUT_MS = 60_000;
+// 저장 도구(wiki_propose/wiki_write)만 넉넉히: 상류가 저장 전에 중복판정 LLM을 부를 수 있어
+// (dedup, 두뇌 속도에 좌우) 60초가 산술적으로 빠듯하다 — 일반 도구는 기존 60초 그대로.
+const SAVE_UPSTREAM_TIMEOUT_MS = 180_000;
 
 async function withUpstream<T>(
   url: string,
@@ -25,7 +28,7 @@ async function withUpstream<T>(
   timeoutMs = UPSTREAM_TIMEOUT_MS,
   // 사람이 이 브리지의 선택창에서 저장을 눌렀을 때만 승인 이름으로 붙는다 — 상류는 이 이름을 보고
   // 앱 저장 카드를 띄우지 않고(중복 질문 금지) 그 자리에서 게시까지 끝낸다.
-  clientName = 'engram-bridge',
+  clientName: string = BRIDGE_CLIENT,
 ): Promise<T> {
   const client = new Client({ name: clientName, version: '1.0.0' });
   // ★8b-2 교훈: 언핸들드 'error'는 호스트 크래시 — 구독 필수(mcp-client.ts와 동일 패턴).
@@ -150,11 +153,16 @@ export function makeBridgeServer(url: string, configDir?: string): Server {
       }
       // ★채널 정체성 주입(AI 웹 조작) — browser_* 호출에만 붙는다(다른 도구는 인자 바이트 동일).
       const args = withChannelIdentity(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, process.env);
+      // 접속 이름이 곧 신호다: 승인받았으면 approved, 앱 내부 호출(env 표식 상속)이면 app —
+      // 상류는 app 이름일 때만 앱 저장 카드를 띄운다(외부 모델 클라이언트는 자기 UI로 묻는다).
+      const callerName = approvedHere
+        ? BRIDGE_APPROVED_CLIENT
+        : isEngramAppCall(process.env) ? BRIDGE_APP_CLIENT : BRIDGE_CLIENT;
       const result = (await withUpstream(
         url,
         (client) => client.callTool({ name: req.params.name, arguments: args }),
-        undefined,
-        approvedHere ? BRIDGE_APPROVED_CLIENT : undefined,
+        save ? SAVE_UPSTREAM_TIMEOUT_MS : undefined,
+        callerName,
       )) as CallToolResult;
       // 승인을 받고 넘겼는데 큐에 남았다 = 상류가 낡아 승인 신호를 못 알아들었다. 우리가 마무리한다.
       const queued = approvedHere ? queuedProposalId(result) : null;

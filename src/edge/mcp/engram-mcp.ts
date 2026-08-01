@@ -75,6 +75,13 @@ const WIKI_SEARCH_FALLBACK_NOTE =
 // 프로세스는 approve_proposal을 직접 부르면 그만이라 새로 열리는 문이 없다. 진짜 격리가 필요해지면
 // 그때 토큰 교환으로 바꾼다.
 export const BRIDGE_APPROVED_CLIENT = 'engram-bridge-approved';
+// 브리지의 평상시 접속 이름(승인 없이 패스스루). 이 이름이 보이면 반대편에 **외부** 모델 클라이언트가
+// 있다 — 모델의 질문 UI가 항상 있으므로 앱 카드보다 그쪽이 사용자가 보고 있는 화면이다(2026-08-01 실측:
+// Claude에서 저장했는데 질문이 Engram 앱에 떠 45초를 태우고 사라졌다).
+export const BRIDGE_CLIENT = 'engram-bridge';
+// 앱 내부(두뇌 하네스)가 스폰한 브리지의 접속 이름 — 이 사용자는 앱을 보고 있으므로 앱 카드가 맞다.
+// BRIDGE_CLIENT와 이름을 가르는 이유: 앱은 env를 못 보고 접속 이름만 본다(브리지가 env로 판별해 싣는다).
+export const BRIDGE_APP_CLIENT = 'engram-bridge-app';
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 // 로컬에 쓰지만 지우거나 덮지 않는 것(추가·제안 등록). 로컬 전용이라 openWorld도 false.
@@ -357,7 +364,10 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
     const viaClient = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
     if (viaClient !== 'unavailable') {
       confirm = viaClient;
-    } else if (deps.confirmSave) {
+    } else if (deps.confirmSave && server.getClientVersion()?.name !== BRIDGE_CLIENT) {
+      // 브리지 경유는 앱 카드를 건너뛴다(2026-08-01): 반대편 모델 클라이언트가 자기 질문 UI로 묻는
+      // 게 사용자가 보는 화면이다 — 앱 카드는 45초를 태운 뒤 어차피 모델 질문으로 넘어와 두 번 묻게
+      // 된다. 앱 안(두뇌 하네스 등)에서 온 호출은 지금처럼 앱 카드가 묻는다.
       const viaApp = await deps.confirmSave({
         title,
         ...(input.slug ? { targetSlug: input.slug } : {}),

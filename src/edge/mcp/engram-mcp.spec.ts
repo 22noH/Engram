@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpSession, MCP_TOOL_PREFIX } from '../../brain/mcp-client';
-import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS, BRIDGE_APPROVED_CLIENT } from './engram-mcp';
+import { McpDeps, buildMcpServer, ENGRAM_MCP_INSTRUCTIONS, BRIDGE_APPROVED_CLIENT, BRIDGE_CLIENT, BRIDGE_APP_CLIENT } from './engram-mcp';
 import {
   disableElicitation,
   APP_CHANNEL_ENV,
@@ -585,6 +585,38 @@ describe('elicitation 승인 게이트', () => {
     expect(proposals.approve).not.toHaveBeenCalled();
     expect(out).toContain('queued');
     await s.close();
+  });
+
+  // 브리지 평상시 이름(승인 없음) = 반대편에 모델 클라이언트가 있다 — 앱 카드에 45초를 태우지 않고
+  // 즉시 승인함+모델 질문 지시로 넘긴다(2026-08-01 실측: Claude에서 저장했는데 질문이 앱에 떴다).
+  it('브리지 일반 이름으로 접속 → 앱 카드 건너뛰고 모델에게 질문을 넘긴다', async () => {
+    const askedApp: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => { askedApp.push(1); return 'save'; });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: BRIDGE_CLIENT, version: '1.0.0' }); // elicitation 미선언
+    await c.connect(clientT);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(askedApp).toEqual([]);                 // 앱 카드는 뜨지 않는다
+    expect(proposals.approve).not.toHaveBeenCalled(); // 자동 승인도 없다
+    expect(out).toContain('NOT SAVED YET');       // 모델이 자기 UI로 묻도록 지시
+    await c.close();
+  });
+
+  // 회귀 방지(2026-08-01 사용자 지적): 앱 내부 두뇌도 같은 브리지를 거친다 — 그쪽 사용자는 앱을
+  // 보고 있으므로 앱 카드가 그대로 떠야 한다. 브리지가 env로 판별해 다른 이름(app)으로 접속한다.
+  it('앱 내부 브리지 이름으로 접속 → 앱 카드가 그대로 묻는다', async () => {
+    const askedApp: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => { askedApp.push(1); return 'save'; });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: BRIDGE_APP_CLIENT, version: '1.0.0' });
+    await c.connect(clientT);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(askedApp).toHaveLength(1);             // 앱 카드가 물었다
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
+    await c.close();
   });
 
   // 브리지가 이미 사람에게 물어 승인받았으면(접속 이름으로 알림) 앱도 클라도 다시 묻지 않는다.
