@@ -74,6 +74,28 @@ it('예약발(scheduled) code → 승인 대기 없이 approveProject+codeRun까
   expect(posts[0]).not.toContain('approve'); // 승인 요청 문구가 아니라 자동 시작 안내
 });
 
+it('같은 프로젝트 동시 실행 금지 — 두 번째 시작은 거부 게시(2026-08-01)', async () => {
+  const o = orc('{"kind":"code","repo":"api","goal":"g"}');
+  (o as any).resolveRepoPaths = () => ['C:/repos/api'];
+  (o as any).proposeProject = async () => ({ id: 'p1', acceptanceCriteria: ['x'], gate: { test: false, build: false, typecheck: false } });
+  (o as any).approveProject = async () => {};
+  let runs = 0; let release: (() => void) | undefined;
+  (o as any).codeRun = () => { runs++; return new Promise((res) => { release = () => res({ status: 'SUCCESS', sessionId: 's' }); }); };
+  const posts: string[] = [];
+  const post = async (t2: string) => { posts.push(t2); };
+  await o.handleMention({ text: 'api에 g', userId: 'c1', scheduled: true }, post);
+  await o.handleMention({ text: 'api에 g', userId: 'c1', scheduled: true }, post); // 첫 실행이 아직 도는 중
+  expect(runs).toBe(1); // 두 번째는 codeRun까지 못 간다
+  expect(posts.some((p) => p.includes('already in progress'))).toBe(true);
+  release!();
+  await (o as any).drainForTest();
+  // 실행이 끝나면 같은 프로젝트를 다시 시작할 수 있다(가드 해제)
+  await o.handleMention({ text: 'api에 g', userId: 'c1', scheduled: true }, post);
+  expect(runs).toBe(2);
+  release!();
+  await (o as any).drainForTest();
+});
+
 it('취소 → 대기 폐기', async () => {
   const o = orc('{"kind":"code","repo":"api","goal":"g"}');
   (o as any).resolveRepoPaths = () => ['C:/repos/api'];

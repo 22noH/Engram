@@ -142,6 +142,8 @@ export class Orchestrator {
   private channelPolicyCache?: ChannelPolicy;
   // 예약(스케줄) 포트 — main.ts에서 setter 주입(메신저처럼 DI 밖). 6b-3.
   private scheduler?: SchedulerPort;
+  // 프로젝트당 코딩 실행 1개 가드(2026-08-01) — launchCoding 진입/종료에서만 만진다.
+  private readonly codingInflightProjects = new Set<string>();
   // 채널→브레인 조회(ChatStore) — main.ts에서 setter 주입(scheduler와 동일 결, DI 밖·chat 비활성이면 미주입).
   // 리뷰 지적 Finding 1: resumeInterrupted의 재개 발사가 채널 브레인을 안 실어보내던 것 — 부팅 시점에
   // "현재" 채널 브레인을 조회해 넣는다(재시작 사이 채널 브레인이 바뀌었어도 최신 값 반영).
@@ -821,6 +823,11 @@ export class Orchestrator {
   // brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain) — codeRun·CodingSpecialist.work까지 전달.
   // permMode: 이 턴의 채널 권한 모드 — codeRun을 거쳐 CodingSpecialist의 게이트까지 그대로 흘러간다.
   private launchCoding(projectId: string, targetPath: string, threadKey: string, post: PostFn, attempt = 0, brain?: BrainProvider, permMode?: PermMode): void {
+    // 프로젝트당 실행 1개(2026-08-01 실측): 예약 발사×2·예약+부팅재개가 같은 projectId(targetPath
+    // 결정적)로 동시에 돌아 같은 저장소 티켓을 이중 수행했다. 모든 시작 경로(승인·예약·재개)가
+    // 여기로 수렴하므로 이 가드 하나로 전부 잠긴다. 거부는 조용히 하지 않는다 — 사유를 게시.
+    if (this.codingInflightProjects.has(projectId)) { void post(t('codingAlreadyRunning', targetPath)); return; }
+    this.codingInflightProjects.add(projectId);
     const tracked = this.tracker.start(threadKey, { question: t('codingTaskLabel', targetPath), team: ['Coder'] });
     const work: Promise<void> = (async (): Promise<void> => {
       try {
@@ -852,6 +859,7 @@ export class Orchestrator {
         try { await post(t('codingFailed')); } catch { /* post도 실패하면 포기 */ }
       }
     })().finally(() => {
+      this.codingInflightProjects.delete(projectId);
       const idx = this.inflight.indexOf(work);
       if (idx !== -1) this.inflight.splice(idx, 1);
     });
