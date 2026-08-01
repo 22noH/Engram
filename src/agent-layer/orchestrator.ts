@@ -1329,6 +1329,11 @@ export class Orchestrator {
       await this.tasks!.recordProgress(session.id, { landed, criteriaMet });
 
       if (allLanded) {
+        // 단일 티켓 즉시 완료(2026-08-01 실사고 2탄): fetch+rebase급 잡일은 티켓 1개가 첫 라운드에
+        // 다 끝내는데, 리뷰어가 "이미 한 일 재확인" 티켓을 만들어 1분짜리 일을 6분으로 늘렸다.
+        // 티켓이 하나뿐이면 교차 검증할 대상이 없다 — 게이트(객관 판정)가 초록이면 그걸로 끝.
+        // 분해가 2개 이상 낸 진짜 작업은 기존대로 리뷰를 거친다.
+        if (total === 1 && round === 0) { report(t('criteriaMet')); return finish(session, 'SUCCESS'); }
         // SUCCESS는 리뷰어 승인 경유만 — 오픈 티켓 0이어도 여기서 판정(우회 차단).
         report(t('reviewingCriteria'));
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));

@@ -53,11 +53,40 @@ describe('Orchestrator.codeRun', () => {
     expect(r.status).toBe('STUCK');
   });
 
+  // 단일 티켓 즉시 완료(2026-08-01 실사고 2탄): 티켓 1개가 첫 라운드에 게이트 초록으로 착지하면
+  // 교차 검증할 대상이 없다 — 리뷰어를 아예 부르지 않는다(잡일 6분 → 1분대).
+  it('티켓 1개가 첫 라운드에 착지하면 리뷰어 없이 SUCCESS', async () => {
+    const tickets = [{ id: 'tk0', area: '.', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }];
+    const tasks = {
+      createCoding: async () => ({ id: 's1' }), transition: async () => {}, addTickets: async () => {},
+      recordProgress: async () => {}, contribute: async () => {},
+      updateTicket: async (_i: string, id: string, patch: any) => { const t = tickets.find(x => x.id === id)!; Object.assign(t, patch); },
+      get: async () => ({ id: 's1', tickets, blackboard: {}, progress: { landed: tickets.filter(t=>t.status==='SUCCESS').length, criteriaMet: 0, criteriaTotal: 1 } }),
+      setResult: async () => {}, remove: async () => {},
+    };
+    let reviewCalls = 0;
+    const o = new Orchestrator({} as any, {} as any, logger, {} as any,
+      tasks as any, undefined, undefined, { run: (f: any) => f() } as any,
+      { get: async () => project } as any, { run: async () => ({ pass: true, failed: null, output: '' }) } as any,
+      { ensureBranch: async () => {}, commitAll: async () => {}, hasChanges: async () => true, head: async () => 'sha0', diffStat: async () => [] } as any,
+      { work: async () => 'x' } as any,
+      { review: async () => { reviewCalls++; return { approved: false, extraTickets: [] }; } } as any,
+      fakeBrain('{"tickets":[{"area":".","instruction":"i"}]}') as any,
+      { assertWritable: () => {}, codingFlags: () => [] } as any);
+    const r = await o.codeRun('p', { maxRounds: 10, stuckK: 3 });
+    expect(r.status).toBe('SUCCESS');
+    expect(reviewCalls).toBe(0); // 리뷰어를 부르지 않는다
+  });
+
   // 정책 변경(2026-08-01, 실사고): 예전엔 "리뷰어 승인 없이는 STUCK"이었지만, 리뷰어가 잡일에
   // 무한 미승인하며 시간을 태우는 게 실물에서 관측됐다(2분 반 작업이 12분+). 이제 보완 기회
   // 1회 소진 후 전 티켓 착지+게이트 초록이면 SUCCESS로 마감한다(사유 게시).
+  // (티켓 2개 — 1개면 위 단일 티켓 즉시 완료가 먼저 걸려 리뷰 상한 경로를 안 탄다.)
   it('리뷰어가 계속 미승인이어도 보완 1회 뒤 게이트 초록이면 SUCCESS로 마감', async () => {
-    const tickets = [{ id: 'tk0', area: '.', instruction: 'i', status: 'PENDING', attempts: 0, gate: null }];
+    const tickets = [
+      { id: 'tk0', area: '.', instruction: 'i', status: 'PENDING', attempts: 0, gate: null },
+      { id: 'tk1', area: 'b', instruction: 'j', status: 'PENDING', attempts: 0, gate: null },
+    ];
     const tasks = {
       createCoding: async () => ({ id: 's1' }), transition: async () => {}, addTickets: async () => {},
       recordProgress: async () => {}, contribute: async () => {},
