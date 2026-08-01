@@ -390,7 +390,7 @@ async function bootstrap(): Promise<void> {
   // 재시작 생존(Phase 10b): 중단된 코딩 작업을 부팅 시 이어서. 게시는 poster(재시작 후엔 라이브 reply 핸들 없음).
   // 실패는 상주를 죽이지 않는다.
   try {
-    const resumed = await orchestrator.resumeInterrupted((channelId, text) => poster.postToChannel(channelId, text));
+    const resumed = await orchestrator.resumeInterrupted((channelId, text, progress, completionReport) => poster.postToChannel(channelId, text, undefined, progress, completionReport));
     if (resumed > 0) logger.log(`중단된 코딩 ${resumed}건 재개`, 'Restart');
   } catch (e) {
     logger.warn(`재시작 재개 실패: ${String(e)}`, 'Restart');

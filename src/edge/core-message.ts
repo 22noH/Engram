@@ -22,4 +22,7 @@ export interface CoreMessage {
   // 미설정(코드 채널이 아니거나 채널에 값이 없음)이면 게이트가 전역 설정(permissions.json
   // allow.commandMode)으로 폴백한다 — 기존 동작 그대로(회귀 0).
   permMode?: PermMode;
+  // 예약 발사 재주입(2026-08-01): true면 이 턴은 사람이 아니라 스케줄러가 보낸 것. 코딩 제안의
+  // 승인 대기를 건너뛴다 — 예약을 등록한 행위가 곧 승인이고, 무인 시간대에 물을 사람이 없다.
+  scheduled?: boolean;
 }

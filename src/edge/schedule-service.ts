@@ -4,10 +4,13 @@ import { ChannelPoster } from './messenger/messenger.port';
 import { ScheduleStore, ScheduleEntry, SchedulerPort } from '../agent-layer/schedule-store';
 
 // Orchestrator를 구조적 타입으로만 의존(순환 회피).
+import type { ProgressRun } from '../../shared/protocol';
+
 interface MentionRunner {
   handleMention(
-    msg: { text: string; userId: string; brain?: string },
-    post: (t: string) => Promise<void>,
+    msg: { text: string; userId: string; brain?: string; scheduled?: boolean },
+    // 진행 표식 관통(2026-08-01): 예약발 코딩·협업의 진행 카드가 여기로 온다 — 좁히면 표식이 유실된다.
+    post: (t: string, actions?: unknown, question?: unknown, toolsUsed?: unknown, progress?: boolean | ProgressRun, completionReport?: boolean) => Promise<void>,
     threadKey?: string,
   ): Promise<void>;
 }
@@ -80,8 +83,10 @@ export class ScheduleService implements SchedulerPort {
     this.firingDepth++;
     void this.orchestrator
       .handleMention(
-        { text: e.task, userId: e.channelId, brain: this.channelBrainOf(e.channelId) },
-        (t) => this.port.postToChannel(e.channelId, t, e.threadId),
+        // scheduled: 예약발 턴 표식 — 코딩 제안이 승인 대기 없이 바로 실행된다(무인 실행이 예약의 목적).
+        { text: e.task, userId: e.channelId, brain: this.channelBrainOf(e.channelId), scheduled: true },
+        // 진행 표식(progress/completionReport)을 그대로 관통 — 버튼·질문 카드는 무인 턴에 무의미해 버린다.
+        (t, _a, _q, _tools, progress, completionReport) => this.port.postToChannel(e.channelId, t, e.threadId, progress, completionReport),
         e.threadId ?? e.channelId,
       )
       .catch((err) => this.logger.warn(`예약 실행 실패 ${e.id}: ${String(err)}`, 'Schedule'))

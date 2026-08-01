@@ -1,4 +1,5 @@
 import { ChannelPoster } from './messenger.port';
+import type { ProgressRun } from '../../../shared/protocol';
 
 // postToChannel 라우터(스펙 §4.3): self ChatStore가 아는 채널이면 self,
 // 아니면 fallback(Discord). 포트가 하나뿐이면 사실상 통과.
@@ -9,8 +10,8 @@ export class MessengerHub implements ChannelPoster {
     private readonly fallback?: ChannelPoster,
   ) {}
 
-  async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
+  async postToChannel(channelId: string, text: string, threadId?: string, progress?: boolean | ProgressRun, completionReport?: boolean): Promise<void> {
     const port = this.store.has(channelId) ? this.self : (this.fallback ?? this.self);
-    await port.postToChannel(channelId, text, threadId);
+    await port.postToChannel(channelId, text, threadId, progress, completionReport);
   }
 }

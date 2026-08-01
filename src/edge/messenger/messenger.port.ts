@@ -45,7 +45,9 @@ export interface MessengerPort {
     target: ReplyTarget, text: string, actions?: Action[], question?: Message['question'],
     toolsUsed?: string[], progress?: boolean | ProgressRun, completionReport?: boolean,
   ): Promise<void>;
-  postToChannel(channelId: string, text: string, threadId?: string): Promise<void>;
+  // progress/completionReport(2026-08-01, additive): 예약 발사·부팅 재개처럼 reply 대신 이 좁은
+  // 경로로 게시하는 실행도 진행 카드·완료 보고 표식을 잃지 않아야 한다. 미전달=기존과 바이트 동일.
+  postToChannel(channelId: string, text: string, threadId?: string, progress?: boolean | ProgressRun, completionReport?: boolean): Promise<void>;
   // Task 1(brain-activity): 옵셔널 — 실시간 활동 라벨(예: "웹 검색 중 · web_search")을 그 채널에만
   // 브로드캐스트. 저장 안 함(휘발) — 미구현 어댑터(Discord 등)는 구조적으로 no-op(회귀 0).
   activity?(channelId: string, label: string): void;

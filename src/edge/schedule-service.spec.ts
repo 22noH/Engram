@@ -44,6 +44,21 @@ it('fire: 저장된 task를 handleMention으로 재주입 → post가 채널로'
   expect(port.channelPosts).toEqual([{ channelId: 'c1', threadId: 't1', text: '결과' }]);
 });
 
+it('fire: 진행 표식(progress·completionReport)이 postToChannel까지 관통(2026-08-01)', async () => {
+  const store = tmpStore();
+  const port = new FakeMessenger();
+  const run = { id: 'r1', title: '자율 코딩' };
+  const orchestrator = { handleMention: async (_msg: any, post: any) => {
+    await post('· 진행', undefined, undefined, undefined, run);
+    await post('보고', undefined, undefined, undefined, undefined, true);
+  } };
+  const svc = service(orchestrator, port, fakeRegistry(), store);
+  svc.fire(store.add({ channelId: 'c1', cron: '0 9 * * *', task: 'X' }));
+  await new Promise((r) => setImmediate(r));
+  expect(port.channelPosts[0]).toMatchObject({ text: '· 진행', progress: run });
+  expect(port.channelPosts[1]).toMatchObject({ text: '보고', completionReport: true });
+});
+
 it('fire once: 발사 후 remove(store + registry)', async () => {
   const store = tmpStore();
   const reg = fakeRegistry();

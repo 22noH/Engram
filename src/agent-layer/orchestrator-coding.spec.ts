@@ -59,6 +59,21 @@ it('승인 → approveProject + codeRun 호출, 성공 메시지', async () => {
   expect(posts.some((p) => p.includes('✅'))).toBe(true);
 });
 
+it('예약발(scheduled) code → 승인 대기 없이 approveProject+codeRun까지 직행(2026-08-01)', async () => {
+  const o = orc('{"kind":"code","repo":"api","goal":"g"}');
+  (o as any).resolveRepoPaths = () => ['C:/repos/api'];
+  (o as any).proposeProject = async () => ({ id: 'p1', acceptanceCriteria: ['x'], gate: { test: true, build: false, typecheck: false } });
+  let approved = ''; let ran = '';
+  (o as any).approveProject = async (id: string) => { approved = id; };
+  (o as any).codeRun = async (id: string) => { ran = id; return { status: 'SUCCESS', sessionId: 's1' }; };
+  const posts: string[] = [];
+  await o.handleMention({ text: 'api에 g', userId: 'c1', scheduled: true }, async (t) => { posts.push(t); });
+  await (o as any).drainForTest();
+  expect(approved).toBe('p1'); // 승인 턴 없이
+  expect(ran).toBe('p1');
+  expect(posts[0]).not.toContain('approve'); // 승인 요청 문구가 아니라 자동 시작 안내
+});
+
 it('취소 → 대기 폐기', async () => {
   const o = orc('{"kind":"code","repo":"api","goal":"g"}');
   (o as any).resolveRepoPaths = () => ['C:/repos/api'];

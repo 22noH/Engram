@@ -482,12 +482,18 @@ export class Orchestrator {
       const goal = sp < 0 ? '' : rest.slice(sp + 1);
       if (await this.denyIfPlanOnly(permMode, post)) return;
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startCoding(repoRef, goal, threadKey, post, brain, permMode);
+      await this.startCoding(repoRef, goal, threadKey, post, brain, permMode, msg.scheduled === true);
       return;
     }
     // 예약(스케줄) 관리 명령
     if (trimmed === '예약목록' || trimmed === 'schedules') {
-      await post(this.formatSchedules(msg.userId));
+      // 취소 버튼(2026-08-01, UX): ID를 손으로 치는 대신 목록 항목마다 클릭 한 번 — send에 기존
+      // 예약취소 명령을 그대로 실어 별도 배관 없이 동작한다(버튼=타이핑 대행).
+      const entries = this.scheduler?.list(msg.userId) ?? [];
+      await post(
+        this.formatSchedules(msg.userId),
+        entries.length ? entries.map((e, i) => ({ label: t('cancelScheduleLabel', i), send: `예약취소 ${e.id}` })) : undefined,
+      );
       return;
     }
     if (trimmed.startsWith('예약취소 ') || trimmed.startsWith('schedule cancel ')) {
@@ -600,7 +606,7 @@ export class Orchestrator {
     const decision = await this.classify(trimmed, brain);
     if (decision.kind === 'code') {
       if (!(await this.channelGate('coding', msg.userId, post))) return;
-      await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post, brain);
+      await this.startCoding(decision.repoRef ?? '', decision.goal ?? msg.text, threadKey, post, brain, undefined, msg.scheduled === true);
       return;
     }
     if (decision.kind === 'schedule') {
@@ -711,7 +717,7 @@ export class Orchestrator {
   }
 
   // 멘션 코딩 진입: repo 해소 → 0/1/N 분기. brain: 요청 한정 채널 두뇌(스펙 §3.2, 미지정=기존 codeBrain).
-  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode): Promise<void> {
+  private async startCoding(repoRef: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode, scheduled = false): Promise<void> {
     const matches = this.resolveRepoPaths(repoRef);
     if (matches.length === 0) {
       await post(t('repoNotFound', repoRef));
@@ -726,7 +732,7 @@ export class Orchestrator {
       await post(t('multipleReposFound', matches.map((m, i) => `${i + 1}. ${m}`).join('\n')), actions);
       return;
     }
-    await this.startProposal(matches[0], goal, threadKey, post, brain, permMode);
+    await this.startProposal(matches[0], goal, threadKey, post, brain, permMode, scheduled);
   }
 
   // Code 채널 대화(2026-07-07): 레포 읽고(읽기전용) 대화체로 답 + 코드요청이면 goal 추출.
@@ -787,13 +793,21 @@ export class Orchestrator {
 
   // 완성조건 초안 → 대상·조건 게시 → 승인 대기. brain: 요청 한정 채널 두뇌(미지정=기존 codeBrain).
   // permMode: 이 턴의 채널 권한 모드 — 쓰기 검증(bypass면 울타리 밖 폴더도 통과)에 그대로 넘긴다.
-  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode): Promise<void> {
+  private async startProposal(targetPath: string, goal: string, threadKey: string, post: PostFn, brain?: BrainProvider, permMode?: PermMode, scheduled = false): Promise<void> {
     if (!this.fence || !this.projects) { await post(t('codingNotReady')); return; }
     try { this.fence.assertWritable(targetPath, permMode); }
     catch { await post(t('pathProtected')); return; }
     const cfg = await this.proposeProject(targetPath, goal, brain);
-    this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
     const crit = cfg.acceptanceCriteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
+    // 예약발(2026-08-01): 승인 대기 없이 바로 실행. 예약 등록이 곧 승인이고, 무인 시간대에 답할
+    // 사람이 없다 — 완성조건은 그대로 게시해 아침에 무엇이 어떤 기준으로 돌았는지 남긴다.
+    if (scheduled) {
+      await this.approveProject(cfg.id);
+      await post(t('proposalAutoStart', targetPath, crit, cfg.gate.test, cfg.gate.build, cfg.gate.typecheck));
+      this.launchCoding(cfg.id, targetPath, threadKey, post, 0, brain, permMode);
+      return;
+    }
+    this.pending.set(threadKey, { kind: 'approve', projectId: cfg.id, path: targetPath });
     await post(
       t('proposalReady', targetPath, crit, cfg.gate.test, cfg.gate.build, cfg.gate.typecheck),
       [
@@ -883,7 +897,9 @@ export class Orchestrator {
   // 재시작 생존(Phase 10b): 부팅 시 호출. RUNNING 코딩 레코드를 각자 채널로 재개(승인된 프로젝트만 —
   // resume hatch가 approved 확인). 스테일 레코드는 제거(재개가 새 세션을 만든다).
   // ponytail: 코딩만 — 협업은 분 단위라 재개 불필요. 재개 시 attempt=0(fresh).
-  async resumeInterrupted(post: (channelId: string, text: string) => Promise<void>): Promise<number> {
+  // post: 진행 표식(progress/completionReport)까지 관통(2026-08-01) — 좁히면 재개된 코딩의 진행
+  // 카드·완료 보고 표식이 생산 단계에서 유실된다(dev 실측: 재개 실행 메시지에 표식 없음).
+  async resumeInterrupted(post: (channelId: string, text: string, progress?: boolean | ProgressRun, completionReport?: boolean) => Promise<void>): Promise<number> {
     if (!this.tasks) return 0;
     let resumed = 0;
     let records: Awaited<ReturnType<TaskStore['list']>>;
@@ -900,7 +916,7 @@ export class Orchestrator {
         await this.tasks.remove(rec.id); // 스테일 세션 제거 — 재개가 새 세션 생성
         await this.handleMention(
           { text: `resume ${projectRef}`, userId: channelId, brain: this.channelBrainOf(channelId) },
-          (t) => post(channelId, t),
+          (t, _actions, _question, _tools, progress, completionReport) => post(channelId, t, progress, completionReport),
           channelId,
         );
         resumed++;
@@ -991,7 +1007,8 @@ export class Orchestrator {
     const threadId = threadKey !== channelId ? threadKey : undefined;
     const e = this.scheduler.add({ channelId, threadId, cron, task, once });
     if (!e) { await post(t('scheduleUnclear')); return; }
-    await post(t('scheduleCreated', e.id, e.cron, once));
+    // 취소 버튼(2026-08-01, UX): 등록 직후가 "아차, 잘못 걸었다"의 순간 — ID 타이핑 없이 한 번에.
+    await post(t('scheduleCreated', e.id, e.cron, once), [{ label: t('cancelThisScheduleLabel'), send: `예약취소 ${e.id}` }]);
   }
 
   private formatSchedules(channelId: string): string {

@@ -932,8 +932,14 @@ export class SelfMessenger implements MessengerPort {
     if (msg) this.broadcastToChannel(t.channelId, { t: 'msg', channelId: t.channelId, message: msg });
   }
 
-  async postToChannel(channelId: string, text: string, threadId?: string): Promise<void> {
-    const msg = this.store.appendMessage(channelId, { authorId: 'engram', text, threadId });
+  async postToChannel(channelId: string, text: string, threadId?: string, progress?: boolean | ProgressRun, completionReport?: boolean): Promise<void> {
+    // 표식 저장은 reply()와 동일 관례(2026-08-01) — 예약 발사·부팅 재개 실행의 진행 카드가 여기로 온다.
+    const msg = this.store.appendMessage(channelId, {
+      authorId: 'engram', text, threadId,
+      ...(progress ? { progress: true } : {}),
+      ...(typeof progress === 'object' ? { progressRun: progress } : {}),
+      ...(completionReport ? { completionReport: true } : {}),
+    });
     if (msg) this.broadcastToChannel(channelId, { t: 'msg', channelId, message: msg });
   }
 

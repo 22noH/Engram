@@ -43,13 +43,22 @@ it('add가 null(잘못된 cron) → 되묻기', async () => {
   expect(posts[0]).toContain('Not sure when you mean');
 });
 
-it('예약목록 → list 집계 게시', async () => {
+it('예약목록 → list 집계 게시 + 항목마다 취소 버튼(2026-08-01 UX)', async () => {
   const o = orc('{"kind":"chat","team":[]}');
   o.setScheduler(fakeScheduler() as any);
-  const posts: string[] = [];
-  await o.handleMention({ text: '예약목록', userId: 'c1' }, async (t) => { posts.push(t); });
+  const posts: string[] = []; const acts: any[] = [];
+  await o.handleMention({ text: '예약목록', userId: 'c1' }, async (t, actions) => { posts.push(t); acts.push(actions); });
   expect(posts[0]).toContain('서버비');
   expect(posts[0]).toContain('#x1');
+  expect(acts[0]).toEqual([{ label: expect.any(String), send: '예약취소 x1' }]);
+});
+
+it('예약 등록 확인에도 취소 버튼이 달린다(2026-08-01 UX)', async () => {
+  const o = orc('{"kind":"schedule","cron":"0 9 * * *","task":"서버비 정리"}');
+  o.setScheduler(fakeScheduler() as any);
+  const acts: any[] = [];
+  await o.handleMention({ text: '매일 9시에 서버비 정리해줘', userId: 'c1' }, async (_t, actions) => { acts.push(actions); });
+  expect(acts[0]).toEqual([{ label: expect.any(String), send: '예약취소 x1' }]);
 });
 
 it('예약취소 <id> → remove 호출', async () => {
