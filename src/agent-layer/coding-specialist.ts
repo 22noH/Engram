@@ -20,6 +20,11 @@ export const CODING_RULES_DEFAULT = [
   '- Report in one or two concise lines.',
 ].join('\n');
 
+// 코딩 티켓 한 건의 두뇌 호출 타임아웃. 프로필 timeoutMs는 채팅 답변 기준(수 분)이라 에이전트
+// 코딩(도구 돌리며 실제 편집)이 그 안에 못 끝나 2분 만에 죽던 실사용 발견(2026-08-01, 예약발 코딩).
+// ponytail: 상수 고정 — 프로필이 이보다 길어도 이 값이 이긴다. 티켓당 30분을 넘기면 설정으로 뺄 것.
+export const CODING_TIMEOUT_MS = 1_800_000;
+
 // 제네릭 코딩 워커(설계 §3, §9). stateless. 코드 변경은 도구 부수효과(타깃 cwd).
 // 게이트는 호출자가 별도로 돌린다(에이전트 자기보고 불신, §8.1).
 @Injectable()
@@ -61,6 +66,7 @@ export class CodingSpecialist {
     ];
     const brain = brainOverride ?? this.resolveBrain(persona.brain);
     const r = await brain.complete(prompt, onChunk, {
+      timeoutMs: CODING_TIMEOUT_MS,
       cwd: project.targetPath,
       extraArgs: flags, // CLI 두뇌용(무변경)
       codeGuard: (p) => this.fence.assertCodingWrite(p, project.writePaths, permMode), // API 두뇌용(Phase 8b-1)

@@ -1,4 +1,4 @@
-import { CodingSpecialist, CODING_RULES_DEFAULT } from './coding-specialist';
+import { CodingSpecialist, CODING_RULES_DEFAULT, CODING_TIMEOUT_MS } from './coding-specialist';
 import { PermissionFence } from './permission-fence';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -34,6 +34,8 @@ describe('CodingSpecialist', () => {
     expect(captured.opts.extraArgs).toContain('--permission-mode'); // 자동모드 acceptEdits
     expect(captured.opts.extraArgs).toContain('acceptEdits');
     expect(captured.prompt).toContain('로그인 고쳐');
+    // 코딩 전용 타임아웃(2026-08-01): 프로필 timeoutMs(채팅 기준)가 아니라 긴 값이 명시로 실린다.
+    expect(captured.opts.timeoutMs).toBe(CODING_TIMEOUT_MS);
   });
 
   it('직전 게이트 실패가 있으면 프롬프트에 실패내용 포함', async () => {
