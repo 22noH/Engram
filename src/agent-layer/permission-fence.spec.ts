@@ -107,16 +107,29 @@ it('assertWritable: writePaths 비어 있으면 자동 허용, 지정되면 엄�
   expect(() => strict.assertWritable('C:/other')).toThrow('writePaths 밖'); // 지정됐으니 밖 거부
 });
 
-it('codingAutoFlags: 표준 toolset + 백스톱 밖 폴더만 add-dir', () => {
+it('codingAutoFlags: 표준 toolset + 백스톱 밖 폴더만 add-dir, 자동모드는 Bash 포함(2026-08-01 개방)', () => {
   const f = new PermissionFence('x', 'C:/engram');
   (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [] } };
   const flags = f.codingAutoFlags(['C:/proj', 'C:/engram/x']);
   expect(flags).toContain('--allowedTools');
   expect(flags.join(',')).toContain('Edit'); // 파일 도구
-  expect(flags.join(',')).not.toContain('Bash'); // Bash는 울타리 탈출 위험으로 자동모드 제외
+  expect(flags.join(',')).toContain('Bash'); // 자동모드(전역 기본) — git 등 실작업 가능
   expect(flags).toContain('--add-dir');
   expect(flags).toContain('C:/proj');
   expect(flags).not.toContain('C:/engram/x'); // 백스톱(자기 repo 하위) 제외
+});
+
+it('codingAutoFlags: restricted는 허용목록 명령만 Bash(<cmd>:*) 스코프, plan/files는 Bash 없음', () => {
+  const f = new PermissionFence('x');
+  (f as any).cfg = { default: 'deny', allow: { tools: {}, writePaths: [], denyPaths: [], commands: ['git', 'npm'] } };
+  const restricted = f.codingAutoFlags(['C:/proj'], 'restricted' as any).join(',');
+  expect(restricted).toContain('Bash(git:*)');
+  expect(restricted).toContain('Bash(npm:*)');
+  expect(restricted).not.toContain('Bash,'); // 전체 Bash는 아님(스코프만)
+  const plan = f.codingAutoFlags(['C:/proj'], 'plan' as any).join(',');
+  expect(plan).not.toContain('Bash');
+  const files = f.codingAutoFlags(['C:/proj'], 'files' as any).join(',');
+  expect(files).not.toContain('Bash');
 });
 
 it('assertWritable: C:/ProgramData도 시스템 폴더로 거부', () => {

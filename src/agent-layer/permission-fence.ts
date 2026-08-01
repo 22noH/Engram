@@ -21,6 +21,7 @@ const EMPTY = (): FenceConfig => ({ default: 'deny', allow: { tools: {}, writePa
 export const DEFAULT_COMMANDS = [
   'npm', 'pnpm', 'yarn', 'npx', 'node', 'deno', 'bun', 'python', 'python3', 'pytest', 'go', 'cargo', 'rustc',
   'dotnet', 'msbuild', 'cmake', 'make', 'nmake', 'qmake', 'tsc', 'jest', 'vitest', 'eslint', 'prettier', 'gradle', 'mvn',
+  'git', // 예약 자동화의 핵심 잡일(fetch·rebase·상태 정리) — 2026-08-01 Bash 개방과 함께 추가
 ];
 
 // 시스템 디렉터리(설정·writePaths 무관 항상 거부 백스톱). 목록·포함검사 로직은 pal/path-safety.ts
@@ -45,10 +46,11 @@ export class PermissionFence {
   constructor(private readonly configPath: string, private readonly engramRoot?: string) {}
 
   // 자동모드 표준 코딩 toolset — **파일 도구만**(페르소나 grant 무관).
-  // Bash 제외: --add-dir는 파일 도구(Edit/Write/Read)만 가두고 샌드박스 없는 Bash는
-  // 임의 셸로 울타리를 빠져나가 자기 repo·홈·시스템에 쓸 수 있다(보안 리뷰 Critical).
-  // 명령 실행(테스트·빌드)은 에이전트가 아니라 VerificationGate(Engram)가 직접 한다(§8.1).
-  // Bash 자율 허용은 OS 샌드박스 붙인 후속(감독/샌드박스 모드)으로 보류.
+  // Bash(2026-08-01 사용자 결정으로 개방): 예전엔 "울타리 탈출 위험"으로 전면 제외했지만, git 같은
+  // 실작업이 통째로 막혀 예약 자동화가 껍데기가 됐다("권한 차단으로 미실행" 실사고). 이제 Claude Code와
+  // 같은 방식으로 막는다 — 도구를 빼는 게 아니라 **권한 모드별 명령 규칙**으로:
+  //   auto/bypass → Bash 전체, restricted → 허용목록 명령만 Bash(<cmd>:*) 스코프, plan/files → 없음.
+  // 규칙 산출은 codingAutoFlags 한 곳(모드→정책 매핑은 commandPolicy와 동일 근거).
   static readonly CODING_TOOLS = ['Edit', 'Write', 'Read', 'Glob', 'Grep'];
 
   // 권한 모드 plan(계획만)용 읽기 전용 toolset — CODING_TOOLS에서 쓰기 도구(Edit/Write)만 뺀 것.
@@ -140,7 +142,12 @@ export class PermissionFence {
   // 통제되므로(--allowedTools), 여기서 걸러야 "계획만"이 CLI 경로에서도 실제로 지켜진다.
   codingAutoFlags(writePaths: string[], mode?: PermMode): string[] {
     const tools = mode === 'plan' ? PermissionFence.READONLY_TOOLS : PermissionFence.CODING_TOOLS;
-    const flags = ['--allowedTools', tools.join(',')];
+    // Bash는 명령 정책에 따라 규칙으로 준다(클래스 상단 주석): auto=전체, allowlist=명령 스코프, off=없음.
+    const policy = this.commandPolicy(mode);
+    const bash = policy === 'off' ? []
+      : policy === 'auto' ? ['Bash']
+      : (this.cfg.allow.commands ?? DEFAULT_COMMANDS).map((c) => `Bash(${c}:*)`);
+    const flags = ['--allowedTools', [...tools, ...bash].join(',')];
     for (const w of writePaths.filter((p) => !this.isDenied(p))) flags.push('--add-dir', w);
     return flags;
   }
