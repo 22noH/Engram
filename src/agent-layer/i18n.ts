@@ -30,6 +30,7 @@ const MESSAGES: Record<string, Entry> = {
   synthesizingOpinions: { en: () => '📝 Synthesizing input…', ko: () => '📝 의견 종합 중…' },
   decomposing: { en: () => 'Breaking down the work… (calling the model)', ko: () => '작업 분해 중… (모델 호출)' },
   reviewingCriteria: { en: () => 'Reviewing acceptance criteria…', ko: () => '완성조건 리뷰 중…' },
+  reviewCapDone: { en: () => 'Review follow-up budget spent — all tickets landed with green gates, wrapping up.', ko: () => '리뷰 보완 기회 소진 — 전 작업 착지·게이트 초록이라 완료 처리합니다.' },
   criteriaMet: { en: () => '✓ Acceptance criteria met — done', ko: () => '✓ 완성조건 충족 — 완료' },
   criteriaMetStored: { en: () => 'Acceptance criteria met — awaiting human merge', ko: () => '완성조건 충족 — 사람 머지 대기' },
   startCodingConfirm: { en: () => 'Start autonomous coding?', ko: () => '자율 코딩을 시작할까요?' },

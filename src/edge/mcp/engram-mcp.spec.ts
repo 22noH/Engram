@@ -603,6 +603,22 @@ describe('elicitation 승인 게이트', () => {
     await c.close();
   });
 
+  // 양면 게시(2026-08-01 사용자 결정): 외부 모델 클라이언트 저장은 모델 질문 + 앱 카드를 동시에.
+  it('브리지 일반 이름 + offerSave 주입 → 비차단 앱 카드가 제안 id로 함께 뜬다', async () => {
+    const offered: Array<{ proposalId: string }> = [];
+    const { deps } = savingDeps(async () => 'save');
+    deps.offerSave = (req) => { offered.push(req); };
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(deps).connect(serverT);
+    const c = new Client({ name: BRIDGE_CLIENT, version: '1.0.0' });
+    await c.connect(clientT);
+    const out = await callText(c, 'wiki_propose', { title: 'T', content: 'C' });
+    expect(offered).toEqual([expect.objectContaining({ proposalId: 'p-app', title: 'T' })]);
+    expect(out).toContain('NOT SAVED YET');          // 모델 질문 지시는 그대로
+    expect(out).toContain('either place');            // 양면 안내
+    await c.close();
+  });
+
   // 회귀 방지(2026-08-01 사용자 지적): 앱 내부 두뇌도 같은 브리지를 거친다 — 그쪽 사용자는 앱을
   // 보고 있으므로 앱 카드가 그대로 떠야 한다. 브리지가 env로 판별해 다른 이름(app)으로 접속한다.
   it('앱 내부 브리지 이름으로 접속 → 앱 카드가 그대로 묻는다', async () => {

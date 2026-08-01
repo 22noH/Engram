@@ -1269,6 +1269,13 @@ export class Orchestrator {
     const stuck = new StuckDetector(opts.stuckK ?? 3);
     const maxRounds = opts.maxRounds ?? 100;
     let budgetSpent = 0;
+    // 리뷰어 보완 상한(2026-08-01 실사고): fetch+rebase 잡일에 리뷰어가 라운드마다 "추가 작업 5개"를
+    // 만들어 2분 반짜리 일이 12분+로 늘었다. 프롬프트("충족이면 승인")는 LLM이 안 지키면 그만 —
+    // 구조로 자른다: 보완 기회 1회·추가 티켓 3개까지, 그 뒤 전 티켓 착지+게이트 초록이면 완료다.
+    // 게이트(객관 검증)는 그대로다 — 상한은 리뷰어의 범위 불리기에만 건다.
+    const MAX_REVIEW_EXTRA_ROUNDS = 1;
+    const MAX_REVIEW_EXTRA_TICKETS = 3;
+    let reviewExtraRounds = 0;
 
     for (let round = 0; round < maxRounds; round++) {
       if (this.runState !== 'running') return finish(session, 'STOPPED');
@@ -1326,8 +1333,15 @@ export class Orchestrator {
         report(t('reviewingCriteria'));
         const review = await this.reviewer!.review(project.acceptanceCriteria, Object.values(after?.blackboard ?? {}).join('\n'));
         if (review.approved) { report(t('criteriaMet')); return finish(session, 'SUCCESS'); }
-        report(t('reviewerExtraTickets', review.extraTickets.length));
-        await this.tasks!.addTickets(session.id, review.extraTickets.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
+        if (reviewExtraRounds >= MAX_REVIEW_EXTRA_ROUNDS) {
+          // 보완 기회 소진 + 전 티켓 착지·게이트 초록 = 완료로 처리(정직하게 사유 게시).
+          report(t('reviewCapDone'));
+          return finish(session, 'SUCCESS');
+        }
+        reviewExtraRounds++;
+        const extras = review.extraTickets.slice(0, MAX_REVIEW_EXTRA_TICKETS);
+        report(t('reviewerExtraTickets', extras.length));
+        await this.tasks!.addTickets(session.id, extras.map((t, i) => ({ id: `tk_rev_${round}_${i}`, area: t.area, instruction: t.instruction })));
       }
 
       if (project.budget.tokens !== null && budgetSpent >= project.budget.tokens) { this.runState = 'paused'; return finish(session, 'BUDGET'); }

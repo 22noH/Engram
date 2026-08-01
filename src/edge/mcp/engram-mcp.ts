@@ -36,6 +36,10 @@ export interface McpDeps {
   // MCP elicitation을 못 쓰는 두 경로 — 앱 두뇌(헤드리스 claude가 6ms에 cancel)와 stateless /mcp —
   // 가 이걸로 묻는다. 'unavailable'(창 없음·타임아웃)이면 기존대로 승인함 폴백.
   confirmSave?: ((req: { title: string; targetSlug?: string; category?: string; body: string }) => Promise<'save' | 'cancel' | 'unavailable'>) | null;
+  // 양면 게시(2026-08-01): 외부 모델 클라이언트 경유 저장은 어느 화면을 보고 있는지 모른다 —
+  // 앱 카드도 "동시에" 띄우되 기다리지 않는다(비차단). 카드의 답은 대기 중인 제안을 직접
+  // 승인/거부한다(먼저 답한 쪽이 이기고, 진 쪽의 결정은 제안이 이미 소진돼 무해하게 무시된다).
+  offerSave?: ((req: { proposalId: string; title: string; targetSlug?: string; category?: string; body: string }) => void) | null;
   // 페이지를 다른 폴더로 옮긴다(2026-07-27). 분류는 위키 내용에서 나오는 것이라, 이미 쌓인 페이지도
   // 두뇌가 읽고 정리할 수 있어야 한다 — 그 통로가 지금까지 MCP에도 ws에도 없었다.
   recategorize?: ((slug: string, category: string) => Promise<string>) | null;
@@ -357,6 +361,9 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   //  ④ 클라이언트가 못 물을 때만(미지원·비대화형) 앱 저장 카드로 넘긴다 — 물어볼 기회를 버리지 않는다.
   const autosave = deps.settings?.read('wiki.autosave') === 'direct';
   const askedByBridge = server.getClientVersion()?.name === BRIDGE_APPROVED_CLIENT;
+  // 외부 모델 클라이언트 경유(브리지 평상시 이름) — 차단형 앱 카드는 건너뛰고, 아래에서 비차단
+  // 카드(offerSave)를 모델 질문과 "동시에" 띄운다(양면 게시, 먼저 답한 쪽 승리).
+  const viaExternalBridge = server.getClientVersion()?.name === BRIDGE_CLIENT;
   let confirm: 'accept' | 'decline' | 'unavailable';
   if (autosave || askedByBridge) {
     confirm = 'accept';
@@ -364,10 +371,9 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
     const viaClient = await confirmWikiSave(server, { title, content, slug: input.slug, op: 'propose' });
     if (viaClient !== 'unavailable') {
       confirm = viaClient;
-    } else if (deps.confirmSave && server.getClientVersion()?.name !== BRIDGE_CLIENT) {
-      // 브리지 경유는 앱 카드를 건너뛴다(2026-08-01): 반대편 모델 클라이언트가 자기 질문 UI로 묻는
-      // 게 사용자가 보는 화면이다 — 앱 카드는 45초를 태운 뒤 어차피 모델 질문으로 넘어와 두 번 묻게
-      // 된다. 앱 안(두뇌 하네스 등)에서 온 호출은 지금처럼 앱 카드가 묻는다.
+    } else if (deps.confirmSave && !viaExternalBridge) {
+      // 앱 안(두뇌 하네스 등)에서 온 호출은 차단형 앱 카드가 묻는다 — 그 사용자는 앱을 보고 있다.
+      // 외부 브리지 경유는 이 카드를 건너뛴다(45초 대기 + 순차 이중 질문의 원인) — 아래 양면 게시로.
       const viaApp = await deps.confirmSave({
         title,
         ...(input.slug ? { targetSlug: input.slug } : {}),
@@ -395,6 +401,19 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   // 열어볼 화면조차 없어서, 사용자 입장에서 저장은 **영영 완료되지 않는다** — 그런데도 우리는
   // "queued"만 돌려주고 끝냈다. 그래서 마지막 고리는 모델에게 넘긴다: 어느 클라이언트든 모델
   // 자신의 질문 UI는 항상 뜨므로, 여기까지 온 저장은 반드시 사람에게 한 번 닿는다.
+  // 양면 게시(2026-08-01 사용자 결정): 사용자가 지금 어느 화면을 보는지 서버는 모른다 — 그래서
+  // 앱 카드도 "동시에" 띄운다(비차단, 카드 답이 제안을 직접 승인/거부). 먼저 답한 쪽이 이긴다.
+  let appCardShown = false;
+  if (deps.offerSave && viaExternalBridge) {
+    try {
+      deps.offerSave({
+        proposalId: id, title, body: content,
+        ...(input.slug ? { targetSlug: input.slug } : {}),
+        ...(normalizeCategoryPath(input.category) ? { category: normalizeCategoryPath(input.category)! } : {}),
+      });
+      appCardShown = true;
+    } catch { /* 카드 실패는 모델 질문 경로에 영향 없음 */ }
+  }
   const folder = normalizeCategoryPath(input.category) ?? 'unsorted';
   const target = input.slug ? `appended to the existing page "${input.slug}"` : 'a new page';
   return ok(
@@ -403,6 +422,10 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
     `(${target}, folder "${folder}")\n` +
     `• yes → call approve_proposal with id ${id}\n` +
     `• no  → call reject_proposal with id ${id}\n` +
+    (appCardShown
+      ? `The Engram app is showing the same save card — answering in either place completes it. If approve_proposal ` +
+        `says the proposal is missing, it was already handled there; just tell the user it is done.\n`
+      : '') +
     `Do not leave it queued without asking, and do not decide on the user's behalf — they will otherwise ` +
     `believe it was saved. If they want to stop being asked, tell them about the wiki.autosave setting.`,
   );

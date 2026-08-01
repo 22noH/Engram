@@ -217,19 +217,34 @@ export class SelfMessenger implements MessengerPort {
         // §3.4: wikiDeps 있으면(메인 서버) 승인 도구 3종을 앱 /mcp에도 상시 노출 — ws 승인함(this.approving)과
         // ★같은 Set을 공유해 교차 경로(ws↔MCP) 이중승인을 원천 차단, onChanged로 ws 클라에도 실시간 브로드캐스트.
         // wiki_write는 this.mcpDeps.write에 이미 담겨 오면 그대로 흘려보낸다(주입은 main.ts 몫 — 여기 로직 없음).
-        const deps: McpDeps = this.wikiDeps
+        const mcpProposals = this.wikiDeps
+          ? makeMcpProposals(this.wikiDeps.proposals, this.wikiDeps.applier, {
+              approving: this.approving,
+              onChanged: () => {
+                this.broadcast({ t: 'wikiChanged' });
+                this.broadcast({ t: 'proposalsChanged' });
+              },
+            })
+          : null;
+        const deps: McpDeps = this.wikiDeps && mcpProposals
           ? {
               ...this.mcpDeps,
               // 앱이 떠 있으니 저장은 앱 카드가 묻는다(2026-07-26). /mcp는 stateless라 서버가
               // 클라이언트에게 물을 통로가 없어서, 창을 쥐고 있는 이쪽이 대신 묻는다.
               confirmSave: (req) => this.askWikiSave(req),
-              proposals: makeMcpProposals(this.wikiDeps.proposals, this.wikiDeps.applier, {
-                approving: this.approving,
-                onChanged: () => {
-                  this.broadcast({ t: 'wikiChanged' });
-                  this.broadcast({ t: 'proposalsChanged' });
-                },
-              }),
+              // 양면 게시(2026-08-01): 외부 모델 클라이언트 저장은 모델 질문과 앱 카드를 동시에 —
+              // 비차단, 카드 답이 큐의 제안을 직접 승인/거부한다(먼저 답한 쪽 승리, 진 쪽은 제안
+              // 소진으로 무해). 실패는 격리 — 모델 질문 경로가 항상 남는다.
+              offerSave: (req) => {
+                void this.askWikiSave(req)
+                  .then((d) => {
+                    if (d === 'save') return mcpProposals.approve(req.proposalId).then(() => undefined);
+                    if (d === 'cancel') return mcpProposals.reject(req.proposalId).then(() => undefined);
+                    return undefined; // unavailable(타임아웃·창 없음) — 제안은 큐에 남고 모델 질문이 마무리
+                  })
+                  .catch((err) => this.opts.logger.warn(`양면 저장 카드 처리 실패(${req.proposalId}): ${String(err)}`, 'SelfChat'));
+              },
+              proposals: mcpProposals,
             }
           : this.mcpDeps;
         void handleMcpRequest(buildMcpServer(deps), req, res);
