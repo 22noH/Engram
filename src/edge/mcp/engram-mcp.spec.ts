@@ -635,6 +635,35 @@ describe('elicitation 승인 게이트', () => {
     await c.close();
   });
 
+  // ★stateless 시뮬레이션(2026-08-01 실측 45.0초의 회귀 가드): 실서비스 /mcp는 요청마다 새 서버라
+  // 접속 이름이 tools/call에 도달하지 않는다 — 헤더에서 온 deps.caller가 판별의 권위여야 한다.
+  // 여기서는 일부러 평범한 이름의 클라이언트로 붙여 이름 경로가 도울 수 없게 만든다.
+  it('deps.caller=engram-bridge(헤더 신호) → 차단형 앱 카드 없이 양면 게시', async () => {
+    const blockedCard: unknown[] = [];
+    const offered: Array<{ proposalId: string }> = [];
+    const { deps } = savingDeps(async () => { blockedCard.push(1); return 'save'; });
+    deps.caller = BRIDGE_CLIENT;
+    deps.offerSave = (req) => { offered.push(req); };
+    const s = await connectedSession(deps); // 평범한 이름, elicitation 미선언
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(blockedCard).toEqual([]);          // 45초 차단형 카드 안 탄다
+    expect(offered).toEqual([expect.objectContaining({ proposalId: 'p-app' })]);
+    expect(out).toContain('either place');
+    await s.close();
+  });
+
+  it('deps.caller=engram-bridge-approved(헤더 신호) → 아무도 안 묻고 바로 저장', async () => {
+    const asked: unknown[] = [];
+    const { deps, proposals } = savingDeps(async () => { asked.push(1); return 'save'; });
+    deps.caller = BRIDGE_APPROVED_CLIENT;
+    const s = await connectedSession(deps);
+    const out = await s.callTool(T('wiki_propose'), { title: 'T', content: 'C' });
+    expect(asked).toEqual([]);
+    expect(proposals.approve).toHaveBeenCalledWith('p-app');
+    expect(out).toContain('saved to the Engram wiki');
+    await s.close();
+  });
+
   // 브리지가 이미 사람에게 물어 승인받았으면(접속 이름으로 알림) 앱도 클라도 다시 묻지 않는다.
   it('브리지 승인 이름으로 접속 → 아무도 다시 묻지 않고 바로 저장', async () => {
     const askedApp: unknown[] = [];

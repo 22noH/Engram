@@ -4,7 +4,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, CallToolResult, ListTool
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DEFAULT_CHAT_PORT } from './edge/messenger/chat.config';
-import { instructionsWithPluginNotice, BRIDGE_APPROVED_CLIENT, BRIDGE_CLIENT, BRIDGE_APP_CLIENT } from './edge/mcp/engram-mcp';
+import { instructionsWithPluginNotice, BRIDGE_APPROVED_CLIENT, BRIDGE_CLIENT, BRIDGE_APP_CLIENT, CALLER_HEADER } from './edge/mcp/engram-mcp';
 import { confirmWikiSave, declinedText, WikiSaveRequest, isEngramAppCall } from './edge/mcp/mcp-elicit';
 import { loadWikiSaveMode } from './knowledge-core/wiki/wiki-save.config';
 import { CHANNEL_ARG, isBrowserToolName } from '../shared/browser-ops';
@@ -33,7 +33,11 @@ async function withUpstream<T>(
   const client = new Client({ name: clientName, version: '1.0.0' });
   // ★8b-2 교훈: 언핸들드 'error'는 호스트 크래시 — 구독 필수(mcp-client.ts와 동일 패턴).
   client.onerror = (e) => console.error('[mcp-bridge] client error:', e);
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+  // 호출자 신호를 헤더로도 싣는다(2026-08-01 실측): 상류 /mcp는 stateless라 접속 이름이 tools/call
+  // 인스턴스에 도달하지 않는다 — 요청마다 붙는 헤더만이 살아남는다(engram-mcp CALLER_HEADER 주석).
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: { headers: { [CALLER_HEADER]: clientName } },
+  });
   transport.onerror = (e) => console.error('[mcp-bridge] transport error:', e);
   // ★8a 교훈(스톨 클래스): 거부(ECONNREFUSED)는 즉시 실패하지만 '멈춘' 상주는 영원히 대기
   // — connect+호출 전 구간에 타임아웃(초과 시 catch에서 close로 정리).

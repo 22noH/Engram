@@ -40,6 +40,9 @@ export interface McpDeps {
   // 앱 카드도 "동시에" 띄우되 기다리지 않는다(비차단). 카드의 답은 대기 중인 제안을 직접
   // 승인/거부한다(먼저 답한 쪽이 이기고, 진 쪽의 결정은 제안이 이미 소진돼 무해하게 무시된다).
   offerSave?: ((req: { proposalId: string; title: string; targetSlug?: string; category?: string; body: string }) => void) | null;
+  // 호출자 이름(CALLER_HEADER에서 — stateless HTTP에선 getClientVersion이 비므로 이게 권위).
+  // 미지정이면 접속 이름으로 폴백한다(stdio·테스트 같은 stateful 경로는 그걸로 충분).
+  caller?: string | null;
   // 페이지를 다른 폴더로 옮긴다(2026-07-27). 분류는 위키 내용에서 나오는 것이라, 이미 쌓인 페이지도
   // 두뇌가 읽고 정리할 수 있어야 한다 — 그 통로가 지금까지 MCP에도 ws에도 없었다.
   recategorize?: ((slug: string, category: string) => Promise<string>) | null;
@@ -86,6 +89,11 @@ export const BRIDGE_CLIENT = 'engram-bridge';
 // 앱 내부(두뇌 하네스)가 스폰한 브리지의 접속 이름 — 이 사용자는 앱을 보고 있으므로 앱 카드가 맞다.
 // BRIDGE_CLIENT와 이름을 가르는 이유: 앱은 env를 못 보고 접속 이름만 본다(브리지가 env로 판별해 싣는다).
 export const BRIDGE_APP_CLIENT = 'engram-bridge-app';
+// ★호출자 신호는 HTTP 헤더로도 나른다(2026-08-01 실측 45.0초): 앱 /mcp는 stateless라 요청마다 새
+// server — initialize를 본 인스턴스와 tools/call 인스턴스가 달라 getClientVersion()이 tools/call
+// 시점에 비어 있다. 접속 이름 기반 판별(BRIDGE_*)은 그 경로에서 전부 죽은 코드였다(승인 이름은
+// 브리지의 approve_proposal 폴백이 가려줬을 뿐). 요청과 함께 도착하는 유일한 자리인 헤더에 싣는다.
+export const CALLER_HEADER = 'x-engram-caller';
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 // 로컬에 쓰지만 지우거나 덮지 않는 것(추가·제안 등록). 로컬 전용이라 openWorld도 false.
@@ -360,10 +368,12 @@ async function callWikiPropose(server: Server, deps: McpDeps, args: Record<strin
   //     보내면, 다른 창을 쓰고 있는 사람에게는 아무것도 안 뜬 것과 같다(2026-07-27 사용자 지적).
   //  ④ 클라이언트가 못 물을 때만(미지원·비대화형) 앱 저장 카드로 넘긴다 — 물어볼 기회를 버리지 않는다.
   const autosave = deps.settings?.read('wiki.autosave') === 'direct';
-  const askedByBridge = server.getClientVersion()?.name === BRIDGE_APPROVED_CLIENT;
+  // 호출자 판별: 헤더(deps.caller)가 권위, 없으면 접속 이름(stdio·테스트 경로) — CALLER_HEADER 주석 참조.
+  const callerName = deps.caller ?? server.getClientVersion()?.name;
+  const askedByBridge = callerName === BRIDGE_APPROVED_CLIENT;
   // 외부 모델 클라이언트 경유(브리지 평상시 이름) — 차단형 앱 카드는 건너뛰고, 아래에서 비차단
   // 카드(offerSave)를 모델 질문과 "동시에" 띄운다(양면 게시, 먼저 답한 쪽 승리).
-  const viaExternalBridge = server.getClientVersion()?.name === BRIDGE_CLIENT;
+  const viaExternalBridge = callerName === BRIDGE_CLIENT;
   let confirm: 'accept' | 'decline' | 'unavailable';
   if (autosave || askedByBridge) {
     confirm = 'accept';

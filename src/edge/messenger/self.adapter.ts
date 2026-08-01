@@ -226,9 +226,14 @@ export class SelfMessenger implements MessengerPort {
               },
             })
           : null;
+        // 호출자 헤더(2026-08-01): stateless /mcp에선 접속 이름이 tools/call에 도달하지 않는다 —
+        // 브리지가 실은 CALLER_HEADER를 요청에서 읽어 deps로 넘긴다(engram-mcp가 판별에 사용).
+        const callerHeader = req.headers['x-engram-caller'];
+        const caller = typeof callerHeader === 'string' && callerHeader ? { caller: callerHeader } : {};
         const deps: McpDeps = this.wikiDeps && mcpProposals
           ? {
               ...this.mcpDeps,
+              ...caller,
               // 앱이 떠 있으니 저장은 앱 카드가 묻는다(2026-07-26). /mcp는 stateless라 서버가
               // 클라이언트에게 물을 통로가 없어서, 창을 쥐고 있는 이쪽이 대신 묻는다.
               confirmSave: (req) => this.askWikiSave(req),
@@ -246,7 +251,7 @@ export class SelfMessenger implements MessengerPort {
               },
               proposals: mcpProposals,
             }
-          : this.mcpDeps;
+          : { ...this.mcpDeps, ...caller };
         void handleMcpRequest(buildMcpServer(deps), req, res);
         return;
       }
